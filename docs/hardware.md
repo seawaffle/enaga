@@ -73,8 +73,12 @@ number = row x 8 + column, forming a 48-bit switch word:
 
 Bits 5-7 and 10-15 have no switch. The names come from the original firmware's factory test page, which
 draws the panel and fills in each button whose bit is set, matched to the manual's layout; they are still
-to be confirmed key by key on a unit. The switches are not debounced in hardware; Enaga takes a change at once
-and then holds that key for 10 ms (`hal/keys.c`). How long the contacts really bounce is to be measured on a unit.
+to be confirmed key by key on a unit. The switches are not debounced in hardware, and how long they bounce is
+unmeasured. Enaga follows the original firmware (`hal/keys.c`; smpltrek claim HW-51): each key is sampled every
+6 ms, a press is taken on the first closed sample and a release on the second consecutive open one, so a
+one-sample opening while a key is held is ignored. The original filters releases so only for bits 0-31; its
+STEP keys release on the first open sample, so a one-sample opening gives a release and a new press. Enaga
+filters every key. The original's auto-repeat (400 ms, then every 100 ms) is not reproduced.
 
 ## Encoders
 

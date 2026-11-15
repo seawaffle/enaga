@@ -248,18 +248,37 @@ class E1(unittest.TestCase):
             emu.run(50 * MS)
             self.assertEqual(self.key_events(emu), ["K32 1", "K32 0"])
 
-    def test_press_is_reported_without_waiting_for_the_contact_to_settle(self):
+    def test_press_is_taken_on_the_first_closed_sample(self):
         with Emulation(HERE / "apps" / "keys") as emu:
             self.assertIsNone(emu.run(BOOT)["error"])
             emu.key(STEP1, True)
-            emu.run(2 * MS)                     # well inside the 10 ms settling time
+            emu.run(7 * MS)                     # one 6 ms sample interval, plus the scan
             self.assertEqual(self.key_events(emu), ["K32 1"])
+
+    def test_one_sample_opening_while_held_is_ignored(self):
+        # The original firmware's STEP keys release on the first open sample, so this gave a release and a new
+        # press there. 3 ms openings hold at most one 6 ms sample; 9 ms apart, two consecutive openings cover
+        # every sample phase between them, so at least one is sampled.
+        with Emulation(HERE / "apps" / "keys") as emu:
+            self.assertIsNone(emu.run(BOOT)["error"])
+            emu.key(STEP1, True)
+            emu.run(20 * MS)
+            for _ in range(4):
+                emu.key(STEP1, False)
+                emu.run(3 * MS)
+                emu.key(STEP1, True)
+                emu.run(6 * MS)
+            emu.run(20 * MS)
+            self.assertEqual(self.key_events(emu), ["K32 1"])
+            emu.key(STEP1, False)
+            emu.run(20 * MS)                    # two open samples: 6-12 ms
+            self.assertEqual(self.key_events(emu), ["K32 1", "K32 0"])
 
     def test_short_press_and_quick_repeats_are_all_reported(self):
         with Emulation(HERE / "apps" / "keys") as emu:
             self.assertIsNone(emu.run(BOOT)["error"])
-            emu.key(STEP1, True)                # released inside the settling time: late, not lost
-            emu.run(3 * MS)
+            emu.key(STEP1, True)                # a 13 ms press spans at least two samples
+            emu.run(13 * MS)
             emu.key(STEP1, False)
             emu.run(30 * MS)
             for _ in range(3):                  # a 25 Hz roll on one key

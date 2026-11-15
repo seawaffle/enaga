@@ -171,8 +171,8 @@ audible tone on the expected channel, the real audio load with caches).
 ## Open items
 
 - On the unit: FUNC sampled during the power-key hold; the bootloader passes control normally with FUNC
-  held; FUNC + POWER mid-run; power-key bounce; how long the matrix keys bounce (the 10 ms settling time
-  is a guess).
+  held; FUNC + POWER mid-run; power-key bounce; how long the matrix keys bounce (the 6 ms sampling and
+  two-sample release follow the original firmware, not a measurement).
 - Which LED is which; whether the unit has a hardware MIDI port; physical left/right channel routing; real
   audio CPU headroom with caches; the key names, confirmed key by key on a unit.
 - The L2 split between cache and RAM.
@@ -256,12 +256,19 @@ audible tone on the expected channel, the real audio load with caches).
 
 ### E1 key debouncing (2026-11-15)
 
-- `hal/keys.c` `keys_poll`: a key's change is taken on the first scan that sees it, so a press reaches the app
-  with no added latency; that key is then held at its new state for 10 ms, so bounce after a press or a release
-  is not reported. A change still present when the time is up is taken then, so a release inside the settling
-  time is late, not lost. The original firmware instead samples each row every 6 ms and reports what it sees.
-  The power key keeps its own handling (a one-second hold, which bounce only restarts).
+- `hal/keys.c` `keys_poll` follows the original firmware's timing (smpltrek claim HW-51, "Key timing and
+  debounce"): the matrix is sampled every 6 ms, the spacing at which the original samples each key; a press is
+  taken on the first closed sample (0-6 ms), a release on the second consecutive open sample (6-12 ms), so a
+  one-sample opening while a key is held is ignored. The original applies that release filter only to bits 0-31,
+  so its STEP keys turn a one-sample opening into a release and a new press; Enaga filters every key. A press
+  shorter than the sample spacing can be missed, as in the original. A first version (take a change at once,
+  then hold the key for a guessed 10 ms) was replaced by this before merging. The power key keeps its own
+  handling (a one-second hold, which bounce only restarts).
 - Emulator tests (`tests/apps/keys` logs every event): a press and a release that each bounce four times at
-  0.5 ms give exactly one press and one release (five events with the settling removed); a press is
-  reported within 2 ms; a press released after 3 ms, and a 25 Hz roll on one key, give every event.
-
+  0.5 ms give one press and one release; a press is reported within one sample interval; four 3 ms openings
+  while STEP 1 is held (9 ms apart, so at least one is sampled) give no release, where releasing on the first
+  open sample, as the original's STEP keys do, gives two spurious release/press pairs; a 13 ms press and a
+  25 Hz roll give every event.
+- The layout change exposed a fragile check in the kernel crash test, which mapped each sampled PC to the
+  function at PC - 4; a sample at a function's first packet named the function before it. It now accepts the
+  function at either address.

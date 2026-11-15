@@ -170,7 +170,7 @@ void main(void)
     display_dma = audio_status == 0 || audio_status <= -3;   /* -1/-2: EDMA never powered */
     splash("CARD");
     apps_mount();
-    last_keys = keys_reset();                 /* keys held through start-up do not become events */
+    last_keys = keys_reset(timer_ms());       /* keys held through start-up do not become events */
     irq_global_enable();                      /* audio blocks start being serviced (silence until an app) */
     log_line("ENAGA " ENAGA_VERSION);
     watchdog_start();

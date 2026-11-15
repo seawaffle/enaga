@@ -40,31 +40,32 @@ u64 keys_scan(void)
     return word;
 }
 
-/* Debouncing (the switches have none in hardware). A key's change is taken on the first scan that sees it, so a
- * press adds no latency; the key is then held at its new state for KEYS_SETTLE_MS, so contact bounce after a
- * press or a release never becomes more changes. A change still present when the time is up is taken then:
- * nothing is lost, a release within the settling time is only late. (The original firmware samples each row
- * every 6 ms and reports what it sees.) */
-#define KEYS_SETTLE_MS 10u
+/* Debouncing, following the original firmware (the switches have none in hardware, and their bounce time is
+ * unmeasured). The matrix is sampled every KEYS_SAMPLE_MS, the spacing at which the original samples each key. A
+ * press is taken on the first closed sample (0-6 ms); a release needs two consecutive open samples (6-12 ms), so a
+ * one-sample opening while a key is held is ignored. The original filters releases this way only for bits 0-31;
+ * its STEP keys release on the first open sample, so a one-sample opening there gives a release and a new
+ * press. Enaga filters every key. */
+#define KEYS_SAMPLE_MS 6u
 
-static u64 debounced, settling;
-static u32 changed_ms[48];
+static u64 debounced, open_once;             /* open_once: held keys whose last sample read open */
+static u32 sampled_ms;
 
-u64 keys_reset(void)
+u64 keys_reset(u32 ms)
 {
-    settling = 0;
+    open_once = 0;
+    sampled_ms = ms;
     return debounced = keys_scan();
 }
 
 u64 keys_poll(u32 ms)
 {
-    u64 raw = keys_scan(), changed;
-    unsigned i;
-    for (i = 0; settling && i < 48; i++)
-        if (((settling >> i) & 1) && ms - changed_ms[i] >= KEYS_SETTLE_MS) settling &= ~(1ull << i);
-    changed = (raw ^ debounced) & ~settling;
-    for (i = 0; changed >> i; i++)
-        if ((changed >> i) & 1) changed_ms[i] = ms;
-    settling |= changed;
-    return debounced ^= changed;
+    u64 raw, open, released;
+    if (ms - sampled_ms < KEYS_SAMPLE_MS) return debounced;
+    sampled_ms = ms;
+    raw = keys_scan();
+    open = debounced & ~raw;
+    released = open & open_once;
+    open_once = open & ~released;
+    return debounced = (debounced | raw) & ~released;
 }
