@@ -46,6 +46,19 @@ enum enaga_key {
     ENAGA_KEY_COUNT = 48
 };
 
+/* Panel LEDs by logical number (docs/hardware.md "Panel MCU", which marks what is confirmed on a unit). Levels run
+ * 0 (off) to ENAGA_LED_MAX; a colour an LED does not have is ignored. Every key with an LED is ENAGA_LED_KEY + its
+ * enaga_key: STEP 1-16, HOME, MIXER, REC, PROJECT, EDIT, FUNC, STOP, PLAY, CLR and OK (red and green). The
+ * octave buttons have no LED. */
+#define ENAGA_LED_MAX 10u
+enum enaga_led {
+    ENAGA_LED_PAD = 0,                      /* + pad 0-14, the id of ENAGA_EVENT_PAD: red, green, blue */
+    ENAGA_LED_VOL_L = 16, ENAGA_LED_VOL_R = 17, ENAGA_LED_MIC = 18,   /* one colour: the brightest of the three */
+    ENAGA_LED_VALUE = 19,                   /* the VALUE encoder: red, green, blue */
+    ENAGA_LED_KEY = 64,                     /* + enaga_key */
+    ENAGA_LED_COUNT = ENAGA_LED_KEY + ENAGA_KEY_COUNT
+};
+
 enum enaga_event_type {
     ENAGA_EVENT_KEY = 1,                    /* id: key bit; value: 1 down, 0 up */
     ENAGA_EVENT_ENCODER = 2,                /* id: 0-3 = A-D, 4 = VALUE; value: signed detents */
@@ -88,6 +101,7 @@ typedef struct enaga_host {
     void (*text)(uint8_t *canvas, int x, int y, const char *text, uint8_t grey);   /* 5 x 7 font, 6 px advance */
     uint32_t (*audio_load)(void);           /* last audio block's cost, per mille of its real-time budget */
     uint32_t (*audio_load_peak)(void);      /* highest since the app started */
+    void (*led)(uint32_t led, uint32_t red, uint32_t green, uint32_t blue);   /* enaga_led; main context only */
 } enaga_host_t;
 
 /* What the app gives Enaga. Every callback receives `context`; any callback may be 0. */

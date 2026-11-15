@@ -43,6 +43,8 @@ ENAGA_APP(Beep)
   `<numbers>`. `new`/`delete` work on the app's heap (everything above Enaga, about 124 MiB). There is no
   libm yet, and no allocating standard containers. Global destructors never run: Enaga discards an app's
   memory after calling `stop()`.
+- Panel LEDs by name, levels 0-10, from the main loop: `enaga::pad_led(pad, r, g, b)`, `step_led(n, red, green)`,
+  `button_led(key, red, green)`, `vol_led`, `mic_led`, `value_led`. Enaga switches them all off when an app stops.
 - `enaga::fatal(reason)` stops the app; Enaga shows the reason and keeps running. Enaga's watchdog stops an
   app the same way when a main-loop call (including `init` and `stop`) has not returned after 1 s, or `audio`
   after 100 ms.
@@ -86,7 +88,7 @@ project. Point `ENAGA_EMULATOR` at its emulator directory (the one containing `c
 
 ```sh
 export ENAGA_EMULATOR=/path/to/emulator
-python3 -B -m unittest discover -s tests -v                           # 17 tests, about 80 s
+python3 -B -m unittest discover -s tests -v                           # 18 tests, about 90 s
 python3 -B tools/emulate.py examples/tone --key 32@300000000           # press STEP 1; writes build/emulate/
 ```
 

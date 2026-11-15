@@ -94,9 +94,73 @@ to the DSP over **UART1** at 465,000 baud, 8N1 (186 MHz / 16 / 25).
 | from MCU | `Bn lo hi` | analogue channel n: 14-bit reading `lo \| hi << 7`; n = 0-14 pads, 15 battery |
 | from MCU | `A1` + 6 bytes | MCU information; bytes 3-5 are its version |
 
-LED addresses are a = 0-2, b = 0-5, c = 0-7 (144 addresses); levels 0-10 are usable (from 11 a neighbouring
-LED lights too). Which address is which physical LED is **unconfirmed**. The original firmware treats a pad
-reading of 800 or more as a press.
+LED addresses are a = 0-2, b = 0-5, c = 0-7 (144 addresses), written here as n = 48a + 8b + c; levels 0-10 are
+usable (from 11 a neighbouring LED lights too). The original firmware treats a pad reading of 800 or more as a
+press.
+
+### LED map
+
+From the original firmware (the smpltrek notes, `sdk/docs/hardware-access.md` "Panel LEDs"; the graded table of
+all 144 addresses is printed by `sdk/analysis/led_table.py` there). It drives 115 addresses; the other 29 are
+never written, by it or by Enaga: (0,0,6-7), (1,0,6-7), (2,0,6-7), (0,1,7), (1,1,7), (2,1,7) and (2,3,0) to
+(2,5,3). Confirmation on a unit, per LED: **device** = every channel's address seen lighting it; **partly** =
+the LED seen on one channel, the others inferred; **static** = from the code only. Unit session L1 (planned in
+smpltrek) is to check the rest and the brightness steps.
+
+Pads, indexed by MCU pad channel (the id of a pad event); red, green and blue are v1, v2 and v3 of the original
+firmware's `pad_rgb_set`:
+
+| Pad | Label | Red | Green | Blue | Confirmed |
+|---|---|---|---|---|---|
+| 0 | TRK 8 | 2,1,5 | 2,1,4 | 2,1,6 | static |
+| 1 | TRK 1 | 2,1,2 | 2,1,1 | 2,1,3 | static |
+| 2 | TRK 9 | 0,1,5 | 0,1,4 | 0,1,6 | device |
+| 3 | TRK 2 | 0,1,2 | 0,1,1 | 0,1,3 | device |
+| 4 | TRK 10 | 1,1,5 | 1,1,4 | 1,1,6 | static |
+| 5 | TRK 3 | 1,1,2 | 1,1,1 | 1,1,3 | static |
+| 6 | GLOBAL 1 | 2,2,4 | 2,2,3 | 2,2,5 | static |
+| 7 | TRK 4 | 0,2,7 | 0,2,6 | 0,1,0 | partly (blue) |
+| 8 | GLOBAL 2 | 1,2,4 | 1,2,3 | 1,2,5 | static |
+| 9 | TRK 5 | 1,2,7 | 1,2,6 | 1,1,0 | static |
+| 10 | GLOBAL 3 | 0,2,4 | 0,2,3 | 0,2,5 | static |
+| 11 | TRK 6 | 2,2,7 | 2,2,6 | 2,1,0 | static |
+| 12 | USB AUDIO | 0,2,1 | 0,2,0 | 0,2,2 | partly (green) |
+| 13 | TRK 7 | 2,2,1 | 2,2,0 | 2,2,2 | static |
+| 14 | EXT SRC | 1,2,1 | 1,2,0 | 1,2,2 | static |
+
+STEP 1-16 and ten buttons are two-channel LEDs: green at an even c (below), red at c + 1. The STEP order is the
+panel wiring.
+
+| STEP | Green | Confirmed | | STEP | Green | Confirmed |
+|---|---|---|---|---|---|---|
+| 1 | 1,3,0 | static | | 9 | 2,5,4 | static |
+| 2 | 1,3,2 | static | | 10 | 0,3,0 | device |
+| 3 | 0,3,2 | device | | 11 | 2,5,6 | static |
+| 4 | 0,3,4 | partly (green) | | 12 | 1,3,4 | static |
+| 5 | 0,3,6 | partly (green) | | 13 | 1,3,6 | static |
+| 6 | 0,4,0 | partly (green) | | 14 | 1,4,0 | static |
+| 7 | 1,4,2 | static | | 15 | 0,4,2 | partly (green) |
+| 8 | 1,4,4 | static | | 16 | 0,4,4 | static |
+
+| Button | Green | | Button | Green |
+|---|---|---|---|---|
+| FUNC | 0,5,0 | | REC | 1,5,0 |
+| HOME | 0,5,2 | | PROJECT | 1,5,2 |
+| MIXER | 0,5,4 | | EDIT | 1,5,4 |
+| STOP | 0,5,6 | | PLAY | 1,5,6 |
+| CLR | 0,4,6 | | OK | 1,4,6 |
+
+Every button LED is partly confirmed: its green address was seen on the unit (2026-11-14 sweep), red at c + 1
+was not swept. The octave buttons have no LED.
+
+Row 0 (b = 0) holds six one-channel LEDs, each written on all three a-planes with the same value, as the
+original firmware does: c = 0 VOL L, 1 VOL R, 2 the microphone LED, 3-5 the VALUE encoder's blue, green and red.
+Planes a = 0 and 1 were seen on the unit, a = 2 is inferred. The original firmware flashes VOL L, VOL R and the
+microphone LED when the input feeding them peaks above -3 dBFS.
+
+Enaga's API (`enaga_led` in `include/enaga/abi.h`, `enaga::pad_led`, `step_led`, `button_led`, `vol_led`,
+`mic_led`, `value_led` in `app.hpp`) drives these by name; `kernel/leds.c` holds the address tables and sends
+only changes.
 
 ## Display
 

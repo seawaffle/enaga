@@ -21,6 +21,22 @@ inline uint32_t ms() { return host().ms(); }
 inline uint32_t audio_load() { return host().audio_load(); }          // per mille of the block budget
 inline uint32_t audio_load_peak() { return host().audio_load_peak(); }
 
+// Panel LEDs, levels 0 (off) to ENAGA_LED_MAX (enaga_led in abi.h). Main context only: ignored from audio().
+inline void pad_led(int pad, unsigned red, unsigned green, unsigned blue) {
+    host().led(ENAGA_LED_PAD + pad, red, green, blue);       // pad 0-14, as in on_pad
+}
+inline void step_led(int step, unsigned red, unsigned green) {   // STEP 1-16
+    host().led(int(ENAGA_LED_KEY) + ENAGA_KEY_STEP1 + step - 1, red, green, 0);
+}
+inline void button_led(int key, unsigned red, unsigned green) {  // enaga_key of a button with an LED
+    host().led(int(ENAGA_LED_KEY) + key, red, green, 0);
+}
+inline void vol_led(int channel, unsigned level) {               // 0 = VOL L, 1 = VOL R
+    host().led(ENAGA_LED_VOL_L + channel, level, level, level);
+}
+inline void mic_led(unsigned level) { host().led(ENAGA_LED_MIC, level, level, level); }
+inline void value_led(unsigned red, unsigned green, unsigned blue) { host().led(ENAGA_LED_VALUE, red, green, blue); }
+
 // The draw target: ENAGA_SCREEN_W x ENAGA_SCREEN_H bytes, row-major, grey 0-15.
 class Canvas {
 public:

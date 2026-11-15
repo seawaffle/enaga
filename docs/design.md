@@ -172,7 +172,8 @@ audible tone on the expected channel, the real audio load with caches).
 
 - On the unit: FUNC sampled during the power-key hold; the bootloader passes control normally with FUNC
   held; FUNC + POWER mid-run; power-key bounce.
-- Which LED is which; whether the unit has a hardware MIDI port; physical left/right channel routing; real
+- LED map: 53 addresses known only from the code, 24 seen on another channel of their LED (docs/hardware.md
+  "LED map"; smpltrek session L1); the level-to-brightness steps. Whether the unit has a hardware MIDI port; physical left/right channel routing; real
   audio CPU headroom with caches; the key names, confirmed key by key on a unit.
 - The L2 split between cache and RAM.
 - USB stack: the C6748's USB0 is a Mentor MUSB controller; a TinyUSB port (TinyUSB has a MUSB driver for
@@ -252,3 +253,24 @@ audible tone on the expected channel, the real audio load with caches).
 - Emulator tests: an app hung in `update`, in the audio callback and in `init` is dropped while audio and
   drawing continue; an injected hang in Enaga's own code shows the crash screen after one second and not
   before; the tick runs at one interrupt per 10 ms. Removing the nesting makes the audio-callback test fail.
+
+### Panel LED API (2026-11-15)
+
+- The LED map from the smpltrek notes (`sdk/docs/hardware-access.md` "Panel LEDs", `led_table.py`), restated in
+  docs/hardware.md "LED map" with each LED's confirmation on a unit. ABI: `enaga_led` numbers (pads by MCU
+  channel; VOL L, VOL R, microphone, VALUE; every key with an LED as `ENAGA_LED_KEY` + its `enaga_key`) and one
+  host function, `led(led, red, green, blue)`; a colour an LED lacks is ignored and levels are clamped to 10.
+  The C++ layer has `pad_led`, `step_led`, `button_led`, `vol_led`, `mic_led` and `value_led`.
+- `kernel/leds.c` keeps the level last sent to each address and sends only changes (5 bytes, about 108 us at
+  465,000 baud), writes the row-0 LEDs on all three a-planes as the original firmware does, and never writes the
+  29 unused addresses. Calls from interrupt context are ignored, since their bytes could split a message the
+  main context is sending. Every LED is switched off at start-up, when an app is dropped (the kernel loop's entry
+  with no app) and when one is unloaded.
+- The emulator drops what UART1 sends, so the test checks Enaga's per-address cache: `tests/apps/leds` walks every
+  LED and the test, whose table was transcribed separately from the notes' (a, b, c) form and checked against
+  `led_table.py`, compares all 144 addresses after each step; clamping, the ignored audio-context call and the
+  switch-off on a drop are checked too.
+- GCC compiled the brightest-of-three into `MAXU4`, which the emulator lacked; MAXU4 and MINU4 were added there
+  with a test (smpltrek working tree, not yet committed). The C++20 header needed `int(ENAGA_LED_KEY)`, since
+  arithmetic between two enum types is deprecated.
+

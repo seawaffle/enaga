@@ -42,10 +42,14 @@ static void host_text(uint8_t *canvas, int x, int y, const char *text, uint8_t g
     (void)canvas; (void)x; (void)y; (void)text; (void)grey;
 }
 static uint32_t host_zero(void) { return 0; }
+static void host_led(uint32_t led, uint32_t red, uint32_t green, uint32_t blue)
+{
+    (void)led; (void)red; (void)green; (void)blue;
+}
 
 static const enaga_host_t host = {ENAGA_ABI_VERSION, sizeof(enaga_host_t), harness_heap, sizeof(harness_heap),
                                   host_log, host_ms, host_fatal, ENAGA_SAMPLE_RATE, ENAGA_BLOCK_FRAMES, host_text,
-                                  host_zero, host_zero};
+                                  host_zero, host_zero, host_led};
 
 void harness_main(void) {
     const enaga_app_t *app = 0;

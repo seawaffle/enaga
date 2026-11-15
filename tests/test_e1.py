@@ -227,6 +227,59 @@ class E1(unittest.TestCase):
                 seen.add(function_at(emu.cpu.state()["pc"] - 4))
             self.assertLessEqual(seen, {"kernel_crash", "power_key_down", "gpio_read_bank16", "tsc_read"})
 
+    # Panel LED addresses (a, b, c), transcribed from the smpltrek notes (docs/hardware.md "Panel MCU"):
+    # pads by MCU channel as (red, green, blue); STEP and button LEDs as their green address (red at c + 1).
+    LED_PADS = [((2, 1, 5), (2, 1, 4), (2, 1, 6)), ((2, 1, 2), (2, 1, 1), (2, 1, 3)), ((0, 1, 5), (0, 1, 4), (0, 1, 6)),
+                ((0, 1, 2), (0, 1, 1), (0, 1, 3)), ((1, 1, 5), (1, 1, 4), (1, 1, 6)), ((1, 1, 2), (1, 1, 1), (1, 1, 3)),
+                ((2, 2, 4), (2, 2, 3), (2, 2, 5)), ((0, 2, 7), (0, 2, 6), (0, 1, 0)), ((1, 2, 4), (1, 2, 3), (1, 2, 5)),
+                ((1, 2, 7), (1, 2, 6), (1, 1, 0)), ((0, 2, 4), (0, 2, 3), (0, 2, 5)), ((2, 2, 7), (2, 2, 6), (2, 1, 0)),
+                ((0, 2, 1), (0, 2, 0), (0, 2, 2)), ((2, 2, 1), (2, 2, 0), (2, 2, 2)), ((1, 2, 1), (1, 2, 0), (1, 2, 2))]
+    LED_STEPS = [(1, 3, 0), (1, 3, 2), (0, 3, 2), (0, 3, 4), (0, 3, 6), (0, 4, 0), (1, 4, 2), (1, 4, 4),
+                 (2, 5, 4), (0, 3, 0), (2, 5, 6), (1, 3, 4), (1, 3, 6), (1, 4, 0), (0, 4, 2), (0, 4, 4)]
+    LED_BUTTONS = [(0, 5, 2), (0, 5, 4), (1, 5, 0), (1, 5, 2), (1, 5, 4),     # HOME MIXER REC PROJECT EDIT
+                   (0, 5, 0), (0, 5, 6), (1, 5, 6), (0, 4, 6), (1, 4, 6)]     # FUNC STOP PLAY CLR OK
+
+    @staticmethod
+    def led_walk():
+        """What each step of tests/apps/leds lights: {address n = 48a + 8b + c: level}."""
+        n = lambda a, b, c: 48 * a + 8 * b + c
+        row0 = lambda c, v: {n(a, 0, c): v for a in range(3)}           # all three a-planes
+        walk = [{n(*r): 1, n(*g): 2, n(*b): 3} for r, g, b in E1.LED_PADS]
+        walk += [row0(0, 3), row0(1, 3), row0(2, 3), {**row0(5, 1), **row0(4, 2), **row0(3, 3)}]
+        walk += [{n(*g): 2, n(*g) + 1: 1} for g in E1.LED_STEPS + E1.LED_BUTTONS]
+        return walk + [{}]                                               # OCTAVE LEFT: no LED
+
+    def leds(self, emu):
+        return emu.cpu.read(emu.names["led_level"], 144)
+
+    def press(self, emu, key):
+        emu.key(key, True)
+        emu.run(15 * MS)
+        emu.key(key, False)
+        emu.run(15 * MS)
+
+    def test_led_api_drives_the_mapped_addresses(self):
+        walk = self.led_walk()
+        used = set().union(*walk)
+        self.assertEqual(len(used), 115)            # every address the original firmware drives, no other
+        with Emulation(HERE / "apps" / "leds") as emu:
+            self.assertIsNone(emu.run(BOOT)["error"])
+            start = self.leds(emu)
+            self.assertEqual([start[i] for i in sorted(used)], [0] * 115)    # switched off at start-up
+            self.assertTrue(all(start[i] == 0xFF for i in range(144) if i not in used))   # never written
+            for step, lit in enumerate(walk):
+                self.press(emu, STEP1)
+                expected = bytes(lit.get(i, 0 if i in used else 0xFF) for i in range(144))
+                self.assertEqual(self.leds(emu), expected, f"walk step {step}")
+            self.press(emu, STEP1 + 1)              # red 15 is clamped to the maximum, 10
+            self.assertEqual(self.leds(emu)[48 * 2 + 8 + 5], 10)
+            self.press(emu, STEP1 + 2)              # from the audio callback: ignored
+            self.assertEqual([self.leds(emu)[i] for i in (106, 105, 107)], [0, 0, 0])
+            self.press(emu, STEP1 + 3)              # the app is dropped: every LED off
+            self.assertEqual(emu.report()["crash_reason"], "leds done")
+            final = self.leds(emu)
+            self.assertEqual([final[i] for i in sorted(used)], [0] * 115)
+
     def test_display_frames_go_out_by_edma(self):
         with Emulation(ENAGA / "examples" / "tone") as emu:
             self.assertIsNone(emu.run(BOOT)["error"])

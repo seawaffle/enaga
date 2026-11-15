@@ -59,6 +59,11 @@ void apps_drop(const char *reason);           /* forget a failed app; returns */
 void apps_fatal(const char *reason);          /* never returns */
 extern char crash_reason[48];
 
+/* leds.c: panel LEDs by enaga_led, cached per address so only changes are sent */
+void leds_set(unsigned led, unsigned red, unsigned green, unsigned blue);   /* main context; ignored in interrupts */
+void leds_forget(void);                       /* the panel's state is unknown: the next write of each LED is sent */
+void leds_off(void);
+
 /* log.c: Enaga's log, also read by the emulator tests */
 #define LOG_LINES 16
 #define LOG_WIDTH 40

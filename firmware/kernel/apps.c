@@ -40,10 +40,12 @@ static void host_text(u8 *target, int x, int y, const char *text, u8 grey)
 }
 static uint32_t host_audio_load(void) { return audio_cycles_last / (AUDIO_BUDGET_CYCLES / 1000u); }
 static uint32_t host_audio_load_peak(void) { return audio_cycles_peak / (AUDIO_BUDGET_CYCLES / 1000u); }
+static void host_led(uint32_t led, uint32_t red, uint32_t green, uint32_t blue) { leds_set(led, red, green, blue); }
 
 enaga_host_t app_host = {                     /* heap filled in per app by load_path */
     ENAGA_ABI_VERSION, sizeof(enaga_host_t), 0, 0,
     host_log, host_ms, host_fatal, ENAGA_SAMPLE_RATE, AUDIO_FRAMES, host_text, host_audio_load, host_audio_load_peak,
+    host_led,
 };
 
 static void cache_sync(uint32_t address, uint32_t bytes)   /* the loader calls this just before the app's entry */
@@ -148,6 +150,7 @@ void apps_unload(void)
         a->stop(a->context);
         app_busy = 0;
     }
+    leds_off();
 }
 
 void apps_event(const enaga_event_t *event)
