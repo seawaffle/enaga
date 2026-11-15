@@ -31,12 +31,18 @@ extern "C" {
 #define ENAGA_SAMPLE_RATE     48000u
 #define ENAGA_BLOCK_FRAMES    64u           /* audio callback block: 1.33 ms */
 
-/* Keys by bit number in the panel's 48-bit switch word (docs/hardware.md "Keys"; bits without a confirmed
- * name are delivered by number). POWER is a separate input and never reaches an app. */
+/* Keys by bit number in the panel's 48-bit switch word (docs/hardware.md "Keys"). Bits 5-7 and 10-15 have
+ * no switch. POWER is a separate input and never reaches an app. */
 enum enaga_key {
-    ENAGA_KEY_FUNC = 19, ENAGA_KEY_PROJECT = 20, ENAGA_KEY_MIXER = 21, ENAGA_KEY_PLAY = 22, ENAGA_KEY_OK = 23,
-    ENAGA_KEY_LEFT = 24, ENAGA_KEY_REC = 26, ENAGA_KEY_HOME = 27, ENAGA_KEY_EDIT = 28, ENAGA_KEY_STOP = 29,
-    ENAGA_KEY_OCTAVE_RIGHT = 31, ENAGA_KEY_STEP1 = 32,     /* STEP n = ENAGA_KEY_STEP1 + n - 1, n = 1..16 */
+    ENAGA_KEY_PUSH_B = 0, ENAGA_KEY_PUSH_A = 1, ENAGA_KEY_PUSH_C = 2, ENAGA_KEY_PUSH_D = 3,   /* knob pushes */
+    ENAGA_KEY_PUSH_VALUE = 4,
+    ENAGA_KEY_SELECT_LEFT = 8, ENAGA_KEY_SELECT_RIGHT = 9,      /* the selection buttons */
+    ENAGA_KEY_OCTAVE_LEFT = 16, ENAGA_KEY_OCTAVE_RIGHT = 31,
+    ENAGA_KEY_UP = 17, ENAGA_KEY_RIGHT = 18, ENAGA_KEY_LEFT = 24, ENAGA_KEY_DOWN = 25,
+    ENAGA_KEY_FUNC = 19, ENAGA_KEY_PROJECT = 20, ENAGA_KEY_MIXER = 21, ENAGA_KEY_PLAY = 22,
+    ENAGA_KEY_OK = 23, ENAGA_KEY_REC = 26, ENAGA_KEY_HOME = 27, ENAGA_KEY_EDIT = 28, ENAGA_KEY_STOP = 29,
+    ENAGA_KEY_CLR = 30,
+    ENAGA_KEY_STEP1 = 32,                                       /* STEP n = ENAGA_KEY_STEP1 + n - 1, n = 1..16 */
     ENAGA_KEY_COUNT = 48
 };
 
