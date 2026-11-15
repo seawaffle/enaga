@@ -6,8 +6,8 @@
 ;
 ; Each maskable vector pushes B0/B1, loads the interrupt number into B1 and branches to isr_common, which
 ; saves every register the C calling convention lets enaga_irq clobber (A0-A9, A16-A31, B0-B9, B16-B31) plus
-; ILC/RILC (SPLOOP state), calls enaga_irq(number) with interrupts disabled (no nesting), restores, and
-; returns through IRP.
+; ILC/RILC (SPLOOP state), calls enaga_irq(number) with interrupts disabled, restores, and returns through
+; IRP. The one nesting is the watchdog inside the app's audio callback (irq_nest_begin/end, kernel/audio.c).
 
 	.global _start
 	.global _halt
@@ -95,6 +95,41 @@ irq_resume_at:
 restart_at:
 	mv .L2 b4, b15
 	b .S2X a4
+	nop 5
+
+; void irq_nest_begin(u32 saved[3], u32 mask): inside a handler, let the interrupts in mask nest (SPRUFE8B
+; 5.6.2): IRP, ITSR and IER go to saved[0..2] (a nested interrupt overwrites IRP and ITSR), IER becomes
+; mask | NMIE, then GIE is set.
+	.global irq_nest_begin
+	.global irq_nest_end
+irq_nest_begin:
+	mvc .S2 irp, b0
+	stw .D1T2 b0, *a4
+	mvc .S2 itsr, b0
+	stw .D1T2 b0, *+a4[1]
+	mvc .S2 ier, b0
+	stw .D1T2 b0, *+a4[2]
+	or .L2 2, b4, b0
+	mvc .S2 b0, ier
+	mvc .S2 csr, b0
+	or .L2 1, b0, b0
+	mvc .S2 b0, csr
+	b .S2 b3
+	nop 5
+
+; void irq_nest_end(const u32 saved[3]): GIE off, then IRP, ITSR and IER as irq_nest_begin found them.
+irq_nest_end:
+	mvc .S2 csr, b0
+	and .L2 -2, b0, b0
+	mvc .S2 b0, csr
+	ldw .D1T2 *a4, b0
+	ldw .D1T2 *+a4[1], b1
+	ldw .D1T2 *+a4[2], b2
+	nop 4
+	mvc .S2 b0, irp
+	mvc .S2 b1, itsr
+	mvc .S2 b2, ier
+	b .S2 b3
 	nop 5
 
 ; Interrupt vector table: 16 fetch packets of 32 bytes, 1 KiB aligned.

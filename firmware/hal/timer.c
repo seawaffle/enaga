@@ -1,16 +1,18 @@
 #include "hal.h"
 
 /* Time comes from the CPU time-stamp counter (tsc_read, 372 MHz), enabled first thing in main: a clock that
- * cannot fail to run. TIMER64P0 is also configured as the original firmware's free-running counter (TCR:
- * PWID12 = 1, ENAMODE12 = continuous) but only observed: timer64_counts() reports whether it advances, which
- * checks its 24 MHz input without depending on it. */
+ * cannot fail to run. TIMER64P0 runs continuously with a 10 ms period (TCR: PWID12 = 1, ENAMODE12 =
+ * continuous; PRD12 = 240,000 at its believed 24 MHz input) and raises event 4 (TINT12) at each period, the
+ * original firmware's clock tick: the kernel's watchdog interrupt (kernel/watchdog.c). Nothing measures time
+ * with it, so a wrong input frequency only changes how often the watchdog looks. timer64_counts() reports
+ * whether it advances. */
 
 static u32 last_ticks, ms_count, ms_remainder;
 
 void timer_init(void)
 {
     REG32(TIMER0 + 0x20) = 0;              /* TCR: stopped */
-    REG32(TIMER0 + 0x18) = 0xFFFFFFFFu;    /* PRD12 */
+    REG32(TIMER0 + 0x18) = TIMER_PERIOD;   /* PRD12 */
     REG32(TIMER0 + 0x10) = 0;              /* TIM12 */
     REG32(TIMER0 + 0x04) = 0;              /* EMUMGT */
     REG32(TIMER0 + 0x08) = 0;              /* GPINTGPEN */

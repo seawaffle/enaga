@@ -68,7 +68,7 @@ void enaga_exception(void)
         crash_efr = exception_record[1];
         crash_ierr = exception_record[2];
         apps_drop("CPU EXCEPTION");
-        if (irq_active) { irq_active = 0; audio_irq_rearm(); }
+        if (irq_active) irq_unwind();
         exception_resume(kernel_loop, KERNEL_SP);
     }
     kernel_crash(exception_record[1] & 1 ? "SOFTWARE EXCEPTION" : "CPU EXCEPTION");

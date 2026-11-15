@@ -164,8 +164,8 @@ Proposal, grouped by service. Names are illustrative until each service exists.
 ## Status
 
 E0 is complete. E1 has its kernel, audio engine, display DMA and exception handling, all tested on the
-emulator; nothing has run on a unit yet. Remaining for E1: a watchdog for a hung main loop, cache and L2
-configuration, key debouncing, and the first session on the unit (install 0.1.0, confirm start-up, an
+emulator; nothing has run on a unit yet. The watchdog is in place (emulator-tested). Remaining
+for E1: cache and L2 configuration, key debouncing, and the first session on the unit (install 0.1.0, confirm start-up, an
 audible tone on the expected channel, the real audio load with caches).
 
 ## Open items
@@ -179,6 +179,11 @@ audible tone on the expected channel, the real audio load with caches).
   other TI parts) is plausible and unverified.
 - A fault in Enaga code called by an app (a host function given a bad pointer) currently counts as a kernel
   crash rather than the app's fault.
+- Hangs with interrupts disabled (in a kernel handler, or an app that clears GIE) escape the software
+  watchdog; the C6748's hardware watchdog (TIMER64P1) would catch them by resetting the chip, which probably
+  also drops the power hold. Whether a reset on the unit switches it off or restarts Enaga is to be checked.
+- Loading a very large app: the loader's CRC and bss clearing run without feeding the watchdog, so an image
+  that takes over a second to check would trip it. To be measured on the unit with caches on.
 - Licence.
 
 ## Development log
@@ -228,3 +233,22 @@ audible tone on the expected channel, the real audio load with caches).
   leaves words 0-1 unused (`test_interrupts_preserve_loop_state` fails on the old layout). (2) Stacks started
   at their very end, so the kernel's first call wrote the first word of the app window and the exception
   handler overwrote its own saved NRP; every stack pointer now starts 8 bytes inside its stack.
+
+### E1 watchdog (2026-11-15)
+
+- `kernel/watchdog.c`: TIMER64P0 now has a 10 ms period, and its TINT12 (event 4, the original firmware's tick
+  event) reaches CPU interrupt 4, the highest maskable priority. Each tick checks that the main loop has fed
+  the watchdog within 1 s and that the app's audio callback has not been running for 100 ms. A hang while an
+  app is loaded, starting (constructors, `init`) or stopping is the app's: it is dropped as with `fatal()`
+  ("APP NOT RESPONDING", "APP HUNG IN AUDIO") and the kernel loop continues. With no app it is Enaga's: the
+  crash screen ("WATCHDOG"). Times come from the time-stamp counter, so the timer's unconfirmed input clock
+  only changes how often the watchdog looks.
+- A callback that never returns holds the audio interrupt, and handlers run with interrupts off, so the
+  watchdog is the one nested interrupt: `audio.c` wraps the app's callback in `irq_nest_begin`/`irq_nest_end`
+  (start.s), which save IRP, ITSR and IER, unmask only the watchdog and set GIE. `irq_active` now counts
+  handlers, and every abnormal exit from interrupt context (`fatal()`, a CPU exception, the watchdog) goes
+  through `irq_unwind`, which unmasks every enabled interrupt again; without that the audio interrupt stays
+  masked after a failure inside the callback (checked by breaking it: the audio tests then fail).
+- Emulator tests: an app hung in `update`, in the audio callback and in `init` is dropped while audio and
+  drawing continue; an injected hang in Enaga's own code shows the crash screen after one second and not
+  before; the tick runs at one interrupt per 10 ms. Removing the nesting makes the audio-callback test fail.

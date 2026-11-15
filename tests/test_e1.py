@@ -1,5 +1,5 @@
 """E1: the firmware boots on the emulator, loads an app from the card, services the audio interrupt, sends
-display frames by EDMA, delivers key events, and recovers from apps that fail in either context.
+display frames by EDMA, delivers key events, and recovers from apps that fail or hang in either context.
 
     ENAGA_EMULATOR=/path/to/emulator python3 -B -m unittest discover -s tests -p test_e1.py -v
 
@@ -25,6 +25,7 @@ WORK_E1 = paths.BUILD / "tests"
 BOOT = 300_000_000          # past card, app load and audio start
 STEP1 = 32
 BLOCK_CYCLES = 64 * 372_000_000 // 48_000
+MS = 372_000
 
 
 def samples(emu):
@@ -50,11 +51,13 @@ class E1(unittest.TestCase):
             self.assertEqual(report["app_status"], "NO CARD")
             self.assertFalse(report["app_running"])
             self.assertEqual((report["audio_status"], report["audio_codec_errors"]), (0, 0))
-            blocks = report["audio_blocks"]
+            blocks, ticks = report["audio_blocks"], emu.word("watchdog_ticks")
             self.assertGreater(blocks, 100)
-            self.assertEqual(report["interrupts"], blocks)
+            self.assertEqual(report["interrupts"], blocks + ticks)   # audio blocks and the watchdog's tick
             emu.run(10 * BLOCK_CYCLES)
             self.assertIn(emu.report()["audio_blocks"] - blocks, range(9, 12))   # one interrupt per block
+            emu.run(100 * MS)
+            self.assertIn(emu.word("watchdog_ticks") - ticks, range(10, 13))    # one tick per 10 ms
             self.assertEqual(emu.report()["audio_overruns"], 0)
             self.assertTrue(all(v == 0 for v in samples(emu)[-4096:]))
             self.assertEqual(report["log"], ["ENAGA 0.1.0"])
@@ -91,7 +94,7 @@ class E1(unittest.TestCase):
             emu.run(40_000_000)
             self.assertTrue(all(v == 0 for v in samples(emu)[-4096:]))
 
-    def crash(self, key, reason, exception=False):
+    def crash(self, key, reason, exception=False, wait=60_000_000):
         with Emulation(HERE / "apps" / "crash") as emu:
             self.assertIsNone(emu.run(BOOT)["error"])
             words = samples(emu)[-1024:]
@@ -99,22 +102,29 @@ class E1(unittest.TestCase):
             emu.key(key, True)
             emu.run(20_000_000)
             emu.key(key, False)
-            blocks = emu.report()["audio_blocks"]
-            self.assertIsNone(emu.run(60_000_000)["error"])
+            self.assertIsNone(emu.run(wait)["error"])
             report = emu.report()
             self.assertFalse(report["app_running"])
             self.assertEqual((report["app_status"], report["crash_reason"]), ("APP STOPPED", reason))
             self.assertEqual(report["log"][-2:], ["FATAL", reason])
-            expected = 60_000_000 // BLOCK_CYCLES               # the audio interrupt keeps running
-            self.assertIn(report["audio_blocks"] - blocks, range(expected - 3, expected + 3))
-            self.assertTrue(all(v == 0 for v in samples(emu)[-4096:]))  # silence after the app is dropped
-            self.assertFalse(emu.word("kernel_crashed"))
+            self.assert_recovered(emu)
             if exception:                                               # EFR.SXF, PC inside the app window
                 pc = emu.word("crash_pc")
                 self.assertEqual((emu.word("crash_efr"), emu.word("crash_ierr")), (1, 0))
                 self.assertTrue(build_app.BASE <= pc < build_app.LIMIT, hex(pc))
             else:
                 self.assertEqual(emu.word("crash_efr"), 0)
+
+    def assert_recovered(self, emu):
+        """After an app was dropped: Enaga's loop runs, the audio interrupt keeps running, output is silent."""
+        self.assertFalse(emu.word("kernel_crashed"))
+        self.assertEqual((emu.word("irq_active"), emu.word("audio_in_callback"), emu.word("app_busy")), (0, 0, 0))
+        blocks, frames = emu.report()["audio_blocks"], emu.word("oled_dma_frames")
+        self.assertIsNone(emu.run(60_000_000)["error"])
+        expected = 60_000_000 // BLOCK_CYCLES
+        self.assertIn(emu.report()["audio_blocks"] - blocks, range(expected - 3, expected + 3))
+        self.assertGreaterEqual(emu.word("oled_dma_frames") - frames, 2)   # the main loop draws again
+        self.assertTrue(all(v == 0 for v in samples(emu)[-4096:]))
 
     def test_interrupts_preserve_loop_state(self):
         # Regression: the ISR once saved ILC at *SP, which the C handler's prologue overwrote; an audio
@@ -143,18 +153,52 @@ class E1(unittest.TestCase):
     def test_cpu_exception_in_audio_callback_drops_the_app(self):
         self.crash(STEP1 + 3, "CPU EXCEPTION", exception=True)
 
-    def test_cpu_exception_in_enaga_shows_the_crash_screen(self):
-        # Fault injection: an SWE packet in unused Enaga RAM, reached through Enaga's own pad callback.
-        source = WORK_E1 / "swe.s"
-        source.parent.mkdir(parents=True, exist_ok=True)
-        source.write_text("\t.text\n\tswe\n" + "\tnop\n" * 7)
-        obj, raw = source.with_suffix(".o"), source.with_suffix(".bin")
-        build_app.run([paths.tool("as"), "-mlittle-endian", "-march=c674x", "-o", obj, source], source.parent)
-        build_app.run([build_app.OBJCOPY, "-O", "binary", "-j", ".text", obj, raw], source.parent)
+    def test_watchdog_drops_an_app_hung_in_main_context(self):
+        self.crash(STEP1 + 4, "APP NOT RESPONDING", wait=1100 * MS)
+
+    def test_watchdog_drops_an_app_hung_in_audio_callback(self):
+        self.crash(STEP1 + 5, "APP HUNG IN AUDIO", wait=150 * MS)
+
+    def test_watchdog_drops_an_app_hung_in_init(self):
+        with Emulation(HERE / "apps" / "hang") as emu:
+            self.assertIsNone(emu.run(BOOT + 1100 * MS)["error"])
+            report = emu.report()
+            self.assertFalse(report["app_running"])
+            self.assertEqual((report["app_status"], report["crash_reason"]), ("APP STOPPED", "APP NOT RESPONDING"))
+            self.assertEqual(report["log"][-3:], ["hang init", "FATAL", "APP NOT RESPONDING"])
+            self.assert_recovered(emu)
+
+    def test_watchdog_shows_the_crash_screen_when_enaga_hangs(self):
+        # Fault injection: a branch to itself in unused Enaga RAM, reached through Enaga's own pad callback.
+        raw = self.assemble("hang", "0:\tb .S2 0b\n\tnop 5\n")
         target = 0xC0300000
         with Emulation() as emu:
             self.assertIsNone(emu.run(BOOT)["error"])
-            emu.cpu.write(target, raw.read_bytes())
+            emu.cpu.write(target, raw)
+            emu.cpu.write(emu.names["pad_callback"], struct.pack("<I", target))
+            emu.cpu.uart_receive(1, bytes([0xB0, 0x10, 0x00]))
+            self.assertIsNone(emu.run(900 * MS)["error"])
+            self.assertEqual(emu.word("kernel_crashed"), 0)              # not before the second is up
+            self.assertIsNone(emu.run(200 * MS)["error"])
+            self.assertEqual(emu.word("kernel_crashed"), 1)
+            self.assertEqual(emu.report()["log"][-2:], ["KERNEL CRASH", "WATCHDOG"])
+
+    def assemble(self, name, text):
+        source = WORK_E1 / f"{name}.s"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("\t.text\n" + text)
+        obj, raw = source.with_suffix(".o"), source.with_suffix(".bin")
+        build_app.run([paths.tool("as"), "-mlittle-endian", "-march=c674x", "-o", obj, source], source.parent)
+        build_app.run([build_app.OBJCOPY, "-O", "binary", "-j", ".text", obj, raw], source.parent)
+        return raw.read_bytes()
+
+    def test_cpu_exception_in_enaga_shows_the_crash_screen(self):
+        # Fault injection: an SWE packet in unused Enaga RAM, reached through Enaga's own pad callback.
+        raw = self.assemble("swe", "\tswe\n" + "\tnop\n" * 7)
+        target = 0xC0300000
+        with Emulation() as emu:
+            self.assertIsNone(emu.run(BOOT)["error"])
+            emu.cpu.write(target, raw)
             emu.cpu.write(emu.names["pad_callback"], struct.pack("<I", target))
             emu.cpu.uart_receive(1, bytes([0xB0, 0x10, 0x00]))   # a pad 0 reading
             self.assertIsNone(emu.run(40_000_000)["error"])

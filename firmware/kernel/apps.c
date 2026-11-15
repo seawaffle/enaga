@@ -11,6 +11,7 @@
 #define APPS_DIR  "/ENAGA/APPS"
 
 const enaga_app_t *app_current;
+volatile int app_busy;
 char app_status[32];
 char app_name[ENAGA_NAME_BYTES];
 char crash_reason[48];
@@ -45,7 +46,12 @@ enaga_host_t app_host = {                     /* heap filled in per app by load_
     host_log, host_ms, host_fatal, ENAGA_SAMPLE_RATE, AUDIO_FRAMES, host_text, host_audio_load, host_audio_load_peak,
 };
 
-static void cache_sync(uint32_t address, uint32_t bytes) { cache_wbinv((void *)address, bytes); }
+static void cache_sync(uint32_t address, uint32_t bytes)   /* the loader calls this just before the app's entry */
+{
+    cache_wbinv((void *)address, bytes);
+    watchdog_feed();                          /* from here a hang is the app's (constructors, init) */
+    app_busy = 1;
+}
 
 void apps_mount(void)
 {
@@ -90,6 +96,7 @@ static int load_path(const char *path)
         if (f_read(&file, (u8 *)header.load_address + done, chunk, &got) != FR_OK || got != chunk) {
             f_close(&file); set_status(load_error(ENAGA_LOAD_TRUNCATED)); return -1;
         }
+        watchdog_feed();
     }
     f_close(&file);
     copy_text(app_name, sizeof app_name, header.name);
@@ -100,8 +107,9 @@ static int load_path(const char *path)
         app_host.heap_size = heap < ENAGA_APP_LIMIT ? ENAGA_APP_LIMIT - heap : 0;
     }
     status = enaga_package_start(&header, &app_host, cache_sync, &loaded);   /* runs the app's constructors */
-    if (status != ENAGA_LOAD_OK) { set_status(load_error(status)); return -1; }
-    if (loaded->init && loaded->init(loaded->context) != 0) { set_status("APP INIT FAILED"); return -1; }
+    if (status != ENAGA_LOAD_OK) { app_busy = 0; set_status(load_error(status)); return -1; }
+    if (loaded->init && loaded->init(loaded->context) != 0) { app_busy = 0; set_status("APP INIT FAILED"); return -1; }
+    app_busy = 0;
     app_current = loaded;
     audio_set_callback(loaded->audio, loaded->context);
     set_status("APP RUNNING");
@@ -135,7 +143,11 @@ void apps_unload(void)
     const enaga_app_t *a = app_current;
     audio_set_callback(0, 0);
     app_current = 0;
-    if (a && a->stop) a->stop(a->context);
+    if (a && a->stop) {
+        app_busy = 1;
+        a->stop(a->context);
+        app_busy = 0;
+    }
 }
 
 void apps_event(const enaga_event_t *event)
@@ -143,14 +155,16 @@ void apps_event(const enaga_event_t *event)
     if (app_current && app_current->event) app_current->event(app_current->context, event);
 }
 
-/* An app called fatal() (or failed in a way the runtime caught): drop it and continue in the kernel loop on a
- * fresh stack. From the audio callback this leaves interrupt context through IRP. Whatever the main context
+/* An app called fatal() (or failed in a way the runtime caught, or the watchdog found it hung): drop it and
+ * continue in the kernel loop on a fresh stack. From interrupt context (the audio callback, the watchdog) this
+ * leaves through IRP. Whatever the main context
  * was doing is abandoned (a FatFs operation in progress is not completed). */
 void apps_drop(const char *reason)           /* the app failed: forget it without calling it again */
 {
     u32 gie = irq_global_disable();
     audio_silence_now();                      /* also clears the callback */
     app_current = 0;
+    app_busy = 0;
     if (gie) irq_global_enable();
     copy_text(crash_reason, sizeof crash_reason, reason);
     set_status("APP STOPPED");
@@ -162,8 +176,7 @@ void apps_fatal(const char *reason)
 {
     apps_drop(reason);
     if (irq_active) {
-        irq_active = 0;
-        audio_irq_rearm();
+        irq_unwind();
         irq_resume_at(kernel_loop, KERNEL_SP);
     }
     restart_at(kernel_loop, KERNEL_SP);

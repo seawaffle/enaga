@@ -15,14 +15,20 @@ void irq_global_enable(void);
 u32  irq_global_disable(void);                 /* returns the previous GIE bit */
 void irq_resume_at(void (*fn)(void), u32 sp);  /* from interrupt context, continue at fn (never returns) */
 void restart_at(void (*fn)(void), u32 sp);     /* main context: continue at fn on a fresh stack */
+void irq_nest_begin(u32 saved[3], u32 mask);   /* in a handler: let the interrupts in mask nest (keeps IRP, ITSR, IER) */
+void irq_nest_end(const u32 saved[3]);         /* GIE off and IRP, ITSR, IER as they were */
 extern char _stack_top[];
 #define KERNEL_SP (((u32)_stack_top - 8) & ~7u)   /* a fresh kernel stack: *SP must lie inside it */
 
 /* irq.c */
+#define IRQ_WATCHDOG 4                        /* CPU interrupt 4 <- event 4, T64P0_TINT12 (the highest maskable priority) */
 #define IRQ_AUDIO 8                           /* CPU interrupt 8 <- event 8, EDMA3_0_CC0_INT1 (shadow region 1) */
 void irq_init(void);
-extern volatile int irq_active;               /* nonzero while enaga_irq runs */
+void irq_enable(u32 mask);                    /* IER |= mask, remembered for irq_unwind */
+extern volatile int irq_active;               /* handlers running: 2 while the watchdog has nested into audio */
 void enaga_irq(unsigned number);
+void irq_unwind(void);                        /* before leaving interrupt context abnormally: GIE off, no handler
+                                                 active, every enabled interrupt unmasked, audio rearmed */
 
 /* audio.c: McASP0 + EDMA ring, one interrupt per block, the app's callback in interrupt context */
 #define AUDIO_FRAMES ENAGA_BLOCK_FRAMES
@@ -35,10 +41,13 @@ void audio_mute(void);                        /* power-off order: silence, DAC m
 void audio_silence_now(void);                 /* zero the transmit ring at once (crash paths) */
 void audio_irq_rearm(void);                   /* re-evaluate the EDMA interrupt (after leaving the ISR abnormally) */
 extern volatile u32 audio_blocks, audio_overruns, audio_cycles_last, audio_cycles_peak;
+extern volatile int audio_in_callback;        /* the app's callback is running, since audio_callback_start (TSC) */
+extern volatile u32 audio_callback_start;
 extern int audio_status, audio_codec_errors;
 
 /* apps.c: find, load, host and unload apps */
 extern const enaga_app_t *app_current;
+extern volatile int app_busy;                 /* Enaga is running the app's start-up (constructors, init) or stop */
 extern enaga_host_t app_host;                 /* the table every app receives */
 extern char app_status[32];
 extern char app_name[ENAGA_NAME_BYTES];
@@ -66,6 +75,12 @@ void exceptions_enable(void);
 void exception_resume(void (*fn)(void), u32 sp);
 void enaga_exception(void);
 void kernel_crash(const char *reason);         /* never returns */
+
+/* watchdog.c: the 10 ms tick checks the audio callback and the main loop are still progressing */
+extern volatile u32 watchdog_ticks;
+void watchdog_start(void);
+void watchdog_feed(void);                     /* the main loop is progressing */
+void watchdog_isr(void);
 
 /* main.c */
 void kernel_loop(void);                       /* never returns */

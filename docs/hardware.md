@@ -54,7 +54,7 @@ Switching off, in the original firmware's order: `B2` to the panel MCU, DAC mute
 
 A 6 x 8 matrix: rows GP2[0..5] are outputs driven one high at a time; columns 0-5 are GP3[1..6], column 6
 is GP3[9], column 7 is GP3[11]. One extra key, active low on GP5[10], appears as row 0, column 4. Key
-number = row x 8 + column, forming a 48-bit switch word. Names known so far:
+number = row x 8 + column, forming a 48-bit switch word:
 
 | Bit | Key | Bit | Key |
 |---|---|---|---|
@@ -141,7 +141,8 @@ for identification, then 23 MHz with a 4-bit bus. SDSC and SDHC cards are handle
 ## Interrupts and exceptions
 
 The C674x interrupt controller routes events to CPU interrupts 4-15 through INTMUX1-3. Enaga uses CPU
-interrupt 8 for event 8 (EDMA3 CC0 region 1 completion). Exceptions (internal and software) are enabled
+interrupt 4 for event 4 (TIMER64P0 TINT12, the watchdog tick; the original firmware's clock tick is the same
+event) and CPU interrupt 8 for event 8 (EDMA3 CC0 region 1 completion). Exceptions (internal and software) are enabled
 with TSR.GEE and enter through the NMI vector; the EFR and IERR bit values follow TI's SYS/BIOS c64p
 exception module.
 
@@ -150,4 +151,5 @@ exception module.
 Peripherals are powered through the two power and sleep controllers (PSC0 at `0x01C10000`, PSC1 at
 `0x01E27000`) before use: PSC0 module 0 and 1 (EDMA3 CC0 and TC0), 5 (MMCSD0); PSC1 module 7 (McASP0), 10
 (SPI1), 12 (UART1). I2C0 has no PSC module and runs from the 24 MHz oscillator. TIMER64P0 is believed to
-count at 24 MHz (**unconfirmed**; Enaga only checks that it runs).
+count at 24 MHz (**unconfirmed**); Enaga gives it a 240,000-count period, 10 ms if so, for the watchdog
+tick, and measures no time with it.

@@ -43,7 +43,9 @@ ENAGA_APP(Beep)
   `<numbers>`. `new`/`delete` work on the app's heap (everything above Enaga, about 124 MiB). There is no
   libm yet, and no allocating standard containers. Global destructors never run: Enaga discards an app's
   memory after calling `stop()`.
-- `enaga::fatal(reason)` stops the app; Enaga shows the reason and keeps running.
+- `enaga::fatal(reason)` stops the app; Enaga shows the reason and keeps running. Enaga's watchdog stops an
+  app the same way when a main-loop call (including `init` and `stop`) has not returned after 1 s, or `audio`
+  after 100 ms.
 
 See `examples/tone` for a complete app.
 
@@ -84,7 +86,7 @@ project. Point `ENAGA_EMULATOR` at its emulator directory (the one containing `c
 
 ```sh
 export ENAGA_EMULATOR=/path/to/emulator
-python3 -B -m unittest discover -s tests -v                           # 13 tests, about a minute
+python3 -B -m unittest discover -s tests -v                           # 17 tests, about 80 s
 python3 -B tools/emulate.py examples/tone --key 32@300000000           # press STEP 1; writes build/emulate/
 ```
 
@@ -99,7 +101,7 @@ Without `ENAGA_EMULATOR` the tests are skipped. `tools/emulate.py` writes the la
 | `include/enaga/app.hpp` | The C++ layer: `enaga::App`, `enaga::Canvas`, `ENAGA_APP(Type)`, `enaga::log`, `enaga::fatal` |
 | `runtime/` | Linked into every app: entry point, static constructors, heap, `new`/`delete`, C++ ABI hooks, `app.ld` |
 | `loader/` | The package loader (freestanding C, used by the firmware and the tests) |
-| `firmware/` | Enaga itself: `hal/` drivers, `kernel/` (interrupts, audio engine, app host, exceptions, main loop), `start.s`, `link.ld`, `build.py` |
+| `firmware/` | Enaga itself: `hal/` drivers, `kernel/` (interrupts, audio engine, app host, exceptions, watchdog, main loop), `start.s`, `link.ld`, `build.py` |
 | `examples/` | `tone` (STEP 1-8 play 750 Hz x step); `cxxcheck` (exercises the C++ runtime) |
 | `tests/` | `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board |
 | `tools/` | `build_app.py`, `emulate.py`, `sysimage.py` (the update-file format), `paths.py`, toolchain build scripts |

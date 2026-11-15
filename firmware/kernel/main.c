@@ -7,7 +7,7 @@
  * first app found is loaded, and kernel_loop runs: inputs become events for the app, `update` runs every pass,
  * `draw` every 50 ms with the frame sent by EDMA (the loop keeps running while it goes out; a frame still in
  * flight delays the next draw), and the power key held one second switches the unit off. With no app
- * (none found, or one that failed) Enaga shows its own status page.
+ * (none found, or one that failed) Enaga shows its own status page. Each pass feeds the watchdog (watchdog.c).
  *
  * Not yet: FUNC at power-on / FUNC + POWER and the Enaga menu, key debouncing, and pad thresholds (raw
  * readings are delivered). */
@@ -125,6 +125,7 @@ void kernel_loop(void)
     irq_global_enable();
     for (;;) {
         u32 ms = timer_ms();
+        watchdog_feed();
         poll_inputs(ms);
         if (app_current && app_current->update) app_current->update(app_current->context, ms);
         poll_power(ms);
@@ -172,6 +173,7 @@ void main(void)
     last_keys = keys_scan();                  /* keys held through start-up do not become events */
     irq_global_enable();                      /* audio blocks start being serviced (silence until an app) */
     log_line("ENAGA " ENAGA_VERSION);
+    watchdog_start();
     apps_load_first();
     kernel_loop();
 }

@@ -63,6 +63,8 @@
 
 
 volatile u32 audio_blocks, audio_overruns, audio_cycles_last, audio_cycles_peak;
+volatile int audio_in_callback;
+volatile u32 audio_callback_start;
 int audio_status, audio_codec_errors;
 
 static u32 tx_a[WORDS] __attribute__((aligned(128)));
@@ -190,7 +192,7 @@ int audio_init(void)
     edma_setup();
     audio_codec_errors = codec_init();
     if (audio_codec_errors) return audio_status = -4;
-    irq_enable_mask(1u << IRQ_AUDIO);         /* taken once the kernel sets GIE */
+    irq_enable(1u << IRQ_AUDIO);              /* taken once the kernel sets GIE */
     mcasp_setup();
     if (mcasp_start() < 0) return audio_status = -5;
     codec_unmute();
@@ -233,8 +235,15 @@ void audio_isr(void)
         } else {
             for (i = 0; i < WORDS; i++) in_block[i] = 0.0f;
         }
-        if (fn) fn(callback_context, in_block, out_block, FRAMES);
-        else for (i = 0; i < WORDS; i++) out_block[i] = 0.0f;
+        if (fn) {                             /* the watchdog may interrupt the app's callback (watchdog.c) */
+            u32 saved[3];
+            audio_callback_start = tsc_read();
+            audio_in_callback = 1;
+            irq_nest_begin(saved, 1u << IRQ_WATCHDOG);
+            fn(callback_context, in_block, out_block, FRAMES);
+            irq_nest_end(saved);
+            audio_in_callback = 0;
+        } else for (i = 0; i < WORDS; i++) out_block[i] = 0.0f;
         for (i = 0; i < WORDS; i++) {
             float v = out_block[i] * 2147483648.0f;
             tx[i] = v >= 2147483647.0f ? 0x7FFFFFFFu : v <= -2147483648.0f ? 0x80000000u : (u32)(int)v;
@@ -251,13 +260,14 @@ void audio_isr(void)
 
 void audio_irq_rearm(void)                    /* an app failed inside the callback: keep the interrupt alive */
 {
-    REG32(EDMA_S1_IEVAL) = 1;
+    if (audio_status == 0) REG32(EDMA_S1_IEVAL) = 1;
 }
 
 void audio_silence_now(void)                  /* with interrupts off the ring replays its two buffers: clear them */
 {
     u32 i;
     callback = 0;
+    audio_in_callback = 0;
     for (i = 0; i < WORDS; i++) { tx_a[i] = 0; tx_b[i] = 0; }
     cache_wbinv(tx_a, sizeof tx_a);
     cache_wbinv(tx_b, sizeof tx_b);

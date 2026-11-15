@@ -19,7 +19,8 @@ u32  gpio_read_bank16(unsigned bank);
 void tsc_enable(void);               /* crt0.s: start the CPU time-stamp counter */
 u32  tsc_read(void);                 /* its low word: CPU cycles, 372,000 per ms */
 #define TICKS_PER_MS 372000u
-void timer_init(void);               /* TIMER64P0 as a free-running counter: configured, then only observed */
+#define TIMER_PERIOD 240000u         /* TIMER64P0 period: 10 ms at 24 MHz; event 4 (TINT12) each period */
+void timer_init(void);               /* TIMER64P0 running continuously, one event per period (the watchdog's tick) */
 int  timer64_counts(void);           /* 1 = TIM12 advanced over 1 ms (its 24 MHz input clock is running) */
 u32  timer_ticks(void);              /* the time base: tsc_read() */
 u32  timer_ms(void);                 /* milliseconds since tsc_enable, maintained by timer_ms() calls */
