@@ -1,0 +1,5 @@
+build/
+tools/tic6x
+tools/gcc-build/
+tools/binutils-build/
+__pycache__/
