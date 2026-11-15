@@ -123,6 +123,7 @@ void kernel_loop(void)
 {
     int busy;
     irq_global_enable();
+    if (!app_current) leds_off();                /* start-up with no app, or an app was just dropped */
     for (;;) {
         u32 ms = timer_ms();
         watchdog_feed();
@@ -165,6 +166,8 @@ void main(void)
     uart1_send(0xA0);
     a0_sent = 1;
     a0_last_ms = timer_ms();
+    leds_forget();                            /* whatever the panel shows now: every LED off */
+    leds_off();
     splash("AUDIO");
     audio_init();
     display_dma = audio_status == 0 || audio_status <= -3;   /* -1/-2: EDMA never powered */
