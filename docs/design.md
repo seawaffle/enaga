@@ -164,14 +164,15 @@ Proposal, grouped by service. Names are illustrative until each service exists.
 ## Status
 
 E0 is complete. E1 has its kernel, audio engine, display DMA and exception handling, all tested on the
-emulator; nothing has run on a unit yet. The watchdog is in place (emulator-tested). Remaining
-for E1: cache and L2 configuration, key debouncing, and the first session on the unit (install 0.1.0, confirm start-up, an
+emulator; nothing has run on a unit yet. The watchdog and key debouncing are in place (emulator-tested).
+Remaining for E1: cache and L2 configuration, and the first session on the unit (install 0.1.0, confirm start-up, an
 audible tone on the expected channel, the real audio load with caches).
 
 ## Open items
 
 - On the unit: FUNC sampled during the power-key hold; the bootloader passes control normally with FUNC
-  held; FUNC + POWER mid-run; power-key bounce.
+  held; FUNC + POWER mid-run; power-key bounce; how long the matrix keys bounce (the 10 ms settling time
+  is a guess).
 - Which LED is which; whether the unit has a hardware MIDI port; physical left/right channel routing; real
   audio CPU headroom with caches; the key names, confirmed key by key on a unit.
 - The L2 split between cache and RAM.
@@ -252,3 +253,15 @@ audible tone on the expected channel, the real audio load with caches).
 - Emulator tests: an app hung in `update`, in the audio callback and in `init` is dropped while audio and
   drawing continue; an injected hang in Enaga's own code shows the crash screen after one second and not
   before; the tick runs at one interrupt per 10 ms. Removing the nesting makes the audio-callback test fail.
+
+### E1 key debouncing (2026-11-15)
+
+- `hal/keys.c` `keys_poll`: a key's change is taken on the first scan that sees it, so a press reaches the app
+  with no added latency; that key is then held at its new state for 10 ms, so bounce after a press or a release
+  is not reported. A change still present when the time is up is taken then, so a release inside the settling
+  time is late, not lost. The original firmware instead samples each row every 6 ms and reports what it sees.
+  The power key keeps its own handling (a one-second hold, which bounce only restarts).
+- Emulator tests (`tests/apps/keys` logs every event): a press and a release that each bounce four times at
+  0.5 ms give exactly one press and one release (five events with the settling removed); a press is
+  reported within 2 ms; a press released after 3 ms, and a 25 Hz roll on one key, give every event.
+

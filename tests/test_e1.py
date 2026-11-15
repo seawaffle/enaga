@@ -227,6 +227,47 @@ class E1(unittest.TestCase):
                 seen.add(function_at(emu.cpu.state()["pc"] - 4))
             self.assertLessEqual(seen, {"kernel_crash", "power_key_down", "gpio_read_bank16", "tsc_read"})
 
+    def key_events(self, emu):
+        return [line for line in emu.report()["log"] if line[:1] == "K" and line[1:2].isdigit()]
+
+    def bounce(self, emu, key, settle_down, pulses=4):
+        """Contact bounce: the key flips every 0.5 ms a few times before it settles at settle_down."""
+        for i in range(pulses):
+            emu.key(key, i % 2 == 0 if settle_down else i % 2 == 1)
+            emu.run(MS // 2)
+        emu.key(key, settle_down)
+
+    def test_bouncing_key_gives_one_press_and_one_release(self):
+        with Emulation(HERE / "apps" / "keys") as emu:
+            self.assertIsNone(emu.run(BOOT)["error"])
+            self.bounce(emu, STEP1, True)
+            emu.run(50 * MS)
+            self.assertEqual(self.key_events(emu), ["K32 1"])
+            self.bounce(emu, STEP1, False)
+            emu.run(50 * MS)
+            self.assertEqual(self.key_events(emu), ["K32 1", "K32 0"])
+
+    def test_press_is_reported_without_waiting_for_the_contact_to_settle(self):
+        with Emulation(HERE / "apps" / "keys") as emu:
+            self.assertIsNone(emu.run(BOOT)["error"])
+            emu.key(STEP1, True)
+            emu.run(2 * MS)                     # well inside the 10 ms settling time
+            self.assertEqual(self.key_events(emu), ["K32 1"])
+
+    def test_short_press_and_quick_repeats_are_all_reported(self):
+        with Emulation(HERE / "apps" / "keys") as emu:
+            self.assertIsNone(emu.run(BOOT)["error"])
+            emu.key(STEP1, True)                # released inside the settling time: late, not lost
+            emu.run(3 * MS)
+            emu.key(STEP1, False)
+            emu.run(30 * MS)
+            for _ in range(3):                  # a 25 Hz roll on one key
+                emu.key(STEP1, True)
+                emu.run(20 * MS)
+                emu.key(STEP1, False)
+                emu.run(20 * MS)
+            self.assertEqual(self.key_events(emu), ["K32 1", "K32 0"] * 4)
+
     def test_display_frames_go_out_by_edma(self):
         with Emulation(ENAGA / "examples" / "tone") as emu:
             self.assertIsNone(emu.run(BOOT)["error"])

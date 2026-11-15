@@ -53,6 +53,8 @@ void led_set(u8 a, u8 b, u8 c, u8 value);
 
 void keys_init(void);
 u64  keys_scan(void);                 /* 48-bit switch word, bit n = row n / 8, column n % 8; bit 27 is HOME */
+u64  keys_reset(void);                /* debouncing starts from the keys held now; returns them */
+u64  keys_poll(u32 ms);               /* the debounced switch word (keys.c), ms from timer_ms */
 
 void encoders_init(void);
 void encoders_poll(void);

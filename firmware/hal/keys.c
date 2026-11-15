@@ -39,3 +39,32 @@ u64 keys_scan(void)
     }
     return word;
 }
+
+/* Debouncing (the switches have none in hardware). A key's change is taken on the first scan that sees it, so a
+ * press adds no latency; the key is then held at its new state for KEYS_SETTLE_MS, so contact bounce after a
+ * press or a release never becomes more changes. A change still present when the time is up is taken then:
+ * nothing is lost, a release within the settling time is only late. (The original firmware samples each row
+ * every 6 ms and reports what it sees.) */
+#define KEYS_SETTLE_MS 10u
+
+static u64 debounced, settling;
+static u32 changed_ms[48];
+
+u64 keys_reset(void)
+{
+    settling = 0;
+    return debounced = keys_scan();
+}
+
+u64 keys_poll(u32 ms)
+{
+    u64 raw = keys_scan(), changed;
+    unsigned i;
+    for (i = 0; settling && i < 48; i++)
+        if (((settling >> i) & 1) && ms - changed_ms[i] >= KEYS_SETTLE_MS) settling &= ~(1ull << i);
+    changed = (raw ^ debounced) & ~settling;
+    for (i = 0; changed >> i; i++)
+        if ((changed >> i) & 1) changed_ms[i] = ms;
+    settling |= changed;
+    return debounced ^= changed;
+}

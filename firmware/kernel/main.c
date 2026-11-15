@@ -9,8 +9,8 @@
  * flight delays the next draw), and the power key held one second switches the unit off. With no app
  * (none found, or one that failed) Enaga shows its own status page. Each pass feeds the watchdog (watchdog.c).
  *
- * Not yet: FUNC at power-on / FUNC + POWER and the Enaga menu, key debouncing, and pad thresholds (raw
- * readings are delivered). */
+ * Not yet: FUNC at power-on / FUNC + POWER and the Enaga menu, and pad thresholds (raw readings are
+ * delivered). Keys are debounced in keys.c. */
 
 extern char __bss_start[], __bss_end[];
 static u64 last_keys;
@@ -83,7 +83,7 @@ static void shutdown(void)
 
 static void poll_inputs(u32 ms)
 {
-    u64 keys = keys_scan(), changed = keys ^ last_keys;
+    u64 keys = keys_poll(ms), changed = keys ^ last_keys;
     int i;
     enaga_event_t e;
     e.ms = ms;
@@ -170,7 +170,7 @@ void main(void)
     display_dma = audio_status == 0 || audio_status <= -3;   /* -1/-2: EDMA never powered */
     splash("CARD");
     apps_mount();
-    last_keys = keys_scan();                  /* keys held through start-up do not become events */
+    last_keys = keys_reset();                 /* keys held through start-up do not become events */
     irq_global_enable();                      /* audio blocks start being serviced (silence until an app) */
     log_line("ENAGA " ENAGA_VERSION);
     watchdog_start();

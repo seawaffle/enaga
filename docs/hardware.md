@@ -73,7 +73,8 @@ number = row x 8 + column, forming a 48-bit switch word:
 
 Bits 5-7 and 10-15 have no switch. The names come from the original firmware's factory test page, which
 draws the panel and fills in each button whose bit is set, matched to the manual's layout; they are still
-to be confirmed key by key on a unit. The switches are not debounced in hardware.
+to be confirmed key by key on a unit. The switches are not debounced in hardware; Enaga takes a change at once
+and then holds that key for 10 ms (`hal/keys.c`). How long the contacts really bounce is to be measured on a unit.
 
 ## Encoders
 
