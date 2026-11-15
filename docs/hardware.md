@@ -58,15 +58,22 @@ number = row x 8 + column, forming a 48-bit switch word:
 
 | Bit | Key | Bit | Key |
 |---|---|---|---|
-| 19 | FUNC | 26 | REC |
-| 20 | PROJECT | 27 | HOME |
-| 21 | MIXER | 28 | EDIT |
-| 22 | PLAY | 29 | STOP |
-| 23 | OK | 31 | OCTAVE RIGHT |
-| 24 | LEFT | 32-47 | STEP 1-16 |
+| 0 | knob B push | 19 | FUNC |
+| 1 | knob A push | 20 | PROJECT |
+| 2 | knob C push | 21 | MIXER |
+| 3 | knob D push | 22 | PLAY |
+| 4 | VALUE push | 23 | OK |
+| 8 | selection button, left | 24 | left |
+| 9 | selection button, right | 25 | down |
+| 16 | octave left | 26 | REC |
+| 17 | up | 27 | HOME |
+| 18 | right | 28 | EDIT |
+| 29 | STOP | 30 | CLR |
+| 31 | octave right | 32-47 | STEP 1-16 |
 
-The other bits are delivered to apps by number until they are identified. The switches are not debounced
-in hardware.
+Bits 5-7 and 10-15 have no switch. The names come from the original firmware's factory test page, which
+draws the panel and fills in each button whose bit is set, matched to the manual's layout; they are still
+to be confirmed key by key on a unit. The switches are not debounced in hardware.
 
 ## Encoders
 

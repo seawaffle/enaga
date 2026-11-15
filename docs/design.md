@@ -172,8 +172,8 @@ audible tone on the expected channel, the real audio load with caches).
 
 - On the unit: FUNC sampled during the power-key hold; the bootloader passes control normally with FUNC
   held; FUNC + POWER mid-run; power-key bounce.
-- Which LED is which; whether the unit has a hardware MIDI port; encoder push switches; physical left/right
-  channel routing; real audio CPU headroom with caches.
+- Which LED is which; whether the unit has a hardware MIDI port; physical left/right channel routing; real
+  audio CPU headroom with caches; the key names, confirmed key by key on a unit.
 - The L2 split between cache and RAM.
 - USB stack: the C6748's USB0 is a Mentor MUSB controller; a TinyUSB port (TinyUSB has a MUSB driver for
   other TI parts) is plausible and unverified.
