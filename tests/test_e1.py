@@ -220,12 +220,13 @@ class E1(unittest.TestCase):
             functions = sorted((address, name) for name, address in emu.names.items() if address >= 0xC0000000)
             def function_at(pc):
                 return max((entry for entry in functions if entry[0] <= pc), default=(0, "?"))[1]
-            seen = set()
+            crash_loop = {"kernel_crash", "power_key_down", "gpio_read_bank16", "tsc_read"}
             for _ in range(20):
                 emu.run(100_003)
-                # During a return's delay slots the core's PC already names the next fetch address.
-                seen.add(function_at(emu.cpu.state()["pc"] - 4))
-            self.assertLessEqual(seen, {"kernel_crash", "power_key_down", "gpio_read_bank16", "tsc_read"})
+                # During a return's delay slots the core's PC already names the next fetch address, but a PC at a
+                # function's first packet belongs to that function: either reading may be the right one.
+                pc = emu.cpu.state()["pc"]
+                self.assertTrue({function_at(pc), function_at(pc - 4)} & crash_loop, hex(pc))
 
     def key_events(self, emu):
         return [line for line in emu.report()["log"] if line[:1] == "K" and line[1:2].isdigit()]
