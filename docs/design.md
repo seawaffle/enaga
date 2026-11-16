@@ -76,7 +76,7 @@ DDR is 128 MiB at `0xC0000000`-`0xC7FFFFFF` (hardware.md "Memory").
 | Enaga code, data, stacks, DMA rings | 4 MiB at `0xC0000000`; 0.1.0 uses about 80 KB plus a 256 KB stack | Enaga |
 | App image (code, data, bss) | from `ENAGA_APP_BASE` = `0xC0400000`, as large as the app | app |
 | App heap | from the end of the image, rounded up to 4 KiB, to the end of DDR (`ENAGA_APP_LIMIT` = `0xC8000000`) | app (`new`, `malloc`, samples) |
-| L2 | **open:** all cache, or part RAM for audio-critical code and buffers | to be measured on the unit |
+| L1P, L1D, L2 | all cache since E1 (Enaga sets it at start-up); part of L2 as RAM for audio-critical code and buffers stays **open** | to be measured on the unit |
 
 So an app has the whole 124 MiB above Enaga for its image plus heap. For comparison, the original firmware's
 image and static buffers take about 21 MiB and its default heap is 64 MiB. App assets live on the card in the
@@ -164,9 +164,9 @@ Proposal, grouped by service. Names are illustrative until each service exists.
 ## Status
 
 E0 is complete. E1 has its kernel, audio engine, display DMA and exception handling, all tested on the
-emulator; nothing has run on a unit yet. The watchdog and key debouncing are in place (emulator-tested).
-Remaining for E1: cache and L2 configuration, and the first session on the unit (install 0.1.0, confirm start-up, an
-audible tone on the expected channel, the real audio load with caches).
+emulator; nothing has run on a unit yet. The watchdog, key debouncing and the start-up cache configuration are in
+place (emulator-tested). Remaining for E1: the first session on the unit (install 0.1.0, confirm start-up and the
+cache line in the log, an audible tone on the expected channel, the real audio load with caches).
 
 ## Open items
 
@@ -177,7 +177,9 @@ audible tone on the expected channel, the real audio load with caches).
   "LED map"; smpltrek session L1); the level-to-brightness steps. Whether the unit has a hardware MIDI port;
   physical left/right channel routing; real audio CPU headroom with caches; the key names, confirmed key by key
   on a unit.
-- The L2 split between cache and RAM.
+- The L2 split between cache and RAM. What the bootloader hands over in the cache registers, and whether it
+  writes back the image it copied before branching (Enaga's first fetches depend on that; the log's `CACHE`
+  line shows the registers on a unit).
 - USB stack: the C6748's USB0 is a Mentor MUSB controller; a TinyUSB port (TinyUSB has a MUSB driver for
   other TI parts) is plausible and unverified.
 - A fault in Enaga code called by an app (a host function given a bad pointer) currently counts as a kernel
@@ -294,3 +296,18 @@ audible tone on the expected channel, the real audio load with caches).
 - GCC compiled the brightest-of-three into `MAXU4`, which the emulator lacked; MAXU4 and MINU4 were added there
   with a test (smpltrek working tree, not yet committed). The C++20 header needed `int(ENAGA_LED_KEY)`, since
   arithmetic between two enum types is deprecated.
+
+### E1 cache configuration (2026-11-15)
+
+- Enaga had relied on the bootloader having configured the caches, but nothing showed what the bootloader leaves:
+  the original firmware's configuration (L2 and L1P all cache, L1D 16 KiB cache + 16 KiB RAM, MAR 192-199 set)
+  comes from its own SYS/BIOS start-up, and the emulator's hand-over has DDR uncached. If DDR were left uncached
+  on a unit, every audio figure would be meaningless.
+- `cache_setup()` (`hal/cache.c`) runs right after bss is cleared: a global write-back-invalidate of L1D and L2,
+  then L2, L1P and L1D all cache (mode 4 each, read back), then the PC bit of MAR 192-199 (all 128 MiB of DDR).
+  L1D is all cache rather than the original's half, since Enaga uses no on-chip RAM. The log's second line,
+  `CACHE 443 00>444 FF` on the emulator, gives the L2, L1P and L1D modes and the DDR MAR bits as handed over and
+  after set-up (the second half read back from the registers).
+- The emulator keeps these registers but models no caches and does not record them in its MMIO trace, so the test
+  is the logged read-back (leaving `cache_setup` out gives `443 00>443 00` and fails); the maintenance order is
+  only reviewed against SPRUFK5A/SPRUG82, not tested.

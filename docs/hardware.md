@@ -23,11 +23,18 @@ TLV320AIC3106 data sheet (SLAS509).
 ## Boot
 
 The bootloader (in SPI flash, never modified by Enaga) copies the system image's sections to their load
-addresses and branches to its entry point. At that moment the PLLs, DDR and caches are configured, the
+addresses and branches to its entry point. At that moment the PLLs and DDR are configured, the
 power hold (GP4[11]) is already driven high, and the OLED shows the SONICWARE logo. The bootloader runs
 from `0xC7020000`-`0xC70B0000` while loading, so an image must not load there; the original firmware loads
 from `0xC0000000`, which is where Enaga loads too. A system image that never takes over leaves the unit on,
 showing the logo, with the power key dead: remove the batteries or power to recover, then use BOOT MODE.
+
+What the bootloader leaves in the cache registers is not known (the original firmware's configuration, under
+"Processor and memory", is set by its own start-up), so Enaga sets L1P, L1D and L2 all cache and DDR cacheable
+(MAR 192-199) before anything else (`hal/cache.c`). Its log's second line records both states:
+`CACHE 443 00>444 FF` is L2, L1P and L1D modes (4 = all cache, 3 = 16 KiB) and the PC bits of MAR 192-199 in
+hex (bit n = MAR 192+n), as handed over, then after set-up. Whether the bootloader writes back the image it
+copied before branching to it is unknown too; Enaga could not repair that afterwards.
 
 ## Installing and recovery
 

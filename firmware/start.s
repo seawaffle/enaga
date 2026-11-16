@@ -1,8 +1,8 @@
 ; Enaga entry, interrupt vectors and the interrupt context switch (C674x, SPRUFE8B chapter 5).
 ;
-; The bootloader has copied the image to its load address and branches to _start with caches configured and
-; DDR running (docs/hardware.md "Boot"). _start sets the stack, keeps interrupts off and calls main; the kernel
-; points ISTP at `vectors` and enables what it uses (kernel/irq.c).
+; The bootloader has copied the image to its load address and branches to _start with DDR running and the
+; caches in an unknown state (docs/hardware.md "Boot"; main sets them, hal/cache.c). _start sets the stack, keeps
+; interrupts off and calls main; the kernel points ISTP at `vectors` and enables what it uses (kernel/irq.c).
 ;
 ; Each maskable vector pushes B0/B1, loads the interrupt number into B1 and branches to isr_common, which
 ; saves every register the C calling convention lets enaga_irq clobber (A0-A9, A16-A31, B0-B9, B16-B31) plus

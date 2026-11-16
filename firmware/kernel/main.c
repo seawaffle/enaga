@@ -3,7 +3,8 @@
 /* Enaga start-up and the main loop.
  *
  * Start-up follows an order proven on the unit: power hold, time-stamp counter, keys, timer, encoders,
- * display, the panel MCU link (90, B1, A0), audio, card. Then interrupts are enabled, the
+ * display, the panel MCU link (90, B1, A0), audio, card. Before any of it Enaga sets its own cache
+ * configuration (hal/cache.c) and logs the one it was handed. Then interrupts are enabled, the
  * first app found is loaded, and kernel_loop runs: inputs become events for the app, `update` runs every pass,
  * `draw` every 50 ms with the frame sent by EDMA (the loop keeps running while it goes out; a frame still in
  * flight delays the next draw), and the power key held one second switches the unit off. With no app
@@ -19,6 +20,22 @@ static u32 a0_last_ms, a0_sent;
 static int power_seen_up, power_was_down;
 static u32 power_down_since, last_draw;
 static int display_dma;                      /* frames by EDMA once the audio engine has powered it */
+
+static void log_cache(u32 was, u32 now)     /* "CACHE 443 00>444 FF": L2, L1P, L1D modes and DDR MARs */
+{
+    static const char hex[] = "0123456789ABCDEF";
+    char line[] = "CACHE 000 00>000 00";
+    u32 words[2] = { was, now }, i;
+    for (i = 0; i < 2; i++) {
+        char *p = line + 6 + 7 * i;
+        p[0] = hex[words[i] >> 24 & 15];
+        p[1] = hex[words[i] >> 16 & 15];
+        p[2] = hex[words[i] >> 8 & 15];
+        p[4] = hex[words[i] >> 4 & 15];
+        p[5] = hex[words[i] & 15];
+    }
+    log_line(line);
+}
 
 static void splash(const char *stage)
 {
@@ -143,9 +160,12 @@ void kernel_loop(void)
 void main(void)
 {
     char *p;
+    u32 handed_over;
     power_hold();
     tsc_enable();
     for (p = __bss_start; p < __bss_end; p++) *p = 0;
+    handed_over = cache_config();
+    cache_setup();
     irq_init();
     exceptions_enable();
     keys_init();
@@ -176,6 +196,7 @@ void main(void)
     last_keys = keys_reset(timer_ms());       /* keys held through start-up do not become events */
     irq_global_enable();                      /* audio blocks start being serviced (silence until an app) */
     log_line("ENAGA " ENAGA_VERSION);
+    log_cache(handed_over, cache_config());
     watchdog_start();
     apps_load_first();
     kernel_loop();

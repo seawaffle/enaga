@@ -26,6 +26,7 @@ BOOT = 300_000_000          # past card, app load and audio start
 STEP1 = 32
 BLOCK_CYCLES = 64 * 372_000_000 // 48_000
 MS = 372_000
+CACHE_LOG = "CACHE 443 00>444 FF"   # handed L1D half RAM and DDR uncached (emulator profile 1); read back after set-up
 
 
 def samples(emu):
@@ -60,7 +61,7 @@ class E1(unittest.TestCase):
             self.assertIn(emu.word("watchdog_ticks") - ticks, range(10, 13))    # one tick per 10 ms
             self.assertEqual(emu.report()["audio_overruns"], 0)
             self.assertTrue(all(v == 0 for v in samples(emu)[-4096:]))
-            self.assertEqual(report["log"], ["ENAGA 0.1.0"])
+            self.assertEqual(report["log"], ["ENAGA 0.1.0", CACHE_LOG])
             self.assertGreater(report["oled"]["complete_frames"], 0)
 
     def test_tone_app_plays_requested_note(self):
@@ -68,7 +69,7 @@ class E1(unittest.TestCase):
             self.assertIsNone(emu.run(BOOT)["error"])
             report = emu.report()
             self.assertEqual((report["app_status"], report["app_name"]), ("APP RUNNING", "TONE"))
-            self.assertEqual(report["log"], ["ENAGA 0.1.0", "tone ready", "TONE"])
+            self.assertEqual(report["log"], ["ENAGA 0.1.0", CACHE_LOG, "tone ready", "TONE"])
             # The heap follows the image (4 KiB aligned) and runs to the end of the 128 MiB DDR.
             package = (paths.BUILD / "emulate" / "TONE.ENA").read_bytes()
             _, _, _, base, size, bss, *_ = build_app.HEADER.unpack_from(package)

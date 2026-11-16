@@ -68,6 +68,8 @@ void codec_mute(void);                 /* DAC volume muted (43/44 = 0x80) with G
 
 void cache_wbinv(void *address, u32 bytes);
 void cache_inv(void *address, u32 bytes);
+void cache_setup(void);               /* L1P, L1D and L2 all cache, DDR cacheable (cache.c) */
+u32  cache_config(void);              /* L2, L1P, L1D modes in bits 24, 16, 8; bits 0-7 the PC bits of MAR 192-199 */
 u32  crc32(const u8 *p, u32 n);
 
 /* SD card (MMCSD0) and the app loader */
