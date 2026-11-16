@@ -39,16 +39,18 @@ enum enaga_key {
     ENAGA_KEY_SELECT_LEFT = 8, ENAGA_KEY_SELECT_RIGHT = 9,      /* the selection buttons */
     ENAGA_KEY_OCTAVE_LEFT = 16, ENAGA_KEY_OCTAVE_RIGHT = 31,
     ENAGA_KEY_UP = 17, ENAGA_KEY_RIGHT = 18, ENAGA_KEY_LEFT = 24, ENAGA_KEY_DOWN = 25,
-    ENAGA_KEY_FUNC = 19, ENAGA_KEY_PROJECT = 20, ENAGA_KEY_MIXER = 21, ENAGA_KEY_PLAY = 22,
-    ENAGA_KEY_OK = 23, ENAGA_KEY_REC = 26, ENAGA_KEY_HOME = 27, ENAGA_KEY_EDIT = 28, ENAGA_KEY_STOP = 29,
-    ENAGA_KEY_CLR = 30,
+    ENAGA_KEY_OK = 23, ENAGA_KEY_CLR = 30,
+    /* The 2 x 4 function block, numbered in reading order (F1-F4 upper row). Its printed labels differ between
+     * SmplTrek, Lofi-12 XT and CyDrums, so Enaga numbers it (docs/hardware.md "Keys"). */
+    ENAGA_KEY_F1 = 19, ENAGA_KEY_F2 = 26, ENAGA_KEY_F3 = 20, ENAGA_KEY_F4 = 27,
+    ENAGA_KEY_F5 = 22, ENAGA_KEY_F6 = 29, ENAGA_KEY_F7 = 21, ENAGA_KEY_F8 = 28,
     ENAGA_KEY_STEP1 = 32,                                       /* STEP n = ENAGA_KEY_STEP1 + n - 1, n = 1..16 */
     ENAGA_KEY_COUNT = 48
 };
 
 /* Panel LEDs by logical number (docs/hardware.md "Panel MCU", which marks what is confirmed on a unit). Levels run
  * 0 (off) to ENAGA_LED_MAX; a colour an LED does not have is ignored. Every key with an LED is ENAGA_LED_KEY + its
- * enaga_key: STEP 1-16, HOME, MIXER, REC, PROJECT, EDIT, FUNC, STOP, PLAY, CLR and OK (red and green). The
+ * enaga_key: STEP 1-16, F1-F8, CLR and OK (red and green). The
  * octave buttons have no LED. */
 #define ENAGA_LED_MAX 10u
 enum enaga_led {

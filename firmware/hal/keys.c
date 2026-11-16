@@ -2,7 +2,7 @@
 
 /* The 6 x 8 key matrix on GPIO (docs/hardware.md "Keys"): rows GP2[0..5] are
  * outputs driven one high at a time; columns 0-5 are GP3[1..6], 6 is GP3[9], 7 is GP3[11]; in row 0,
- * bit 4 is the extra key on GP5[10], active low. Key n = row n / 8, column n % 8; bit 27 is HOME. */
+ * bit 4 is the extra key on GP5[10], active low. Key n = row n / 8, column n % 8; bit 27 is F4. */
 #define ROW_MASK 0x3Fu
 
 void keys_init(void)

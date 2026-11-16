@@ -8,8 +8,8 @@ import unittest
 from test_e1 import BOOT, HERE, MS, STEP1, build_app, component, paths, samples
 from emulate import Emulation
 
-HOME, PLAY = 27, 22
-PLAY_GREEN = 94                    # its panel MCU address (docs/hardware.md "LED map")
+F4, F5 = 27, 22
+F5_GREEN = 94                    # its panel MCU address (docs/hardware.md "LED map")
 
 
 @unittest.skipUnless(build_app.tools_present(), "tic6x GCC not built (tools/build_tic6x_*.sh)")
@@ -41,7 +41,7 @@ class Check(unittest.TestCase):
             self.assertAlmostEqual(component(right, 32), 0.25, places=2)
             self.assertLess(max(map(abs, left)), 2 ** 20)
 
-            self.press(emu, HOME, 1100)                              # LOAD
+            self.press(emu, F4, 1100)                              # LOAD
             self.press(emu, STEP1 + 7)                               # 256 synth voices: over budget, so capped
             emu.run(200 * MS)
             overruns = emu.word("audio_overruns")
@@ -52,13 +52,13 @@ class Check(unittest.TestCase):
             emu.run(20 * MS)
             self.assertLess(emu.word("audio_cycles_last"), 0.2 * 496_000)
 
-            self.press(emu, HOME, 1100)                              # PANEL: a held key lights its LED
-            emu.key(PLAY, True)
+            self.press(emu, F4, 1100)                              # PANEL: a held key lights its LED
+            emu.key(F5, True)
             emu.run(30 * MS)
-            self.assertEqual(emu.cpu.read(emu.names["led_level"], 144)[PLAY_GREEN], 10)
-            emu.key(PLAY, False)
+            self.assertEqual(emu.cpu.read(emu.names["led_level"], 144)[F5_GREEN], 10)
+            emu.key(F5, False)
             emu.run(30 * MS)
-            self.assertEqual(emu.cpu.read(emu.names["led_level"], 144)[PLAY_GREEN], 0)
+            self.assertEqual(emu.cpu.read(emu.names["led_level"], 144)[F5_GREEN], 0)
             self.assertEqual(emu.report()["app_status"], "APP RUNNING")
 
 

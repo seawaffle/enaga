@@ -52,7 +52,7 @@ extern void (*pad_callback)(int channel, unsigned value);
 void led_set(u8 a, u8 b, u8 c, u8 value);
 
 void keys_init(void);
-u64  keys_scan(void);                 /* 48-bit switch word, bit n = row n / 8, column n % 8; bit 27 is HOME */
+u64  keys_scan(void);                 /* 48-bit switch word, bit n = row n / 8, column n % 8; bit 27 is F4 */
 u64  keys_reset(u32 ms);              /* debouncing starts from the keys held now; returns them */
 u64  keys_poll(u32 ms);               /* the debounced switch word, sampled every 6 ms (keys.c); ms from timer_ms */
 

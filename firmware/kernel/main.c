@@ -10,7 +10,7 @@
  * flight delays the next draw), and the power key held one second switches the unit off. With no app
  * (none found, or one that failed) Enaga shows its own status page. Each pass feeds the watchdog (watchdog.c).
  *
- * Not yet: FUNC at power-on / FUNC + POWER and the Enaga menu, and pad thresholds (raw readings are
+ * Not yet: F1 at power-on / F1 + POWER and the Enaga menu, and pad thresholds (raw readings are
  * delivered). Keys are debounced in keys.c. */
 
 extern char __bss_start[], __bss_end[];

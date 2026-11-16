@@ -1,4 +1,4 @@
-// CHECK: the app for sessions on a unit (docs/hardware.md "Checks on a unit"). Three pages; hold HOME for one
+// CHECK: the app for sessions on a unit (docs/hardware.md "Checks on a unit"). Three pages; hold F4 for one
 // second to go to the next one (the press still counts on the panel page).
 //
 //   AUDIO  STEP 1: 750 Hz left only, STEP 2: 1500 Hz right only, STEP 3: 750 Hz both, STEP 4: off. VALUE: level.
@@ -26,8 +26,8 @@ constexpr int kMaxVoices = 512;
 const char *const kKeyNames[ENAGA_KEY_COUNT] = {
     "PUSH B", "PUSH A", "PUSH C", "PUSH D", "PUSH VALUE", nullptr, nullptr, nullptr,
     "SELECT L", "SELECT R", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-    "OCTAVE L", "UP", "RIGHT", "FUNC", "PROJECT", "MIXER", "PLAY", "OK",
-    "LEFT", "DOWN", "REC", "HOME", "EDIT", "STOP", "CLR", "OCTAVE R",
+    "OCTAVE L", "UP", "RIGHT", "F1", "F3", "F7", "F5", "OK",
+    "LEFT", "DOWN", "F2", "F4", "F8", "F6", "CLR", "OCTAVE R",
     "STEP 1", "STEP 2", "STEP 3", "STEP 4", "STEP 5", "STEP 6", "STEP 7", "STEP 8",
     "STEP 9", "STEP 10", "STEP 11", "STEP 12", "STEP 13", "STEP 14", "STEP 15", "STEP 16",
 };
@@ -100,7 +100,7 @@ public:
     }
 
     void on_key(int key, bool down) override {
-        if (key == ENAGA_KEY_HOME) {
+        if (key == ENAGA_KEY_F4) {
             home_down_ = down;
             if (down) { home_since_ = enaga::ms(); home_used_ = false; }
         }
@@ -161,7 +161,7 @@ public:
         canvas.clear();
         canvas.text(0, 0, "CHECK");
         canvas.text(48, 0, kPages[page_], 10);
-        canvas.text(0, 118, "HOLD HOME: NEXT PAGE", 6);
+        canvas.text(0, 118, "HOLD F4: NEXT PAGE", 6);
         if (page_ == 0) draw_audio(canvas);
         if (page_ == 1) draw_load(canvas);
         if (page_ == 2) draw_panel(canvas);

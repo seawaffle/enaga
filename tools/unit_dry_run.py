@@ -26,11 +26,11 @@ OUT = paths.BUILD / "unit-dry-run"
 MS = 372_000
 BOOT = 300_000_000
 BUDGET = 496_000
-STEP1, HOME = 32, 27
+STEP1, F4 = 32, 27
 GPIO45_OUT = 0x01E26064                    # GPIO banks 4/5 OUT_DATA; bank 4 is the low half
 KEY_NAMES = {0: "PUSH B", 1: "PUSH A", 2: "PUSH C", 3: "PUSH D", 4: "PUSH VALUE", 8: "SELECT L", 9: "SELECT R",
-             16: "OCTAVE L", 17: "UP", 18: "RIGHT", 19: "FUNC", 20: "PROJECT", 21: "MIXER", 22: "PLAY", 23: "OK",
-             24: "LEFT", 25: "DOWN", 26: "REC", 27: "HOME", 28: "EDIT", 29: "STOP", 30: "CLR", 31: "OCTAVE R",
+             16: "OCTAVE L", 17: "UP", 18: "RIGHT", 19: "F1", 20: "F3", 21: "F7", 22: "F5", 23: "OK",
+             24: "LEFT", 25: "DOWN", 26: "F2", 27: "F4", 28: "F8", 29: "F6", 30: "CLR", 31: "OCTAVE R",
              **{STEP1 + n: f"STEP {n + 1}" for n in range(16)}}
 BUTTONS = dict(zip((27, 21, 26, 20, 28, 19, 29, 22, 30, 23), E1.LED_BUTTONS))   # key -> (a, b, c) of its green
 ENCODER_PINS = [((3, 14), (3, 15)), ((3, 12), (3, 10)), ((5, 2), (5, 0)), ((5, 5), (5, 4)), ((5, 7), (5, 8))]
@@ -179,7 +179,7 @@ def main():
                  "left (docs/hardware.md \"Audio\"), so IN L about 250 and IN R about 500")
 
         run.begin(8, "Audio load (LOAD page)")
-        press(emu, HOME, 1100)
+        press(emu, F4, 1100)
         for mode, mode_name in enumerate(("SYNTH", "SAMPLE", "GRAIN")):
             press(emu, STEP1 + mode)
             for preset, voices in zip(range(4, 8), (16, 64, 128, 256)):
@@ -196,8 +196,8 @@ def main():
                           emu.word("audio_overruns") - overruns, emu.word("audio_overruns") - overruns <= 1)
 
         run.begin(9, "Keys and LEDs (PANEL page)")
-        press(emu, HOME, 1100)
-        run.shot(emu, "panel-page", "PANEL page before any key (HOME's hold is the last event)")
+        press(emu, F4, 1100)
+        run.shot(emu, "panel-page", "PANEL page before any key (F4's hold is the last event)")
         for key, name in KEY_NAMES.items():
             emu.key(key, True)
             emu.run(30 * MS)
@@ -211,7 +211,7 @@ def main():
             else:
                 lit = [n for n, v in enumerate(levels) if v not in (0, 0xFF)]   # 0xFF: never written
                 run.check(f"{name}: no LED lit while held", [], lit)
-            if name in ("PUSH VALUE", "PLAY", "STEP 16"):
+            if name in ("PUSH VALUE", "F5", "STEP 16"):
                 run.shot(emu, f"key-{name.lower().replace(' ', '-')}", f"After pressing {name} once")
         for _ in range(2):                                      # a quick double press counts two
             press(emu, STEP1, 20)

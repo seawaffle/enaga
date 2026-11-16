@@ -58,8 +58,8 @@ after set-up. The simulated hand-over gives `CACHE 043 8F>444 FF`; the emulator'
 
 - An update file is a `cmtd` container holding one `mmtd` system image (format and CRC seeds in
   `tools/sysimage.py`); `firmware/build.py` produces `build/firmware/ENAGA_<version>.bin`.
-- **Install:** copy the file to the root of the SD card named `SmplTrek.bin`, hold **HOME** while switching
-  on to reach BOOT MODE, and choose SYSTEM UPDATE. The bootloader checks the file, writes it to flash,
+- **Install:** copy the file to the root of the SD card named `SmplTrek.bin`, hold **F4** (printed HOME on a SmplTrek)
+  while switching on to reach BOOT MODE, and choose SYSTEM UPDATE. The bootloader checks the file, writes it to flash,
   verifies it and asks for a restart.
 - **Recovery:** the same procedure with an official SmplTrek system update restores the original firmware.
   Because Enaga never touches the bootloader or the sound content in flash, that one step is enough.
@@ -83,20 +83,30 @@ number = row x 8 + column, forming a 48-bit switch word:
 
 | Bit | Key | Bit | Key |
 |---|---|---|---|
-| 0 | knob B push | 19 | FUNC |
-| 1 | knob A push | 20 | PROJECT |
-| 2 | knob C push | 21 | MIXER |
-| 3 | knob D push | 22 | PLAY |
+| 0 | knob B push | 19 | F1 (FUNC) |
+| 1 | knob A push | 20 | F3 (PROJECT) |
+| 2 | knob C push | 21 | F7 (MIXER) |
+| 3 | knob D push | 22 | F5 (PLAY) |
 | 4 | VALUE push | 23 | OK |
 | 8 | selection button, left | 24 | left |
 | 9 | selection button, right | 25 | down |
-| 16 | octave left | 26 | REC |
-| 17 | up | 27 | HOME |
-| 18 | right | 28 | EDIT |
-| 29 | STOP | 30 | CLR |
+| 16 | octave left | 26 | F2 (REC) |
+| 17 | up | 27 | F4 (HOME) |
+| 18 | right | 28 | F8 (EDIT) |
+| 29 | F6 (STOP) | 30 | CLR |
 | 31 | octave right | 32-47 | STEP 1-16 |
 
-Bits 5-7 and 10-15 have no switch. The names come from the original firmware's factory test page, which
+Bits 5-7 and 10-15 have no switch. Enaga names the 2 x 4 function block left of OK / CLR F1-F8 in reading
+order, because its printed labels differ between products on the same panel (SmplTrek labels in brackets above;
+Lofi-12 XT and CyDrums print PTN, COPY, PAD, REC, Play, MIX, MUTE there, see smpltrek
+`sdk/docs/cross-flash-button-map.md`):
+
+| | 1st | 2nd | 3rd | 4th |
+|---|---|---|---|---|
+| upper row | F1 (19, FUNC) | F2 (26, REC) | F3 (20, PROJECT) | F4 (27, HOME) |
+| lower row | F5 (22, PLAY) | F6 (29, STOP) | F7 (21, MIXER) | F8 (28, EDIT) |
+
+F1 is func on all three products, and F4 is the key the SmplTrek bootloader tests for BOOT MODE. The names come from the original firmware's factory test page, which
 draws the panel and fills in each button whose bit is set, matched to the manual's layout; they are still
 to be confirmed key by key on a unit. The switches are not debounced in hardware, and how long they bounce is
 unmeasured. Enaga follows the original firmware (`hal/keys.c`; smpltrek claim HW-51): each key is sampled every
@@ -174,10 +184,10 @@ panel wiring.
 
 | Button | Green | | Button | Green |
 |---|---|---|---|---|
-| FUNC | 0,5,0 | | REC | 1,5,0 |
-| HOME | 0,5,2 | | PROJECT | 1,5,2 |
-| MIXER | 0,5,4 | | EDIT | 1,5,4 |
-| STOP | 0,5,6 | | PLAY | 1,5,6 |
+| F1 | 0,5,0 | | F2 | 1,5,0 |
+| F4 | 0,5,2 | | F3 | 1,5,2 |
+| F7 | 0,5,4 | | F8 | 1,5,4 |
+| F6 | 0,5,6 | | F5 | 1,5,6 |
 | CLR | 0,4,6 | | OK | 1,4,6 |
 
 Every button LED is partly confirmed: its green address was seen on the unit (2026-11-14 sweep), red at c + 1
@@ -260,10 +270,10 @@ tick, and measures no time with it.
 Things only a unit can settle, in the order of a session. `python3 -B tools/unit_card.py` stages the files in
 `build/unit-card/` and prints their SHA-256; `python3 -B tools/unit_dry_run.py` walks this list on the emulator
 first (from the simulated cache hand-over) and saves the screen at each step in `build/unit-dry-run/`. The CHECK app is `tests/unit/check` (its header lists every
-control); hold HOME for one second to go to its next page. The speaker stays muted (GP2[9] low, GP2[8] high), so
+control); hold F4 (HOME) for one second to go to its next page. The speaker stays muted (GP2[9] low, GP2[8] high), so
 listen on headphones or the line output. Report each result with what the screen showed.
 
-1. **Install.** A card with only `install/SmplTrek.bin` at its root; HOME held while switching on, SYSTEM UPDATE,
+1. **Install.** A card with only `install/SmplTrek.bin` at its root; F4 (HOME) held while switching on, SYSTEM UPDATE,
    restart. Expected: the ENAGA splash with MCU, AUDIO and CARD, then Enaga's status page with `NO /ENAGA/APPS`.
    A unit stuck on the SONICWARE logo with the power key dead: remove power, then BOOT MODE and the official
    update ("Installing and recovery").

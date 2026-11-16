@@ -16,7 +16,7 @@ The design and plan are in [docs/design.md](docs/design.md); the hardware facts 
 
 class Beep : public enaga::App {
 public:
-    void on_key(int key, bool down) override { if (key == ENAGA_KEY_PLAY) playing_ = down; }
+    void on_key(int key, bool down) override { if (key == ENAGA_KEY_F5) playing_ = down; }
     void audio(const float *, float *out, uint32_t frames) override {   // input unused
         for (uint32_t i = 0; i < frames; i++) {
             float s = 0.0f;
@@ -74,7 +74,7 @@ Not yet recommended: 0.1.0 has not been run on a unit. When it is:
 
 1. Copy `build/firmware/ENAGA_<version>.bin` to the root of the SD card as `SmplTrek.bin`, and an app's
    package to `/ENAGA/APPS/<NAME>/APP.ENA` (8.3 names).
-2. Hold **HOME** while switching on to reach BOOT MODE, and choose SYSTEM UPDATE.
+2. Hold **F4** (HOME on a SmplTrek) while switching on to reach BOOT MODE, and choose SYSTEM UPDATE.
 
 To go back, install an official SmplTrek system update the same way. Enaga never modifies the bootloader or
 the original sounds in flash, so that restores the unit completely. See docs/hardware.md, "Installing and

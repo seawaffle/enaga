@@ -28,15 +28,15 @@ static u8 key_green(unsigned key)       /* a key's two-channel LED: its green ad
     if (key >= ENAGA_KEY_STEP1 && key < ENAGA_KEY_STEP1 + 16) return step_green[key - ENAGA_KEY_STEP1];
     switch (key) {
     case ENAGA_KEY_CLR: return 38;
-    case ENAGA_KEY_FUNC: return 40;
-    case ENAGA_KEY_HOME: return 42;
-    case ENAGA_KEY_MIXER: return 44;
-    case ENAGA_KEY_STOP: return 46;
+    case ENAGA_KEY_F1: return 40;
+    case ENAGA_KEY_F4: return 42;
+    case ENAGA_KEY_F7: return 44;
+    case ENAGA_KEY_F6: return 46;
     case ENAGA_KEY_OK: return 86;
-    case ENAGA_KEY_REC: return 88;
-    case ENAGA_KEY_PROJECT: return 90;
-    case ENAGA_KEY_EDIT: return 92;
-    case ENAGA_KEY_PLAY: return 94;
+    case ENAGA_KEY_F2: return 88;
+    case ENAGA_KEY_F3: return 90;
+    case ENAGA_KEY_F8: return 92;
+    case ENAGA_KEY_F5: return 94;
     default: return NONE;
     }
 }

@@ -18,8 +18,8 @@ Made by the project owner on 2026-11-15.
 2. **No app picker at power-on.** Enaga loads the last app that ran; if none is recorded and exactly one app
    is installed, that one; otherwise it opens the Enaga menu. Apps are switched from the Enaga menu while
    the unit is on, without a reboot.
-3. **The Enaga menu is FUNC + POWER.** While running, pressing POWER while FUNC is held opens it. Holding
-   FUNC while powering on boots straight into it without loading an app (the escape from an app that
+3. **The Enaga menu is F1 + POWER.** While running, pressing POWER while F1 is held opens it. Holding
+   F1 while powering on boots straight into it without loading an app (the escape from an app that
    crashes at start-up). The power key is never delivered to apps.
 4. **Apps are written in C++** (C also works). The boundary between Enaga and an app is a C ABI; the SDK
    provides a header-only C++ layer over it.
@@ -45,12 +45,12 @@ fixed-point slots are hidden).
 
 Power-on sequence (proposal):
 
-1. The bootloader hands over (it is never modified; HOME + POWER still reaches its BOOT MODE, the recovery
+1. The bootloader hands over (it is never modified; F4 + POWER still reaches its BOOT MODE, the recovery
    path, see hardware.md "Installing and recovery").
-2. Enaga takes the power hold, starts the display and the key matrix, and samples FUNC while the power key
-   is still held (the original firmware checks FUNC at about 0.58 s for its factory test mode). The
-   bootloader only tests HOME, so FUNC at power-on is Enaga's to use.
-3. FUNC held: Enaga menu. Otherwise the boot policy in decision 2.
+2. Enaga takes the power hold, starts the display and the key matrix, and samples F1 while the power key
+   is still held (the original firmware checks F1 at about 0.58 s for its factory test mode). The
+   bootloader only tests F4, so F1 at power-on is Enaga's to use.
+3. F1 held: Enaga menu. Otherwise the boot policy in decision 2.
 4. A last app that faults or trips the watchdog during start-up is not auto-loaded on the next boot.
 
 Switching apps while on:
@@ -61,11 +61,11 @@ Switching apps while on:
 4. Discard the app's memory region and heap in one step.
 5. Load the new package, run its static constructors, call `init()`.
 
-FUNC + POWER rules: the menu opens on the POWER press edge while FUNC is down (no wait for release);
-POWER first and then FUNC does nothing; while the menu was opened by the chord, keeping POWER held does
-not start the one-second power-off. When the menu opens the app receives a FUNC release (or an
+F1 + POWER rules: the menu opens on the POWER press edge while F1 is down (no wait for release);
+POWER first and then F1 does nothing; while the menu was opened by the chord, keeping POWER held does
+not start the one-second power-off. When the menu opens the app receives an F1 release (or an
 input-cancel event) and is paused. A plain short POWER press is reserved for Enaga and unused for now.
-POWER held one second with FUNC up switches off.
+POWER held one second with F1 up switches off.
 
 ## Memory
 
@@ -98,8 +98,8 @@ Proposal, grouped by service. Names are illustrative until each service exists.
   mixers, saturation, resamplers; tuned for the C674x so app authors need not know about SPLOOP or cache
   placement. Placement attributes for hot code and data when L2 RAM is available.
 - **Input as events:** pads (press/release with velocity, pressure/aftertouch from the 14-bit panel
-  readings, system-owned thresholds and calibration); keys (down, up, long press, FUNC-shift combinations);
-  encoders (delta with acceleration). Keys and LEDs by logical name (`PLAY`, `pad_led(3)`), never by
+  readings, system-owned thresholds and calibration); keys (down, up, long press, F1-shift combinations);
+  encoders (delta with acceleration). Keys and LEDs by logical name (`F5`, `pad_led(3)`), never by
   switch-word bit or panel MCU address.
 - **Display:** 128 x 128, 4-bit grey, a row-major canvas; Enaga converts to the panel order and sends it by
   DMA. Primitives (lines, rectangles, bitmaps, two or three fonts) and a UI toolkit (menus, parameter
@@ -157,7 +157,7 @@ Proposal, grouped by service. Names are illustrative until each service exists.
 | **E0** | C++ toolchain; app-side C++ runtime; package format; loader that runs constructors | a C++ app with globals, virtuals and `new` runs from a package (done) |
 | **E1** | Kernel: audio callback, display DMA, event loop, exception handling and watchdog, cache/L2 set-up | device load test: measured audio headroom with caches on |
 | **E2** | Audio API and DSP library, asynchronous file I/O, sample loading and streaming | one real instrument app |
-| **E3** | Enaga menu, boot policy, FUNC escape, app switching, settings | switch between two apps repeatedly on the unit |
+| **E3** | Enaga menu, boot policy, F1 escape, app switching, settings | switch between two apps repeatedly on the unit |
 | **E4** | UI toolkit, MIDI, SDK packaging and documentation | an outside developer builds the template app from the docs |
 | **E5 / 1.0** | USB (mass storage, MIDI), API freeze, release | public release |
 
@@ -170,8 +170,8 @@ a unit", the CHECK app in `tests/unit/check`, `tools/unit_card.py`) and not yet 
 
 ## Open items
 
-- On the unit: FUNC sampled during the power-key hold; the bootloader passes control normally with FUNC
-  held; FUNC + POWER mid-run; power-key bounce; how long the matrix keys bounce (the 6 ms sampling and
+- On the unit: F1 sampled during the power-key hold; the bootloader passes control normally with F1
+  held; F1 + POWER mid-run; power-key bounce; how long the matrix keys bounce (the 6 ms sampling and
   two-sample release follow the original firmware, not a measurement).
 - LED map: 53 addresses known only from the code, 24 seen on another channel of their LED (docs/hardware.md
   "LED map"; smpltrek session L1); the level-to-brightness steps. Whether the unit has a hardware MIDI port;
@@ -336,3 +336,12 @@ a unit", the CHECK app in `tests/unit/check`, `tools/unit_card.py`) and not yet 
   The screens found what the checks could not: the font had no `>` or `%` (both added to `hal/gfx.c`, after `Z`
   so the `?` fallback keeps its index), and PEAK on the LOAD page stayed at the cap's one over-budget block, so
   it was replaced by LOAD in percent. Received audio follows the transmit side's belief: slot 1 reads as left.
+
+### Function keys named F1-F8 (2026-11-16)
+
+- The 2 x 4 function block left of OK / CLR is printed differently on the SmplTrek, Lofi-12 XT and CyDrums, which
+  share the panel, so Enaga names it by position: F1-F4 the upper row, F5-F8 the lower (`ENAGA_KEY_F1`-`F8`;
+  docs/hardware.md "Keys" maps them to bits and SmplTrek labels). The old names (`ENAGA_KEY_FUNC`, `HOME`, `REC`,
+  `PROJECT`, `PLAY`, `STOP`, `MIXER`, `EDIT`) are gone; OK, CLR, the D-pad, STEP and the knobs keep theirs.
+- The menu chord is F1 + POWER (func on all three products); BOOT MODE is F4 + POWER, the SmplTrek bootloader's
+  HOME. The CHECK app shows the new names and changes page on F4.

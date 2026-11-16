@@ -4,8 +4,8 @@
 #include <enaga/app.hpp>
 
 namespace {
-constexpr int kButtons[] = {ENAGA_KEY_HOME, ENAGA_KEY_MIXER, ENAGA_KEY_REC, ENAGA_KEY_PROJECT, ENAGA_KEY_EDIT,
-                            ENAGA_KEY_FUNC, ENAGA_KEY_STOP, ENAGA_KEY_PLAY, ENAGA_KEY_CLR, ENAGA_KEY_OK,
+constexpr int kButtons[] = {ENAGA_KEY_F4, ENAGA_KEY_F7, ENAGA_KEY_F2, ENAGA_KEY_F3, ENAGA_KEY_F8,
+                            ENAGA_KEY_F1, ENAGA_KEY_F6, ENAGA_KEY_F5, ENAGA_KEY_CLR, ENAGA_KEY_OK,
                             ENAGA_KEY_OCTAVE_LEFT};   // the last has no LED
 constexpr int kWalk = 15 + 4 + 16 + 11;
 
