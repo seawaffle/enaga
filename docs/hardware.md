@@ -258,7 +258,8 @@ tick, and measures no time with it.
 ## Checks on a unit
 
 Things only a unit can settle, in the order of a session. `python3 -B tools/unit_card.py` stages the files in
-`build/unit-card/` and prints their SHA-256. The CHECK app is `tests/unit/check` (its header lists every
+`build/unit-card/` and prints their SHA-256; `python3 -B tools/unit_dry_run.py` walks this list on the emulator
+first (from the simulated cache hand-over) and saves the screen at each step in `build/unit-dry-run/`. The CHECK app is `tests/unit/check` (its header lists every
 control); hold HOME for one second to go to its next page. The speaker stays muted (GP2[9] low, GP2[8] high), so
 listen on headphones or the line output. Report each result with what the screen showed.
 
@@ -277,9 +278,11 @@ listen on headphones or the line output. Report each result with what the screen
 6. **Channels (AUDIO page):** STEP 1 gives 750 Hz in the **left** ear only, STEP 2 1500 Hz in the **right** only,
    STEP 3 750 Hz in both, STEP 4 off; VALUE changes the level. A swap means "Audio", Channels, is wrong.
 7. **Input (AUDIO page):** a signal into INPUT L, then INPUT R (or the built-in microphone, if the input chain
-   uses it) moves IN L / IN R. Report the readings with nothing connected, too.
+   uses it) moves IN L / IN R (per mille of full scale). A swap means the receive side's channel belief ("Audio")
+   is wrong. Report the readings with nothing connected, too.
 8. **Audio load with caches (LOAD page), the E1 exit measurement:** STEP 1 (SYNTH), then STEP 5, 6, 7, 8 (16, 64,
-   128, 256 voices); wait two seconds at each and note LOAD, CYC/VOICE and FIT 90%, and whether CAP appears.
+   128, 256 voices); wait two seconds at each and note LOAD (percent of the block budget), CYC/VOICE and
+   FIT AT 90%, and whether CAP appears.
    Repeat with STEP 2 (SAMPLE) and STEP 3 (GRAIN). For comparison, the emulator (no caches, no bus latency) gives
    about 2,500 cycles per voice per block for each workload and fits about 177 voices; the unit's SAMPLE and
    GRAIN against SYNTH show what DDR access costs.

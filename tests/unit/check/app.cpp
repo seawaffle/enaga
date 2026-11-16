@@ -5,9 +5,9 @@
 //          IN L/R: input peaks over the last half second, per mille of full scale.
 //   LOAD   STEP 1: SYNTH voices (saw + biquad), STEP 2: SAMPLE voices (16-bit playback streaming through an
 //          8 MiB bank in DDR), STEP 3: GRAIN voices (as SAMPLE, but each voice jumps to a random place every
-//          block). STEP 5-8: 16, 64, 128, 256 voices; VALUE: voices +-1, A: +-8. Shows the highest load in the last second (per mille of the block
-//          budget), cycles per voice (the load / voices, Enaga's own overhead included), and the voices that
-//          would fit in 90 % of the budget at that rate. A block over 90 % cuts the voices to fit 85 % (CAP):
+//          block). STEP 5-8: 16, 64, 128, 256 voices; VALUE: voices +-1, A: +-8. Shows the highest load in the
+//          last second (percent of the block budget), cycles per voice (the load / voices, Enaga's own overhead
+//          included), and the voices that would fit in 90 % of the budget at that rate. A block over 90 % cuts the voices to fit 85 % (CAP):
 //          past 100 % the callback would take every cycle and the main loop, keys included, would stop.
 //   PANEL  the last key by name and bit with its press count (one press must count one: bounce), every encoder's
 //          position, the last pad and its raw reading. A held key lights its LED green; a pad lights green by
@@ -236,10 +236,10 @@ private:
         static const char *const kModes[3] = {"SYNTH", "SAMPLE", "GRAIN"};
         const uint32_t load = load_shown_, wanted = voices_, n = wanted < cap_ ? wanted : cap_;
         canvas.text(0, 16, (Line() << kModes[mode_] << " " << n << (n < wanted ? " CAP" : " VOICES")).str());
-        canvas.text(0, 28, (Line() << "LOAD " << load << " PEAK " << enaga::audio_load_peak()).str());
+        canvas.text(0, 28, (Line() << "LOAD " << load / 10u << "." << load % 10u << "%").str());
         if (n && load) {
             canvas.text(0, 40, (Line() << "CYC/VOICE " << load * (kBlockCycles / 1000u) / n).str());
-            canvas.text(0, 52, (Line() << "FIT 90% " << n * 900u / load).str());
+            canvas.text(0, 52, (Line() << "FIT AT 90% " << n * 900u / load).str());
         }
         canvas.text(0, 68, "STEP 1SYN 2SMP 3GRN", 6);
         canvas.text(0, 78, "5-8: 16 64 128 256", 6);

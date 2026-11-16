@@ -330,3 +330,9 @@ a unit", the CHECK app in `tests/unit/check`, `tools/unit_card.py`) and not yet 
   workloads; GCC's saw + biquad loop is about 39 cycles a frame.
 - `tests/test_check.py` runs CHECK on the emulator: the tones' channels, the cap holding with keys still served,
   and a held key's LED. `tools/unit_card.py` stages the update and the app with their SHA-256.
+- `tools/unit_dry_run.py` walks the whole checklist on the emulator from the simulated BOOT 1.0.17 hand-over: 139
+  checks (status texts, the cache line, block rate, power-off releasing GP4[11], channel separation, the load cap
+  per workload, every key's LED, encoders through their GPIO phases, all 15 pads' LEDs) and a screen per step.
+  The screens found what the checks could not: the font had no `>` or `%` (both added to `hal/gfx.c`, after `Z`
+  so the `?` fallback keeps its index), and PEAK on the LOAD page stayed at the cap's one over-budget block, so
+  it was replaced by LOAD in percent. Received audio follows the transmit side's belief: slot 1 reads as left.

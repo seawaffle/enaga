@@ -106,7 +106,7 @@ Without `ENAGA_EMULATOR` the tests are skipped. `tools/emulate.py` writes the la
 | `firmware/` | Enaga itself: `hal/` drivers, `kernel/` (interrupts, audio engine, app host, exceptions, watchdog, main loop), `start.s`, `link.ld`, `build.py` |
 | `examples/` | `tone` (STEP 1-8 play 750 Hz x step); `cxxcheck` (exercises the C++ runtime) |
 | `tests/` | `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board; `test_check.py` and `unit/check`: the CHECK app for sessions on a unit |
-| `tools/` | `build_app.py`, `emulate.py`, `unit_card.py` (files for a session on a unit), `sysimage.py` (the update-file format), `paths.py`, toolchain build scripts |
+| `tools/` | `build_app.py`, `emulate.py`, `unit_card.py` and `unit_dry_run.py` (files for a session on a unit, and the session walked on the emulator), `sysimage.py` (the update-file format), `paths.py`, toolchain build scripts |
 | `docs/` | `design.md` (decisions, architecture, plan, log), `hardware.md` (the hardware notes) |
 
 ## Licence

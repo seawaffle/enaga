@@ -95,8 +95,10 @@ static const u8 font[][5] = {
     G(0x63, 0x14, 0x08, 0x14, 0x63),   /* X */
     G(0x07, 0x08, 0x70, 0x08, 0x07),   /* Y */
     G(0x61, 0x51, 0x49, 0x45, 0x43),   /* Z */
+    G(0x23, 0x13, 0x08, 0x64, 0x62),   /* % */
+    G(0x00, 0x41, 0x22, 0x14, 0x08),   /* > */
 };
-static const char font_chars[] = " !#+-./0123456789:=?ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+static const char font_chars[] = " !#+-./0123456789:=?ABCDEFGHIJKLMNOPQRSTUVWXYZ%>";
 
 static const u8 *glyph(char c)
 {
