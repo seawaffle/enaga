@@ -300,11 +300,12 @@ a unit", the CHECK app in `tests/unit/check`, `tools/unit_card.py`) and not yet 
 
 - Enaga had relied on the bootloader having configured the caches. smpltrek's trace and simulation of BOOT 1.0.17
   (docs/hardware.md "Boot") show otherwise: it leaves L2 all RAM, L1D half cache, MAR 196-198 (48 MiB of the app
-  heap) uncached, and does not write back the image it copied through L1D before branching. The original
-  firmware's configuration comes from its own SYS/BIOS start-up.
+  heap) uncached, and does no cache maintenance before branching. The original firmware's configuration comes
+  from its own SYS/BIOS start-up.
 - The first instructions of `start.s` record the cache registers (into `.data`, since bss is cleared later), write
-  back and invalidate L1D and invalidate L1P, so the rest of the start-up code is fetched from what DDR holds.
-  The fetches before that cannot be protected; `_start` is at the start of the image, which the copy wrote first.
+  back and invalidate L1D and invalidate L1P, so nothing cached from before the jump is relied on. The image
+  itself is in DDR at entry: smpltrek's code reading shows the bootloader reads flash by EDMA, behind the caches,
+  with no L2 cache (docs/hardware.md "Boot").
 - `cache_setup()` (`hal/cache.c`), right after bss is cleared: L1D and L2 written back again, L2, L1P and L1D all
   cache (mode 4 each, read back), and every writable MAR (16-255) set: cacheable for DDR only. L1D is all cache
   rather than the original's half, since Enaga uses no on-chip RAM. The log's second line gives the modes and DDR

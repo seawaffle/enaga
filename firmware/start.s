@@ -1,8 +1,8 @@
 ; Enaga entry, interrupt vectors and the interrupt context switch (C674x, SPRUFE8B chapter 5).
 ;
-; The bootloader has copied the image to its load address and branches to _start with DDR running; it leaves L2
-; all RAM, L1D half cache and part of DDR uncached, and does not write back the image it copied through L1D
-; (docs/hardware.md "Boot"). _start sets the stack, keeps interrupts off, records the cache registers, writes back
+; The bootloader has copied the image to its load address by EDMA and branches to _start with DDR running; it
+; leaves L2 all RAM, L1D half cache and part of DDR uncached, and does no cache maintenance (docs/hardware.md
+; "Boot"). _start sets the stack, keeps interrupts off, records the cache registers, writes back
 ; and invalidates L1D and invalidates L1P, and calls main, which sets the caches (hal/cache.c); the kernel points
 ; ISTP at `vectors` and enables what it uses (kernel/irq.c).
 ;
@@ -52,8 +52,8 @@ mar_copy:
 	stw .D1T2 b0, *a4++
 	[a1] b .S1 mar_copy
 	nop 5
-	mvkl .S2 0x01845044, b4         ; L1DWBINV: the bootloader copied this image through L1D and does not
-	mvkh .S2 0x01845044, b4         ; write it back before branching here
+	mvkl .S2 0x01845044, b4         ; L1DWBINV: nothing L1D held before the jump is relied on (the image came
+	mvkh .S2 0x01845044, b4         ; by EDMA, behind the caches)
 	mvk .S2 1, b0
 	stw .D2T2 b0, *b4
 l1d_wait:

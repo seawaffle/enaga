@@ -18,7 +18,9 @@ TLV320AIC3106 data sheet (SLAS509).
   shared RAM at `0x80000000`.
 - **SPI flash:** two 16 MiB NOR chips on SPI0. The first 256 KiB of chip 0 hold the bootloader and the next
   4 MiB the system image; the rest holds the original firmware's sounds and settings. Enaga does not write
-  either chip.
+  either chip, and does not read them yet. The original firmware and bootloader read them by EDMA (code reading,
+  "Boot"); if Enaga does too, it must invalidate the destination range before the CPU reads it, since the DMA
+  writes DDR behind the caches.
 
 ## Boot
 
@@ -33,9 +35,16 @@ showing the logo, with the power key dead: remove the batteries or power to reco
 1.0.17's own cache start-up (smpltrek): at the jump L2CFG = 0 (L2 all RAM, no L2 cache), L1PCFG = 4 (32 KiB
 L1P cache), L1DCFG = 3 (16 KiB L1D cache, 16 KiB L1D RAM at `0x11F00000`), and MAR 17, 128, 192-195 and 199
 cacheable, MAR 196-198 (`0xC4000000`-`0xC6FFFFFF`) not. The bootloader does not write back or invalidate any
-cache before branching, so the end of the image it copied may still be dirty in L1D, and it uses neither L2 nor
-L1D as RAM (its code, data and stack are in DDR at `0xC7xxxxxx`). The original firmware's configuration under
-"Processor and memory" is set by its own start-up, not by the bootloader.
+cache before branching, and it uses neither L2 nor L1D as RAM (its code, data and stack are in DDR at
+`0xC7xxxxxx`). The original firmware's configuration under "Processor and memory" is set by its own start-up,
+not by the bootloader.
+
+**How the image reaches DDR (code reading, smpltrek).** The flash is read by EDMA, not by the CPU: receive on
+event 14 from SPIBUF, transmit on event 15 into SPIDAT1, SPIINT0 DMAREQEN, completion interrupt on the receive
+channel; the SPI driver does no cache maintenance. So the system image is written to DDR without passing through
+the CPU's caches, and with no L2 cache at the jump nothing of it is held in L2: Enaga's image is in DDR when it
+starts. Lines the caches hold from before (L1P, L1D) are still not to be trusted, which is why `start.s`
+invalidates L1P and writes back and invalidates L1D first.
 
 So Enaga trusts none of it. The first instructions of `start.s` record L2CFG, L1PCFG, L1DCFG and MAR 192-199,
 write back and invalidate all of L1D and invalidate L1P; `cache_setup` (`hal/cache.c`) then makes L2, L1P and
