@@ -29,12 +29,21 @@ from `0xC7020000`-`0xC70B0000` while loading, so an image must not load there; t
 from `0xC0000000`, which is where Enaga loads too. A system image that never takes over leaves the unit on,
 showing the logo, with the power key dead: remove the batteries or power to recover, then use BOOT MODE.
 
-What the bootloader leaves in the cache registers is not known (the original firmware's configuration, under
-"Processor and memory", is set by its own start-up), so Enaga sets L1P, L1D and L2 all cache and DDR cacheable
-(MAR 192-199) before anything else (`hal/cache.c`). Its log's second line records both states:
-`CACHE 443 00>444 FF` is L2, L1P and L1D modes (4 = all cache, 3 = 16 KiB) and the PC bits of MAR 192-199 in
-hex (bit n = MAR 192+n), as handed over, then after set-up. Whether the bootloader writes back the image it
-copied before branching to it is unknown too; Enaga could not repair that afterwards.
+**Cache state at entry (simulated, not yet seen on a unit).** From a static trace and simulation of BOOT
+1.0.17's own cache start-up (smpltrek): at the jump L2CFG = 0 (L2 all RAM, no L2 cache), L1PCFG = 4 (32 KiB
+L1P cache), L1DCFG = 3 (16 KiB L1D cache, 16 KiB L1D RAM at `0x11F00000`), and MAR 17, 128, 192-195 and 199
+cacheable, MAR 196-198 (`0xC4000000`-`0xC6FFFFFF`) not. The bootloader does not write back or invalidate any
+cache before branching, so the end of the image it copied may still be dirty in L1D, and it uses neither L2 nor
+L1D as RAM (its code, data and stack are in DDR at `0xC7xxxxxx`). The original firmware's configuration under
+"Processor and memory" is set by its own start-up, not by the bootloader.
+
+So Enaga trusts none of it. The first instructions of `start.s` record L2CFG, L1PCFG, L1DCFG and MAR 192-199,
+write back and invalidate all of L1D and invalidate L1P; `cache_setup` (`hal/cache.c`) then makes L2, L1P and
+L1D all cache and writes every MAR from 16 to 255 (0-15 are read-only): cacheable for DDR (192-199), not
+cacheable everywhere else. The log's second line shows both states: L2, L1P and L1D modes (4 = all cache,
+3 = 16 KiB, 0 = none) and the PC bits of MAR 192-199 in hex (bit n = MAR 192+n), as recorded at entry and
+after set-up. The simulated hand-over gives `CACHE 043 8F>444 FF`; the emulator's own hand-over gives
+`CACHE 443 00>444 FF`.
 
 ## Installing and recovery
 
@@ -236,3 +245,11 @@ Peripherals are powered through the two power and sleep controllers (PSC0 at `0x
 (SPI1), 12 (UART1). I2C0 has no PSC module and runs from the 24 MHz oscillator. TIMER64P0 is believed to
 count at 24 MHz (**unconfirmed**); Enaga gives it a 240,000-count period, 10 ms if so, for the watchdog
 tick, and measures no time with it.
+
+## Checks on a unit
+
+Things only a unit can settle, each with how to read the answer.
+
+- **Cache state at entry** (simulated above): the second log line on Enaga's status page. Expected
+  `CACHE 043 8F>444 FF`; anything else before the `>` means the bootloader differs from the simulation. After
+  the `>` it must read `444 FF`.

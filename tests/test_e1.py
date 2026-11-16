@@ -26,7 +26,7 @@ BOOT = 300_000_000          # past card, app load and audio start
 STEP1 = 32
 BLOCK_CYCLES = 64 * 372_000_000 // 48_000
 MS = 372_000
-CACHE_LOG = "CACHE 443 00>444 FF"   # handed L1D half RAM and DDR uncached (emulator profile 1); read back after set-up
+CACHE_LOG = "CACHE 443 00>444 FF"   # the emulator's hand-over (L1D half RAM, DDR uncached), then after set-up
 
 
 def samples(emu):
@@ -63,6 +63,23 @@ class E1(unittest.TestCase):
             self.assertTrue(all(v == 0 for v in samples(emu)[-4096:]))
             self.assertEqual(report["log"], ["ENAGA 0.1.0", CACHE_LOG])
             self.assertGreater(report["oled"]["complete_frames"], 0)
+
+    def test_cache_set_up_from_the_bootloaders_hand_over(self):
+        # BOOT 1.0.17's state at the jump, from smpltrek's static trace and simulation (docs/hardware.md "Boot").
+        cacheable = {17, 128, 192, 193, 194, 195, 199}
+        with Emulation() as emu:
+            put = lambda address, value: emu.cpu.write(address, value.to_bytes(4, "little"))
+            get = lambda address: int.from_bytes(emu.cpu.read(address, 4), "little")
+            put(0x01840000, 0)
+            put(0x01840020, 4)
+            put(0x01840040, 3)
+            for n in range(16, 256):
+                put(0x01848000 + 4 * n, int(n in cacheable))
+            self.assertIsNone(emu.run(BOOT)["error"])
+            self.assertEqual(emu.report()["log"][:2], ["ENAGA 0.1.0", "CACHE 043 8F>444 FF"])
+            self.assertEqual([get(0x01840000) & 7, get(0x01840020), get(0x01840040)], [4, 4, 4])
+            self.assertEqual([n for n in range(16, 256) if get(0x01848000 + 4 * n)], list(range(192, 200)))
+            self.assertGreater(emu.report()["audio_blocks"], 100)
 
     def test_tone_app_plays_requested_note(self):
         with Emulation(ENAGA / "examples" / "tone") as emu:

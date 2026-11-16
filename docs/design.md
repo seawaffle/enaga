@@ -177,9 +177,8 @@ cache line in the log, an audible tone on the expected channel, the real audio l
   "LED map"; smpltrek session L1); the level-to-brightness steps. Whether the unit has a hardware MIDI port;
   physical left/right channel routing; real audio CPU headroom with caches; the key names, confirmed key by key
   on a unit.
-- The L2 split between cache and RAM. What the bootloader hands over in the cache registers, and whether it
-  writes back the image it copied before branching (Enaga's first fetches depend on that; the log's `CACHE`
-  line shows the registers on a unit).
+- The L2 split between cache and RAM. The bootloader's cache state at entry is simulated only (docs/hardware.md
+  "Checks on a unit").
 - USB stack: the C6748's USB0 is a Mentor MUSB controller; a TinyUSB port (TinyUSB has a MUSB driver for
   other TI parts) is plausible and unverified.
 - A fault in Enaga code called by an app (a host function given a bad pointer) currently counts as a kernel
@@ -299,15 +298,19 @@ cache line in the log, an audible tone on the expected channel, the real audio l
 
 ### E1 cache configuration (2026-11-15)
 
-- Enaga had relied on the bootloader having configured the caches, but nothing showed what the bootloader leaves:
-  the original firmware's configuration (L2 and L1P all cache, L1D 16 KiB cache + 16 KiB RAM, MAR 192-199 set)
-  comes from its own SYS/BIOS start-up, and the emulator's hand-over has DDR uncached. If DDR were left uncached
-  on a unit, every audio figure would be meaningless.
-- `cache_setup()` (`hal/cache.c`) runs right after bss is cleared: a global write-back-invalidate of L1D and L2,
-  then L2, L1P and L1D all cache (mode 4 each, read back), then the PC bit of MAR 192-199 (all 128 MiB of DDR).
-  L1D is all cache rather than the original's half, since Enaga uses no on-chip RAM. The log's second line,
-  `CACHE 443 00>444 FF` on the emulator, gives the L2, L1P and L1D modes and the DDR MAR bits as handed over and
-  after set-up (the second half read back from the registers).
-- The emulator keeps these registers but models no caches and does not record them in its MMIO trace, so the test
-  is the logged read-back (leaving `cache_setup` out gives `443 00>443 00` and fails); the maintenance order is
-  only reviewed against SPRUFK5A/SPRUG82, not tested.
+- Enaga had relied on the bootloader having configured the caches. smpltrek's trace and simulation of BOOT 1.0.17
+  (docs/hardware.md "Boot") show otherwise: it leaves L2 all RAM, L1D half cache, MAR 196-198 (48 MiB of the app
+  heap) uncached, and does not write back the image it copied through L1D before branching. The original
+  firmware's configuration comes from its own SYS/BIOS start-up.
+- The first instructions of `start.s` record the cache registers (into `.data`, since bss is cleared later), write
+  back and invalidate L1D and invalidate L1P, so the rest of the start-up code is fetched from what DDR holds.
+  The fetches before that cannot be protected; `_start` is at the start of the image, which the copy wrote first.
+- `cache_setup()` (`hal/cache.c`), right after bss is cleared: L1D and L2 written back again, L2, L1P and L1D all
+  cache (mode 4 each, read back), and every writable MAR (16-255) set: cacheable for DDR only. L1D is all cache
+  rather than the original's half, since Enaga uses no on-chip RAM. The log's second line gives the modes and DDR
+  MAR bits at entry and after set-up.
+- The emulator keeps these registers but models no caches; its own hand-over is L2 all cache with DDR uncached.
+  The new test writes the simulated BOOT 1.0.17 state into the registers before the first instruction and checks
+  the log (`CACHE 043 8F>444 FF`) and every register afterwards; keeping the bootloader's MAR 17 and 128 fails it,
+  as does leaving `cache_setup` out. The cache operations themselves are not observable there (no MMIO trace of
+  this block), so their order is reviewed against SPRUFK5A/SPRUG82 only.

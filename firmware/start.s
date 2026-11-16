@@ -1,8 +1,10 @@
 ; Enaga entry, interrupt vectors and the interrupt context switch (C674x, SPRUFE8B chapter 5).
 ;
-; The bootloader has copied the image to its load address and branches to _start with DDR running and the
-; caches in an unknown state (docs/hardware.md "Boot"; main sets them, hal/cache.c). _start sets the stack, keeps
-; interrupts off and calls main; the kernel points ISTP at `vectors` and enables what it uses (kernel/irq.c).
+; The bootloader has copied the image to its load address and branches to _start with DDR running; it leaves L2
+; all RAM, L1D half cache and part of DDR uncached, and does not write back the image it copied through L1D
+; (docs/hardware.md "Boot"). _start sets the stack, keeps interrupts off, records the cache registers, writes back
+; and invalidates L1D and invalidates L1P, and calls main, which sets the caches (hal/cache.c); the kernel points
+; ISTP at `vectors` and enables what it uses (kernel/irq.c).
 ;
 ; Each maskable vector pushes B0/B1, loads the interrupt number into B1 and branches to isr_common, which
 ; saves every register the C calling convention lets enaga_irq clobber (A0-A9, A16-A31, B0-B9, B16-B31) plus
@@ -29,6 +31,47 @@ _start:
 	mvc .S2 csr, b0
 	and .L2 -2, b0, b0              ; GIE off until the kernel has its handlers in place
 	mvc .S2 b0, csr
+	mvkl .S1 cache_at_entry, a4     ; the cache registers as the bootloader left them, for the log (hal/cache.c)
+	mvkh .S1 cache_at_entry, a4
+	mvkl .S2 0x01840000, b4
+	mvkh .S2 0x01840000, b4
+	ldw .D2T2 *b4, b0               ; L2CFG
+	ldw .D2T2 *+b4[8], b1           ; L1PCFG (+0x20)
+	ldw .D2T2 *+b4[16], b2          ; L1DCFG (+0x40)
+	nop 4
+	stw .D1T2 b0, *a4++
+	stw .D1T2 b1, *a4++
+	stw .D1T2 b2, *a4++
+	mvkl .S2 0x01848300, b4         ; MAR 192-199
+	mvkh .S2 0x01848300, b4
+	mvk .S1 8, a1
+mar_copy:
+	ldw .D2T2 *b4++, b0
+	sub .L1 a1, 1, a1
+	nop 3
+	stw .D1T2 b0, *a4++
+	[a1] b .S1 mar_copy
+	nop 5
+	mvkl .S2 0x01845044, b4         ; L1DWBINV: the bootloader copied this image through L1D and does not
+	mvkh .S2 0x01845044, b4         ; write it back before branching here
+	mvk .S2 1, b0
+	stw .D2T2 b0, *b4
+l1d_wait:
+	ldw .D2T2 *b4, b0
+	nop 4
+	and .L2 1, b0, b0
+	[b0] b .S2 l1d_wait
+	nop 5
+	mvkl .S2 0x01845028, b4         ; L1PINV: from here on, code is fetched from what DDR now holds
+	mvkh .S2 0x01845028, b4
+	mvk .S2 1, b0
+	stw .D2T2 b0, *b4
+l1p_wait:
+	ldw .D2T2 *b4, b0
+	nop 4
+	and .L2 1, b0, b0
+	[b0] b .S2 l1p_wait
+	nop 5
 	mvkl .S1 main, a3
 	mvkh .S1 main, a3
 	b .S2X a3

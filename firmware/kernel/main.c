@@ -160,11 +160,9 @@ void kernel_loop(void)
 void main(void)
 {
     char *p;
-    u32 handed_over;
     power_hold();
     tsc_enable();
     for (p = __bss_start; p < __bss_end; p++) *p = 0;
-    handed_over = cache_config();
     cache_setup();
     irq_init();
     exceptions_enable();
@@ -196,7 +194,7 @@ void main(void)
     last_keys = keys_reset(timer_ms());       /* keys held through start-up do not become events */
     irq_global_enable();                      /* audio blocks start being serviced (silence until an app) */
     log_line("ENAGA " ENAGA_VERSION);
-    log_cache(handed_over, cache_config());
+    log_cache(cache_entry_config(), cache_config());
     watchdog_start();
     apps_load_first();
     kernel_loop();
