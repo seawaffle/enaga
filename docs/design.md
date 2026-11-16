@@ -165,8 +165,8 @@ Proposal, grouped by service. Names are illustrative until each service exists.
 
 E0 is complete. E1 has its kernel, audio engine, display DMA and exception handling, all tested on the
 emulator; nothing has run on a unit yet. The watchdog, key debouncing and the start-up cache configuration are in
-place (emulator-tested). Remaining for E1: the first session on the unit (install 0.1.0, confirm start-up and the
-cache line in the log, an audible tone on the expected channel, the real audio load with caches).
+place (emulator-tested). Remaining for E1: the first session on the unit, prepared (docs/hardware.md "Checks on
+a unit", the CHECK app in `tests/unit/check`, `tools/unit_card.py`) and not yet run.
 
 ## Open items
 
@@ -314,3 +314,18 @@ cache line in the log, an audible tone on the expected channel, the real audio l
   the log (`CACHE 043 8F>444 FF`) and every register afterwards; keeping the bootloader's MAR 17 and 128 fails it,
   as does leaving `cache_setup` out. The cache operations themselves are not observable there (no MMIO trace of
   this block), so their order is reviewed against SPRUFK5A/SPRUG82 only.
+
+### First unit session prepared (2026-11-15)
+
+- `tests/unit/check` (CHECK) is one app for the whole session, since Enaga loads only the first app it finds:
+  an AUDIO page (left-only, right-only and both tones, input peaks), a LOAD page (SYNTH, SAMPLE and GRAIN voice
+  workloads, 8 MiB sample bank in DDR, cycles per voice and voices that fit) and a PANEL page (key names and press
+  counts for the bounce check, encoder positions, pad readings; held keys and pads light their LEDs). Pages change
+  on HOME held one second.
+- Overloading the callback past its budget took every cycle: the main loop, and so key presses, stopped, and the
+  watchdog would have dropped the app. The LOAD page caps itself from the audio side: a block over 90 % cuts the
+  voices to fit 85 % (one overrun at the step), which also makes FIT a direct reading.
+- Emulator baseline (no caches or bus latency): about 2,500 cycles per voice per 64-frame block for all three
+  workloads; GCC's saw + biquad loop is about 39 cycles a frame.
+- `tests/test_check.py` runs CHECK on the emulator: the tones' channels, the cap holding with keys still served,
+  and a held key's LED. `tools/unit_card.py` stages the update and the app with their SHA-256.

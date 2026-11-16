@@ -248,8 +248,39 @@ tick, and measures no time with it.
 
 ## Checks on a unit
 
-Things only a unit can settle, each with how to read the answer.
+Things only a unit can settle, in the order of a session. `python3 -B tools/unit_card.py` stages the files in
+`build/unit-card/` and prints their SHA-256. The CHECK app is `tests/unit/check` (its header lists every
+control); hold HOME for one second to go to its next page. The speaker stays muted (GP2[9] low, GP2[8] high), so
+listen on headphones or the line output. Report each result with what the screen showed.
 
-- **Cache state at entry** (simulated above): the second log line on Enaga's status page. Expected
-  `CACHE 043 8F>444 FF`; anything else before the `>` means the bootloader differs from the simulation. After
-  the `>` it must read `444 FF`.
+1. **Install.** A card with only `install/SmplTrek.bin` at its root; HOME held while switching on, SYSTEM UPDATE,
+   restart. Expected: the ENAGA splash with MCU, AUDIO and CARD, then Enaga's status page with `NO /ENAGA/APPS`.
+   A unit stuck on the SONICWARE logo with the power key dead: remove power, then BOOT MODE and the official
+   update ("Installing and recovery").
+2. **Cache state at entry** (simulated under "Boot"): the status page's second log line. Expected
+   `CACHE 043 8F>444 FF`; anything else before the `>` means the bootloader differs from the simulation. After
+   the `>` it must read `444 FF`.
+3. **Audio engine with no app:** on the status page, AUDIO shows status 0 and a block count that keeps rising;
+   LOAD shows the peak (per mille) and 0 overruns. Report both numbers after about a minute.
+4. **Power off:** POWER held one second shows BYE and the unit switches off. Note whether a short press does
+   anything (it should not).
+5. **App start:** copy `app/ENAGA` to the card, switch on. Expected: the CHECK app's AUDIO page.
+6. **Channels (AUDIO page):** STEP 1 gives 750 Hz in the **left** ear only, STEP 2 1500 Hz in the **right** only,
+   STEP 3 750 Hz in both, STEP 4 off; VALUE changes the level. A swap means "Audio", Channels, is wrong.
+7. **Input (AUDIO page):** a signal into INPUT L, then INPUT R (or the built-in microphone, if the input chain
+   uses it) moves IN L / IN R. Report the readings with nothing connected, too.
+8. **Audio load with caches (LOAD page), the E1 exit measurement:** STEP 1 (SYNTH), then STEP 5, 6, 7, 8 (16, 64,
+   128, 256 voices); wait two seconds at each and note LOAD, CYC/VOICE and FIT 90%, and whether CAP appears.
+   Repeat with STEP 2 (SAMPLE) and STEP 3 (GRAIN). For comparison, the emulator (no caches, no bus latency) gives
+   about 2,500 cycles per voice per block for each workload and fits about 177 voices; the unit's SAMPLE and
+   GRAIN against SYNTH show what DDR access costs.
+9. **Keys and LEDs (PANEL page):** press every key once, slowly. Each must show its name (as printed on the
+   panel) and PRESSES going up by exactly one per press, which is the bounce check; quick double presses must
+   count two. A key with an LED lights it green while held. Report any key with the wrong name, a count that
+   jumps, or the wrong or no LED.
+10. **Encoders and pads (PANEL page):** each encoder one detent at a time: its number changes by one per detent,
+    with the sign clockwise positive. A, B and C set VOL L, VOL R and the microphone LED (0-10); VALUE cycles the
+    VALUE LED red, green, blue. Each pad shows its number and RAW reading and lights green by pressure; note
+    which pad lights for each (the "LED map" order) and the RAW range from resting to pressed hard.
+
+Afterwards the official update restores the unit ("Installing and recovery").
