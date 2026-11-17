@@ -9,22 +9,6 @@
 
 namespace enaga::dsp {
 
-// Heap memory for the C state below: zeroed, owned, not copyable.
-class Memory {
-public:
-    Memory() = default;
-    Memory(const Memory &) = delete;
-    Memory &operator=(const Memory &) = delete;
-    ~Memory() { delete[] data_; }
-    float *allocate(uint32_t floats) {
-        delete[] data_;
-        return data_ = new float[floats]();
-    }
-
-private:
-    float *data_ = nullptr;
-};
-
 class DelayLine {
 public:
     DelayLine() = default;
@@ -42,6 +26,8 @@ public:
     // Blocks: read n taps as samples 0..n-1 of a block whose writes follow (delay >= n - 1), then write the block.
     void read(uint32_t delay, float *out, int n) const { enaga_delay_read(&state_, delay, out, n); }
     void write(const float *in, int n) { enaga_delay_write_block(&state_, in, n); }
+    // A modulated block read: out[i] = tap_linear(delay[i]) at sample i, every delay[i] >= i.
+    void read_linear(const float *delay, float *out, int n) const { enaga_delay_read_linear(&state_, delay, out, n); }
 
     enaga_delay_line state_{};     // public, for C code working on the same line
 

@@ -194,8 +194,8 @@ I/O and sample streaming, the rest of E2, are not started.
   usable velocity (a pad is read every 3.8 ms), per-pad calibration.
 - Synth on the unit: its CPU load with real caches (worst case on the emulator 27 % with cl6x, 52 % GCC only),
   the pad keyboard's feel. Saving patches waits for the file API; edits last until the app stops.
-- DSP library, still to do: FIR, biquads, wavetable and interpolated delay reads (a block form) for other apps.
-  The synth's largest cost is now its per-voice modulation (8.3 % of the budget: exp2, tan_pi and three float
+- DSP library: the SVF runs at 21 cycles a sample under cl6x (its recurrence), twice a biquad's 10; a faster
+  form is worth trying. The synth's largest cost is now its per-voice modulation (8.3 % of the budget: exp2, tan_pi and three float
   divisions per voice and control step, through libgcc), which is the app's own C++. The library is built from source with each app for now; a
   release SDK would ship it prebuilt. Before shipping cl6x-built code, check that it calls none of TI's run-time
   library (the link would show it: apps link only libgcc) and TI's licence terms.
@@ -516,3 +516,26 @@ subsections.
 Synth worst case (GCC alone / cl6x): reverb 9.4 % to 4.3 % / 1.3 %, delay 1.4 % to 1.2 % / 0.4 %; the whole worst
 case 52 % / 27 % of the audio budget. 32 tests pass.
 
+### Biquads, FIR, wavetables and modulated delay reads (2026-11-17)
+
+The building blocks the Open items listed, as block functions in `runtime/dsp` with C++ wrappers:
+`enaga_biquad_*` / `Biquad` (direct form I; `enaga_biquad_design` gives the Audio EQ Cookbook's eight shapes; a
+two-stage cascade like the SVF's), `enaga_fir_*` / `Fir` (the app's taps; a history of length - 1 + 64 floats on
+the app heap), `enaga_wavetable_add` and `_morph_add` on the oscillator's phase (`Oscillator::table_add`,
+`morph_add`; tables of 2^bits samples and a guard sample, band-limiting left to the app), and
+`enaga_delay_read_linear` / `DelayLine::read_linear` (a per-sample delay array, every delay[i] >= i). `Memory`
+moved to `math.hpp` so filters can use it.
+
+The biquad design computes 1 - cos w as 2 sin^2(w / 2): the plain form lost 1e-4 of gain at 1 kHz to cancellation,
+and would lose about 10 % at 50 Hz. The FIR computes eight outputs per pass over the taps, eight sums in flight
+against the adder's four-cycle latency, each summed in tap order, so the results match the plain loop. cl6x puts
+switch tables in `.switch:NAME` sections; `runtime/app.ld` places them. The cl6x library calls C6000 EABI helpers
+(`__c6xabi_divf` for float division, `__c6xabi_fixfu`), which libgcc provides under the same names; nothing from
+TI's run-time library.
+
+Host tests: each block against a per-sample loop bit for bit (uneven block sizes, in place, FIR lengths 1 to 150
+across the 64-sample chunk), biquad responses at their defining frequencies (30 Hz included), the wavetable
+against sin to 2e-6 and backwards; deliberately wrong FIR, delay, wavetable and high-pass code was caught.
+Emulator, one 64-sample block, cycles (GCC / cl6x; the same samples): biquad 1699 / 628, two in series 3032 / 664,
+FIR 16 taps 3269 / 1071, 128 taps 20559 / 6223, wavetable 1226 / 315, morph 2155 / 397, modulated delay read
+1180 / 306; for comparison the SVF 1444 / 1395. 32 tests pass.

@@ -448,6 +448,133 @@ static void blocks() {
     }
 }
 
+// |H| of a biquad at `frequency`, in double.
+static double biquad_gain(const BiquadCoefficients &c, double frequency) {
+    double w = 2 * M_PI * frequency / kRate;
+    double nr = c.b0 + c.b1 * std::cos(w) + c.b2 * std::cos(2 * w), ni = -c.b1 * std::sin(w) - c.b2 * std::sin(2 * w);
+    double dr = 1 + c.a1 * std::cos(w) + c.a2 * std::cos(2 * w), di = -c.a1 * std::sin(w) - c.a2 * std::sin(2 * w);
+    return std::sqrt((nr * nr + ni * ni) / (dr * dr + di * di));
+}
+
+// Biquads, FIR, wavetables and modulated delay reads: responses, and blocks against per-sample loops.
+static void building_blocks() {
+    using B = BiquadCoefficients;
+    const double six = std::pow(10.0, 6.0 / 20);
+    const float butterworth = 0.70710678f;
+    near("biquad low-pass at DC", biquad_gain(B::make(B::low_pass, 1000, butterworth, kRate), 0), 1, 1e-4);
+    near("biquad low-pass at cutoff", biquad_gain(B::make(B::low_pass, 1000, butterworth, kRate), 1000), M_SQRT1_2, 1e-4);
+    near("biquad low-pass at 30 Hz", biquad_gain(B::make(B::low_pass, 30, butterworth, kRate), 30), M_SQRT1_2, 1e-4);
+    near("biquad high-pass at 30 Hz", biquad_gain(B::make(B::high_pass, 30, butterworth, kRate), 30), M_SQRT1_2, 1e-4);
+    near("biquad high-pass at Nyquist", biquad_gain(B::make(B::high_pass, 1000, butterworth, kRate), 24000), 1, 1e-4);
+    near("biquad high-pass at cutoff", biquad_gain(B::make(B::high_pass, 1000, butterworth, kRate), 1000), M_SQRT1_2, 1e-4);
+    near("biquad band-pass at centre", biquad_gain(B::make(B::band_pass, 3000, 4, kRate), 3000), 1, 1e-4);
+    near("biquad notch at centre", biquad_gain(B::make(B::notch, 3000, 4, kRate), 3000), 0, 1e-4);
+    for (double f : {50.0, 3000.0, 15000.0})
+        near("biquad all-pass", biquad_gain(B::make(B::all_pass, 3000, 2, kRate), f), 1, 1e-4);
+    near("biquad peak +6 dB at centre", biquad_gain(B::make(B::peak, 2000, 1, kRate, 6), 2000), six, 1e-3);
+    near("biquad peak away from centre", biquad_gain(B::make(B::peak, 2000, 1, kRate, 6), 20), 1, 1e-3);
+    near("biquad low shelf +6 dB at DC", biquad_gain(B::make(B::low_shelf, 300, butterworth, kRate, 6), 0), six, 1e-3);
+    near("biquad low shelf at 20 kHz", biquad_gain(B::make(B::low_shelf, 300, butterworth, kRate, 6), 20000), 1, 1e-3);
+    near("biquad high shelf -6 dB at Nyquist", biquad_gain(B::make(B::high_shelf, 5000, butterworth, kRate, -6), 24000),
+         1 / six, 1e-3);
+    near("biquad high shelf at DC", biquad_gain(B::make(B::high_shelf, 5000, butterworth, kRate, -6), 0), 1, 1e-3);
+
+    Random noise;
+    std::vector<float> in(4096);
+    for (float &x : in) x = noise.bipolar();
+    const int sizes[] = {64, 37, 1, 16, 100, 64, 13, 200};
+    // Calls f(offset, n) over the input in uneven blocks.
+    auto in_blocks = [&](auto &&f) {
+        for (size_t at = 0, b = 0; at < in.size(); b++) {
+            int n = int(std::min<size_t>(sizes[b % 8], in.size() - at));
+            f(at, n);
+            at += n;
+        }
+    };
+    // Biquads: process (in place too) and cascade against step.
+    {
+        auto c1 = B::make(B::peak, 700, 3, kRate, 9), c2 = B::make(B::low_pass, 4000, 0.9f, kRate);
+        Biquad a, b, d, e1, e2, f1, f2;
+        std::vector<float> ya(in.size()), yb(in.size()), yd = in, ye(in.size()), yf(in.size());
+        in_blocks([&](size_t at, int n) { a.process(&in[at], &ya[at], n, c1); });
+        for (size_t i = 0; i < in.size(); i++) yb[i] = b.step(in[i], c1);
+        same("biquad process = step", ya, yb);
+        in_blocks([&](size_t at, int n) { d.process(&yd[at], &yd[at], n, c1); });
+        same("biquad process in place", yd, yb);
+        in_blocks([&](size_t at, int n) { Biquad::cascade(e1, c1, e2, c2, &in[at], &ye[at], n); });
+        for (size_t i = 0; i < in.size(); i++) yf[i] = f2.step(f1.step(in[i], c1), c2);
+        same("biquad cascade = two steps", ye, yf);
+    }
+    // FIR: lengths below, at and past a chunk, against the plain sum; in place too.
+    for (int length : {1, 3, 32, 64, 65, 150}) {
+        std::vector<float> taps(length);
+        for (float &t : taps) t = noise.bipolar() / float(length);
+        Fir a, d;
+        a.init(taps.data(), length);
+        d.init(taps.data(), length);
+        std::vector<float> ya(in.size()), yb(in.size()), yd = in;
+        in_blocks([&](size_t at, int n) { a.process(&in[at], &ya[at], n); });
+        for (size_t i = 0; i < in.size(); i++) {
+            float sum = 0.0f;
+            for (int k = 0; k < length; k++) sum += taps[k] * (i >= size_t(k) ? in[i - k] : 0.0f);
+            yb[i] = sum;
+        }
+        same("fir process = plain sum", ya, yb);
+        in_blocks([&](size_t at, int n) { d.process(&yd[at], &yd[at], n); });
+        same("fir process in place", yd, yb);
+    }
+    // Wavetables: a 2048-sample sine against sin of the same integer phase; blocks of 64 against 16; a negative dt;
+    // morph against the two tables' lerp.
+    {
+        const int bits = 11, size = 1 << bits;
+        std::vector<float> sine(size + 1), saw(size + 1);
+        for (int i = 0; i <= size; i++) {
+            sine[i] = float(std::sin(2 * M_PI * i / size));
+            saw[i] = i == size ? -1.0f : 2.0f * i / size - 1.0f;
+        }
+        const float dt = 440.0f / kRate;
+        const uint32_t dp = uint32_t(int32_t(dt * 4294967296.0f));
+        Oscillator a, b;
+        std::vector<float> ya(4096), yb(4096);
+        for (int i = 0; i < 4096; i += 64) a.table_add(&ya[i], 64, sine.data(), bits, dt, 1.0f);
+        for (int i = 0; i < 4096; i += 16) b.table_add(&yb[i], 16, sine.data(), bits, dt, 1.0f);
+        same("wavetable in blocks of 64 or 16", ya, yb);
+        double worst = 0;
+        for (int i = 0; i < 4096; i++)
+            worst = std::fmax(worst, std::fabs(ya[i] - std::sin(2 * M_PI * double(uint32_t(i * dp)) / 4294967296.0)));
+        near("wavetable sine error", worst, 0, 2e-6);
+        Oscillator r;
+        std::vector<float> yr(256);
+        r.table_add(yr.data(), 256, sine.data(), bits, -dt, 1.0f);
+        worst = 0;
+        for (int i = 0; i < 256; i++) worst = std::fmax(worst, std::fabs(yr[i] + ya[i]));
+        near("wavetable backwards = sine reversed", worst, 0, 2e-6);
+        Oscillator m, p1, p2;
+        std::vector<float> ym(1000), y1(1000), y2(1000), yl(1000);
+        m.morph_add(ym.data(), 1000, sine.data(), saw.data(), bits, 0.3f, 0.013f, 0.5f);
+        p1.table_add(y1.data(), 1000, sine.data(), bits, 0.013f, 1.0f);
+        p2.table_add(y2.data(), 1000, saw.data(), bits, 0.013f, 1.0f);
+        for (int i = 0; i < 1000; i++) yl[i] = 0.5f * (y1[i] + (y2[i] - y1[i]) * 0.3f);
+        same("wavetable morph = lerp of the tables", ym, yl);
+    }
+    // Modulated delay reads: read_linear then a block write, against tap_linear and write per sample, with a delay
+    // swept by an LFO, never under the block length (200).
+    {
+        DelayLine a(2000), b(2000);
+        std::vector<float> ya(in.size()), yb(in.size()), delay(in.size());
+        for (size_t i = 0; i < in.size(); i++) delay[i] = 600.0f + 390.0f * sin_turns(float(i) * 0.0007f) + 0.37f;
+        in_blocks([&](size_t at, int n) {
+            a.read_linear(&delay[at], &ya[at], n);
+            a.write(&in[at], n);
+        });
+        for (size_t i = 0; i < in.size(); i++) {
+            yb[i] = b.tap_linear(delay[i]);
+            b.write(in[i]);
+        }
+        same("delay read_linear = tap_linear", ya, yb);
+    }
+}
+
 int main() {
     math();
     oscillators();
@@ -456,6 +583,7 @@ int main() {
     effects();
     blocks();
     effects_against_reference();
+    building_blocks();
     if (!failures) std::printf("ok\n");
     return failures ? 1 : 0;
 }

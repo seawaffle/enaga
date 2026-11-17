@@ -61,3 +61,34 @@ void enaga_oscillator_add(enaga_oscillator *o, float *restrict out, int n, int w
     }
     o->phase = p;
 }
+
+/* ---- Wavetables ---- */
+
+void enaga_wavetable_add(enaga_oscillator *o, const float *restrict table, int bits, float *restrict out, int n,
+                         float dt, float level) {
+    uint32_t p = o->phase;
+    const uint32_t dp = (uint32_t)(int32_t)(dt * TURN), shift = 32u - (uint32_t)bits;
+    int i;
+    for (i = 0; i < n; i++) {
+        const uint32_t j = p >> shift;
+        const float f = enaga_unipolar(p << bits), a = table[j];
+        out[i] += level * (a + (table[j + 1] - a) * f);
+        p += dp;
+    }
+    o->phase = p;
+}
+
+void enaga_wavetable_morph_add(enaga_oscillator *o, const float *restrict a, const float *restrict b, int bits,
+                               float morph, float *restrict out, int n, float dt, float level) {
+    uint32_t p = o->phase;
+    const uint32_t dp = (uint32_t)(int32_t)(dt * TURN), shift = 32u - (uint32_t)bits;
+    int i;
+    for (i = 0; i < n; i++) {
+        const uint32_t j = p >> shift;
+        const float f = enaga_unipolar(p << bits), a0 = a[j], b0 = b[j];
+        const float ya = a0 + (a[j + 1] - a0) * f, yb = b0 + (b[j + 1] - b0) * f;
+        out[i] += level * (ya + (yb - ya) * morph);
+        p += dp;
+    }
+    o->phase = p;
+}

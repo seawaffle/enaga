@@ -57,6 +57,17 @@ static inline void enaga_oscillator_reset(enaga_oscillator *o, float phase) {
 void enaga_oscillator_add(enaga_oscillator *o, float *out, int n, int wave, float dt, float inv_dt, float level,
                           float width);
 
+/* ---- Wavetable oscillators: the same phase, reading a table the app fills ---- */
+
+/* A table is 2^bits samples of one cycle (bits 1-24) and a guard sample after them, equal to the first, so reads
+ * interpolate linearly without wrapping. Band-limiting is the table's job: an app playing high notes keeps a
+ * table per octave with fewer harmonics, say. dt in (-0.5, 0.5): negative runs the table backwards. */
+void enaga_wavetable_add(enaga_oscillator *o, const float *table, int bits, float *out, int n, float dt,
+                         float level);
+/* Two tables of the same size crossfaded: (1 - morph) x a + morph x b, one phase for both. */
+void enaga_wavetable_morph_add(enaga_oscillator *o, const float *a, const float *b, int bits, float morph,
+                               float *out, int n, float dt, float level);
+
 /* ---- State-variable filter (topology-preserving, trapezoidal) ---- */
 
 /* a1 = 1 / (1 + g (g + k)), a2 = g a1, a3 = g a2, with g = tan(pi cutoff / rate) and k = 1 / Q (2 for none). */
@@ -95,6 +106,53 @@ static inline float enaga_one_pole_coefficient(float cutoff, float rate) {
 static inline float enaga_one_pole_step(enaga_one_pole *p, float x, float a) { return p->y += a * (x - p->y); }
 void enaga_one_pole_process(enaga_one_pole *p, float a, const float *in, float *out, int n);   /* out may be in */
 
+/* ---- Biquads: direct form I, coefficients from the Audio EQ Cookbook (R. Bristow-Johnson) ---- */
+
+/* y = b0 x + b1 x1 + b2 x2 - a2 y2 - a1 y1, normalised so a0 = 1. */
+typedef struct { float b0, b1, b2, a1, a2; } enaga_biquad_coefficients;
+typedef struct { float x1, x2, y1, y2; } enaga_biquad;
+
+enum {
+    ENAGA_BIQUAD_LOW_PASS, ENAGA_BIQUAD_HIGH_PASS, ENAGA_BIQUAD_BAND_PASS,   /* band-pass: 0 dB at the centre */
+    ENAGA_BIQUAD_NOTCH, ENAGA_BIQUAD_ALL_PASS, ENAGA_BIQUAD_PEAK, ENAGA_BIQUAD_LOW_SHELF, ENAGA_BIQUAD_HIGH_SHELF
+};
+
+/* frequency in Hz (clamped to 0.0001-0.49 of the rate); q > 0 (0.7071 is Butterworth; for the shelves, 0.7071 is
+ * the steepest slope without overshoot); gain_db for PEAK and the shelves only. Two divisions: control rate. */
+void enaga_biquad_design(enaga_biquad_coefficients *c, int type, float frequency, float q, float gain_db,
+                         float rate);
+static inline float enaga_biquad_step(enaga_biquad *s, const enaga_biquad_coefficients *c, float x) {
+    float y = c->b0 * x + c->b1 * s->x1 + c->b2 * s->x2 - c->a2 * s->y2 - c->a1 * s->y1;
+    s->x2 = s->x1;
+    s->x1 = x;
+    s->y2 = s->y1;
+    s->y1 = y;
+    return y;
+}
+void enaga_biquad_process(enaga_biquad *s, const enaga_biquad_coefficients *c, const float *in, float *out,
+                          int n);   /* out may be in */
+/* Two biquads in series (a fourth-order filter): the same as two enaga_biquad_process calls, faster, since the two
+ * stages overlap. out may be in. */
+void enaga_biquad_cascade(enaga_biquad *s1, const enaga_biquad_coefficients *c1, enaga_biquad *s2,
+                          const enaga_biquad_coefficients *c2, const float *in, float *out, int n);
+
+/* ---- FIR filters: out[i] = sum of taps[k] x in[i - k], k = 0 to length - 1 ---- */
+
+#define ENAGA_FIR_CHUNK 64
+
+/* The taps are the caller's and must outlive the filter; so is the history memory (enaga_fir_memory floats,
+ * zeroed). Fir in filter.hpp allocates it on the app heap. */
+typedef struct { const float *taps; float *history; int32_t length; } enaga_fir;
+
+static inline uint32_t enaga_fir_memory(int length) { return (uint32_t)(length - 1 + ENAGA_FIR_CHUNK); }
+static inline void enaga_fir_init(enaga_fir *f, const float *taps, int length, float *memory) {
+    f->taps = taps;
+    f->history = memory;
+    f->length = length;
+}
+/* Sums in the order k = 0, 1, ... for every output, as the plain loop would. out may be in. */
+void enaga_fir_process(enaga_fir *f, const float *in, float *out, int n);
+
 /* ---- Delay lines ---- */
 
 /* A ring of a power-of-two size: buffer[write] is the last sample written. The memory is the caller's
@@ -130,6 +188,9 @@ static inline float enaga_delay_tap_linear(const enaga_delay_line *d, float dela
  * dependencies, which is what lets them pipeline. */
 void enaga_delay_read(const enaga_delay_line *d, uint32_t delay, float *out, int n);
 void enaga_delay_write_block(enaga_delay_line *d, const float *in, int n);
+/* A modulated read (chorus, flanger, vibrato): out[i] = tap_linear(delay[i]) at sample i of the block, as
+ * enaga_delay_read, provided every delay[i] >= i (n - 1 or more always does) and at most the capacity. */
+void enaga_delay_read_linear(const enaga_delay_line *d, const float *delay, float *out, int n);
 
 /* ---- Stereo delay: feedback through a low-pass (tone), optional ping-pong, a gliding time ---- */
 

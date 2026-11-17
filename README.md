@@ -47,8 +47,10 @@ ENAGA_APP(Beep)
 - Panel LEDs by name, levels 0-10, from the main loop: `enaga::pad_led(pad, r, g, b)`, `step_led(n, red, green)`,
   `button_led(key, red, green)`, `vol_led`, `mic_led`, `value_led`. Enaga switches them all off when an app stops.
 - `<enaga/dsp.hpp>` is the DSP library: fast math without libm (`exp2`, `semitones`, `sin_turns`, `tan_pi`,
-  `soft_clip`), band-limited oscillators, a state-variable filter (and a two-stage cascade), a one-pole, ADSR
-  envelopes, LFOs, delay lines, a stereo delay and a reverb. Its classes wrap a C interface, `<enaga/dsp.h>`:
+  `soft_clip`), band-limited oscillators, wavetable oscillators on the app's tables (with a morph between two),
+  a state-variable filter (and a two-stage cascade), cookbook biquads (low- and high-pass, band-pass, notch,
+  all-pass, peak, shelves), FIR filters on the app's taps, a one-pole, ADSR envelopes, LFOs, delay lines (with
+  modulated, interpolated block reads for chorus and flanging), a stereo delay and a reverb. Its classes wrap a C interface, `<enaga/dsp.h>`:
   plain state structs, per-sample steps, and block functions that process a buffer per call (`Svf::process`,
   `Envelope::render`, `Oscillator::render_add`, `StereoDelay::process`, `Reverb::process`, delay-line block reads
   and writes, and buffer arithmetic such as `enaga_mix`, `enaga_multiply`, `enaga_ramp_stereo_add`). The block functions (`runtime/dsp`) are built with TI's C6000 compiler (cl6x) when it

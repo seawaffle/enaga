@@ -3,6 +3,8 @@
 // Svf is the topology-preserving (trapezoidal) state-variable filter: stable under fast modulation, with
 // low-pass, band-pass and high-pass at once. Coefficients cost one division, so compute them at control rate
 // (SvfCoefficients) and run many samples with them: Svf::process, a block function (include/enaga/dsp.h).
+// Biquad covers the cookbook shapes (shelves, peaks, notches, all-passes) for EQ; Fir runs a kernel the app
+// supplies.
 #pragma once
 
 #include <enaga/dsp/math.hpp>
@@ -68,5 +70,53 @@ public:
 
     enaga_one_pole state_{};
 };
+
+struct BiquadCoefficients : enaga_biquad_coefficients {
+    enum Type {
+        low_pass = ENAGA_BIQUAD_LOW_PASS, high_pass = ENAGA_BIQUAD_HIGH_PASS, band_pass = ENAGA_BIQUAD_BAND_PASS,
+        notch = ENAGA_BIQUAD_NOTCH, all_pass = ENAGA_BIQUAD_ALL_PASS, peak = ENAGA_BIQUAD_PEAK,
+        low_shelf = ENAGA_BIQUAD_LOW_SHELF, high_shelf = ENAGA_BIQUAD_HIGH_SHELF
+    };
+    // frequency in Hz; q > 0 (0.7071 Butterworth); gain_db for peak and the shelves. Two divisions: control rate.
+    static BiquadCoefficients make(Type type, float frequency, float q, float sample_rate, float gain_db = 0.0f) {
+        BiquadCoefficients c;
+        enaga_biquad_design(&c, type, frequency, q, gain_db, sample_rate);
+        return c;
+    }
+};
+
+class Biquad {
+public:
+    void reset() { state_ = {}; }
+    float step(float x, const BiquadCoefficients &c) { return enaga_biquad_step(&state_, &c, x); }
+    // A block (out may be in): enaga_biquad_process.
+    void process(const float *in, float *out, int n, const BiquadCoefficients &c) {
+        enaga_biquad_process(&state_, &c, in, out, n);
+    }
+    // Two in series: the same as a.process then b.process, faster.
+    static void cascade(Biquad &a, const BiquadCoefficients &ca, Biquad &b, const BiquadCoefficients &cb,
+                        const float *in, float *out, int n) {
+        enaga_biquad_cascade(&a.state_, &ca, &b.state_, &cb, in, out, n);
+    }
+
+    enaga_biquad state_{};
+};
+
+// An FIR filter on the app's taps (which must outlive it): out[i] = sum of taps[k] in[i - k]. The history comes
+// from the app heap: call init() in the app's init(), not in the audio callback.
+class Fir {
+public:
+    void init(const float *taps, int length) {
+        enaga_fir_init(&state_, taps, length, memory_.allocate(enaga_fir_memory(length)));
+    }
+    void process(const float *in, float *out, int n) { enaga_fir_process(&state_, in, out, n); }   // out may be in
+
+    enaga_fir state_{};
+
+private:
+    Memory memory_;
+};
+
+static_assert(int(BiquadCoefficients::high_shelf) == ENAGA_BIQUAD_HIGH_SHELF);
 
 }  // namespace enaga::dsp

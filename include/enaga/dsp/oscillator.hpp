@@ -21,6 +21,15 @@ public:
     void render_add(float *out, int n, Wave wave, float dt, float inv_dt, float level, float width = 0.5f) {
         enaga_oscillator_add(&state_, out, n, int(wave), dt, inv_dt, level, width);
     }
+    // Adds level x a table the app fills: 2^bits samples of a cycle and a guard sample equal to the first
+    // (enaga_wavetable_add). dt in (-0.5, 0.5).
+    void table_add(float *out, int n, const float *table, int bits, float dt, float level) {
+        enaga_wavetable_add(&state_, table, bits, out, n, dt, level);
+    }
+    // Two tables of one size crossfaded by morph (0 = a, 1 = b): enaga_wavetable_morph_add.
+    void morph_add(float *out, int n, const float *a, const float *b, int bits, float morph, float dt, float level) {
+        enaga_wavetable_morph_add(&state_, a, b, bits, morph, out, n, dt, level);
+    }
 
     enaga_oscillator state_{};     // public, for C code working on the same oscillator
 };

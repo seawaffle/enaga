@@ -41,4 +41,21 @@ private:
     uint32_t state_;
 };
 
+// Heap memory for the C state of a filter or effect (enaga_fir, enaga_delay_line, ...): zeroed, owned, not
+// copyable. Allocate in init(), not in the audio callback.
+class Memory {
+public:
+    Memory() = default;
+    Memory(const Memory &) = delete;
+    Memory &operator=(const Memory &) = delete;
+    ~Memory() { delete[] data_; }
+    float *allocate(uint32_t floats) {
+        delete[] data_;
+        return data_ = new float[floats]();
+    }
+
+private:
+    float *data_ = nullptr;
+};
+
 }  // namespace enaga::dsp

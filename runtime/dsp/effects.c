@@ -22,6 +22,19 @@ void enaga_delay_write_block(enaga_delay_line *d, const float *restrict in, int 
     d->write = (w + (uint32_t)n) & mask;
 }
 
+void enaga_delay_read_linear(const enaga_delay_line *d, const float *restrict delay, float *restrict out, int n) {
+    const float *buf = d->buffer;
+    const uint32_t mask = d->mask, w = d->write;
+    int i;
+    for (i = 0; i < n; i++) {
+        const int whole = (int)delay[i];
+        const float frac = delay[i] - (float)whole;
+        const uint32_t at = w + (uint32_t)i - (uint32_t)whole;
+        const float a = buf[at & mask];
+        out[i] = a + (buf[(at - 1) & mask] - a) * frac;
+    }
+}
+
 /* ---- Stereo delay ---- */
 
 #define DELAY_CHUNK 16          /* enaga_stereo_delay_set keeps the delay at 16 samples or more */

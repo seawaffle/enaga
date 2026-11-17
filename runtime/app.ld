@@ -7,7 +7,8 @@ MEMORY { APP (rwx) : ORIGIN = 0xC0400000, LENGTH = 0x7C00000 }   /* ENAGA_APP_BA
 SECTIONS {
     .text : { *(.text .text.* .text:*) } > APP    /* cl6x (*.ti.c) names function sections .text:NAME */
     /* GCC tic6x names read-only data .const and jump tables .switch (TI conventions) */
-    .rodata : { *(.rodata .rodata.* .const .const.* .const:* .switch .switch.*) } > APP   /* cl6x: .const:NAME */
+    /* cl6x: .const:NAME and .switch:NAME */
+    .rodata : { *(.rodata .rodata.* .const .const.* .const:* .switch .switch.* .switch:*) } > APP
     .init_array : {
         . = ALIGN(4);
         __init_array_start = .;
