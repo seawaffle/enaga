@@ -226,7 +226,13 @@ be sent whole. Enaga sends frames by EDMA (events 18 and 19, SPI1 receive and tr
   both DACs to the line outputs.
 - **Data:** **McASP0**, AXR13 transmits and AXR14 receives, 2-slot frames of 32-bit words, clocks from the
   codec. **EDMA3 channel 0** (McASP receive) and **channel 1** (transmit) move the samples; their
-  completions are signalled in EDMA shadow region 1, which reaches the DSP as **event 8**.
+  completions are signalled in EDMA shadow region 1, which reaches the DSP as **event 8**. The pending
+  register (IPR) has one bit per channel, so completions that arrive before it is cleared merge into one;
+  the finished ping-pong buffer is the one the channel's PaRAM set does not point into (SRC for transmit,
+  DST for receive), not the parity of a completion count. That rests on the EDMA3 documentation (the link
+  reload happens when the last transfer request is issued, before IPR is set); **code reading**, not checked
+  on a unit. Found in smpltrek's bring-up firmware (commit cdd968f), where a 7 ms display frame let 96 blocks
+  complete against 77 counted.
 - **Channels:** with the original firmware's one-word-short first transfer, even buffer words land in slot
   1, believed to be the **left** channel (**unconfirmed** by ear).
 - **Audio GPIOs:**
@@ -248,6 +254,10 @@ be sent whole. Enaga sends frames by EDMA (events 18 and 19, SPI1 receive and tr
 
 **MMCSD0**, pins on PINMUX10; card detect on GP4[0] (low = card present); GP4[1] is driven low. 399 kHz
 for identification, then 23 MHz with a 4-bit bus. SDSC and SDHC cards are handled (`hal/mmcsd.c`).
+MMCST0 clears on read, and an error (TOUTRD, TOUTRS, CRCWR, CRCRD, CRCRS) can come in the same read as
+the DATDNE, DRRDY or DXRDY being waited for, so a data-phase wait fails when any error bit came with its flag;
+otherwise a write the card rejected looks like a success (found in smpltrek's bring-up firmware, commit
+cdd968f; the emulator injects no SD errors, so this path is untested).
 
 ## Interrupts and exceptions
 

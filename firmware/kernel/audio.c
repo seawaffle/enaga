@@ -72,7 +72,7 @@ static u32 tx_b[WORDS] __attribute__((aligned(128)));
 static u32 rx_c[WORDS] __attribute__((aligned(128)));
 static u32 rx_d[WORDS] __attribute__((aligned(128)));
 static float in_block[WORDS], out_block[WORDS];
-static u32 tx_done, rx_done;
+static u32 *tx_last, rx_done;            /* tx_last: the transmit buffer refilled last */
 static volatile audio_callback_t callback;
 static void *volatile callback_context;
 
@@ -219,17 +219,25 @@ void audio_mute(void)
     codec_mute();
 }
 
+static int in_buffer(u32 address, const u32 *buffer)
+{
+    return address - (u32)buffer < WORDS * 4;
+}
+
 void audio_isr(void)
 {
     u32 start = tsc_read(), pending = REG32(EDMA_S1_IPR), i, cycles;
     REG32(EDMA_S1_ICR) = pending & 3;
-    if (pending & 1) rx_done++;
+    if (pending & 1) rx_done = 1;
     if (pending & 2) {
-        u32 *tx = tx_done & 1 ? tx_b : tx_a;  /* completion n finished buffer A, B, A, ...: refill it */
+        /* IPR holds one bit per channel, so completions that arrive before it is cleared merge, and counting
+         * them would pick the wrong buffer. The PaRAM sets say which buffer is in flight (the link reload
+         * happens when the last transfer is issued, before IPR is set; EDMA3 documentation, not yet checked on
+         * the unit): the other one has finished. */
+        u32 *tx;
         audio_callback_t fn = callback;
-        tx_done++;
         if (rx_done) {
-            const u32 *rx = (rx_done - 1) & 1 ? rx_d : rx_c;
+            const u32 *rx = in_buffer(REG32(PARAM(0) + 0x0C), rx_c) ? rx_d : rx_c;
             cache_inv((void *)rx, WORDS * 4);
             for (i = 0; i < WORDS; i++) in_block[i] = (float)(int)rx[i] * (1.0f / 2147483648.0f);
         } else {
@@ -244,6 +252,12 @@ void audio_isr(void)
             irq_nest_end(saved);
             audio_in_callback = 0;
         } else for (i = 0; i < WORDS; i++) out_block[i] = 0.0f;
+        /* Chosen after the callback, so a callback that ran past its block still writes the buffer not playing.
+         * The same buffer twice in a row means the ring replayed a block nobody refilled: it counts as a block
+         * and an overrun. */
+        tx = in_buffer(REG32(PARAM(1) + 0x04), tx_a) ? tx_b : tx_a;
+        if (tx == tx_last) { audio_blocks++; audio_overruns++; }
+        tx_last = tx;
         for (i = 0; i < WORDS; i++) {
             float v = out_block[i] * 2147483648.0f;
             tx[i] = v >= 2147483647.0f ? 0x7FFFFFFFu : v <= -2147483648.0f ? 0x80000000u : (u32)(int)v;

@@ -7,6 +7,7 @@ Needs the tic6x GCC, host gcc and g++, and the SmplTrek emulator (README.md, "Te
 boot is about 300 million guest cycles (a few seconds). Without ENAGA_EMULATOR these tests are skipped.
 """
 import cmath
+import itertools
 import math
 import struct
 import sys
@@ -143,6 +144,23 @@ class E1(unittest.TestCase):
         self.assertIn(emu.report()["audio_blocks"] - blocks, range(expected - 3, expected + 3))
         self.assertGreaterEqual(emu.word("oled_dma_frames") - frames, 2)   # the main loop draws again
         self.assertTrue(all(v == 0 for v in samples(emu)[-4096:]))
+
+    def test_long_callback_never_tears_a_block(self):
+        # A callback that runs 2.5 or 3.5 blocks lets the ring finish two or three blocks whose completions
+        # merge into one pending bit. Counting completions then refills the buffer that is playing, and a
+        # played block comes out half old, half new; the buffer is taken from the PaRAM instead.
+        with Emulation(HERE / "apps" / "stall") as emu:
+            self.assertIsNone(emu.run(BOOT)["error"])
+            for key in (STEP1, STEP1 + 1):
+                blocks = emu.report()["audio_blocks"]
+                emu.key(key, True)
+                emu.run(20 * MS)
+                emu.key(key, False)
+                self.assertIsNone(emu.run(20 * MS)["error"])
+                self.assertIn(emu.report()["audio_blocks"] - blocks, range(29, 32))    # replayed blocks count
+                runs = [len(list(run)) for _, run in itertools.groupby(samples(emu)[-6000:])]
+                self.assertEqual(set(runs[1:-1]), {128}, key)                       # every block one level
+            self.assertGreaterEqual(emu.report()["audio_overruns"], 2)
 
     def test_interrupts_preserve_loop_state(self):
         # Regression: the ISR once saved ILC at *SP, which the C handler's prologue overwrote; an audio

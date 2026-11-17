@@ -345,3 +345,21 @@ a unit", the CHECK app in `tests/unit/check`, `tools/unit_card.py`) and not yet 
   `PROJECT`, `PLAY`, `STOP`, `MIXER`, `EDIT`) are gone; OK, CLR, the D-pad, STEP and the knobs keep theirs.
 - The menu chord is F1 + POWER (func on all three products); BOOT MODE is F4 + POWER, the SmplTrek bootloader's
   HOME. The CHECK app shows the new names and changes page on F4.
+
+### SD error flags and merged audio completions (2026-11-16)
+
+Two bugs reported from smpltrek's bring-up firmware (commit cdd968f) had the same pattern in Enaga.
+- `hal/mmcsd.c`: the data-phase waits checked only the wanted flag, so a CRC error or time-out in the same
+  MMCST0 read as DATDNE, DRRDY or DXRDY passed. They now fail on any error bit (`data_ok`). The emulator
+  cannot inject SD errors, so this is a code fix without a test.
+- `kernel/audio.c`: the transmit and receive buffers were chosen by the parity of a completion count, and
+  completions that arrive while the pending bit is still set merge. Both are now taken from the PaRAM
+  addresses (the buffer not in flight). The transmit buffer is chosen after the app's callback, so a callback
+  that runs past its block still writes the buffer that is not playing; the same buffer twice in a row counts
+  the replayed block in `audio_blocks` and as an overrun. `tests/apps/stall` and
+  `test_long_callback_never_tears_a_block` stall one callback for 2.5 and 3.5 blocks: with the old code a
+  played block came out half old, half new.
+- Enaga's audio runs from the completion interrupt, not a poll, so merging needs interrupts held off for more
+  than a block (a callback overrunning, or a long section with GIE clear); the PaRAM choice holds either way.
+  The smpltrek note about reading EDMA registers before its power module is on does not apply: the interrupt
+  is enabled only after audio set-up.

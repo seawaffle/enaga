@@ -90,6 +90,8 @@ static u32 command(u32 index, u32 arg, u32 flags)
 }
 
 static int ok(u32 st) { return (st & ST0_RSPDNE) && !(st & ST0_ERRORS); }
+/* A data-phase flag counts only without an error: a CRC error or time-out can come in the same MMCST0 read. */
+static int data_ok(u32 st, u32 want) { return (st & want) && !(st & ST0_ERRORS); }
 static u32 response(void) { return REG32(MMC + MMCRSP67); }   /* bits 39:8 of a 48-bit response */
 
 static int app_command(u32 index, u32 arg, u32 flags)
@@ -186,10 +188,10 @@ int sd_read(u8 *buffer, u32 sector, u32 count)
         if (!ok(st)) return -2;
         for (i = 0; i < 512 / 4; i += 16) {          /* 64-byte FIFO fills */
             u32 k;
-            if (!(wait_status(ST0_DRRDY, 500) & ST0_DRRDY)) return -3;
+            if (!data_ok(wait_status(ST0_DRRDY, 500), ST0_DRRDY)) return -3;
             for (k = 0; k < 16; k++) *out++ = REG32(MMC + MMCDRR);
         }
-        if (!(wait_status(ST0_DATDNE, 500) & ST0_DATDNE)) return -4;
+        if (!data_ok(wait_status(ST0_DATDNE, 500), ST0_DATDNE)) return -4;
         sector++;
     }
     return 0;
@@ -208,10 +210,10 @@ int sd_write(const u8 *buffer, u32 sector, u32 count)
         if (!ok(st)) return -2;
         for (i = 0; i < 512 / 4; i += 16) {
             u32 k;
-            if (!(wait_status(ST0_DXRDY, 500) & ST0_DXRDY)) return -3;
+            if (!data_ok(wait_status(ST0_DXRDY, 500), ST0_DXRDY)) return -3;
             for (k = 0; k < 16; k++) REG32(MMC + MMCDXR) = *in++;
         }
-        if (!(wait_status(ST0_DATDNE, 500) & ST0_DATDNE)) return -4;
+        if (!data_ok(wait_status(ST0_DATDNE, 500), ST0_DATDNE)) return -4;
         start = timer_ticks();                       /* CMD13 until the card is back in tran (state 4) */
         for (;;) {
             if (!ok(command(13, rca << 16, RSP_48))) return -5;
