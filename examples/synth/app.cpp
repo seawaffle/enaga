@@ -173,12 +173,15 @@ public:
         const Page &page = kPages[page_];
         const Group &group = page.groups[group_[page_]];
         canvas.rect(0, 10, 128, 1, 4);
-        canvas.text(0, 14, page.name, 10);
-        canvas.text(6 * (length(page.name) + 1), 14, group.title, 15);
-        text_number(text, "", group_[page_] + 1);
-        append(text, "/");
-        text_number(text + length(text), "", page.count);
-        if (page.count > 1) canvas.text(128 - 6 * length(text), 14, text, 6);
+        canvas.text(0, 14, group.title, 15);
+        text[0] = 0;                          // the page, and the group's place in it: "OSC 1/3"
+        append(text, page.name);
+        if (page.count > 1) {
+            text_number(text + length(text), " ", group_[page_] + 1);
+            append(text, "/");
+            text_number(text + length(text), "", page.count);
+        }
+        if (page.count > 1 || !same(page.name, group.title)) canvas.text(128 - 6 * length(text), 14, text, 6);
 
         for (int row = 0; row < group.count; row++) {
             int y = 26 + 13 * row, param = group.params[row];
@@ -250,6 +253,10 @@ private:
         int n = 0;
         while (s[n]) n++;
         return n;
+    }
+    static bool same(const char *a, const char *b) {
+        while (*a && *a == *b) a++, b++;
+        return *a == *b;
     }
     static void append(char *text, const char *more) {
         text += length(text);

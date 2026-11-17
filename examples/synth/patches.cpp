@@ -27,13 +27,13 @@ constexpr C kPad[] = {
     {delay_mix, 15}, {reverb_decay, 90}, {reverb_mix, 45}, kEnd};
 
 constexpr C kBass[] = {
-    {voice_mode, mode_legato}, {voice_glide, 45},
+    {voice_mode, mode_legato}, {voice_glide, 62},
     {mix_osc1, 80}, {mix_sub, 70}, {osc2_wave, wave_pulse}, {osc2_semi, -12}, {osc2_fine, 0}, {mix_osc2, 40},
     {filter_cutoff, 38}, {filter_resonance, 30}, {filter_drive, 30}, {filter_env, 55},
     {env2_decay, 65}, {env2_sustain, 0}, {amp_decay, 80}, {amp_sustain, 80}, {amp_release, 30}, kEnd};
 
 constexpr C kLead[] = {
-    {voice_mode, mode_legato}, {voice_glide, 50},
+    {voice_mode, mode_legato}, {voice_glide, 70},
     {osc1_wave, wave_pulse}, {osc1_width, 30}, {mix_osc2, 60}, {osc2_fine, 10},
     {filter_cutoff, 80}, {filter_resonance, 35}, {filter_env, 20}, {env2_decay, 75}, {env2_sustain, 30},
     {lfo1_shape, lfo_sine}, {lfo1_rate, 72}, {lfo1_sync, 1},
@@ -43,9 +43,9 @@ constexpr C kLead[] = {
 
 constexpr C kPluck[] = {
     {mix_osc1, 80}, {osc2_wave, wave_pulse}, {osc2_semi, 12}, {osc2_fine, 0}, {mix_osc2, 30},
-    {filter_cutoff, 30}, {filter_resonance, 40}, {filter_env, 70}, {filter_velocity, 50},
-    {env2_decay, 60}, {env2_sustain, 0}, {env2_release, 55},
-    {amp_decay, 75}, {amp_sustain, 0}, {amp_release, 60},
+    {filter_cutoff, 40}, {filter_resonance, 40}, {filter_env, 70}, {filter_velocity, 50},
+    {env2_decay, 68}, {env2_sustain, 0}, {env2_release, 60},
+    {amp_decay, 82}, {amp_sustain, 0}, {amp_release, 60},
     {delay_time, 78}, {delay_feedback, 45}, {delay_mode, 1}, {delay_mix, 35}, {reverb_mix, 25}, kEnd};
 
 constexpr C kWobble[] = {
