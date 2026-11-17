@@ -178,8 +178,12 @@ void kernel_loop(void)
 void main(void)
 {
     char *p;
-    power_hold();
     tsc_enable();
+    /* GPIO on before anything uses it, as the original firmware's board set-up does. The bootloader leaves it
+     * on (code that never enables it has driven the power hold and read keys on a unit), so this changes
+     * nothing there, but it lets Enaga start from a power-on state too. */
+    psc_enable(PSC1, PSC1_GPIO);
+    power_hold();
     for (p = __bss_start; p < __bss_end; p++) *p = 0;
     cache_setup();
     irq_init();

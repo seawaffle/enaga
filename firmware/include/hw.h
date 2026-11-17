@@ -26,6 +26,7 @@ typedef unsigned long long u64;
 #define EDMA     0x01C00000u          /* EDMA3 CC0; PaRAM at +0x4000, shadow region 0 at +0x2000 */
 
 /* PSC modules used (docs/hardware.md, "Power and clocks") */
+#define PSC1_GPIO   3
 #define PSC1_SPI1   10
 #define PSC1_UART1  12
 #define PSC1_MCASP0 7
