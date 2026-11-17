@@ -47,6 +47,10 @@ static void math() {
     worst = 0;
     for (float x = 0; x <= 0.49f; x += 0.0007f) worst = std::fmax(worst, std::fabs(tan_pi(x) / std::tan(M_PI * x) - 1) * (x > 0));
     near("tan_pi relative error", worst, 0, 1e-4);
+    worst = 0;
+    for (float x = 1e-30f; x < 1e30f; x *= 1.0007f)
+        for (float y : {x, -x}) worst = std::fmax(worst, std::fabs(double(reciprocal(y)) * y - 1));
+    near("reciprocal relative error", worst, 0, 2e-7);
     near("semitones(12)", semitones(12), 2, 1e-6);
     near("soft_clip(0.1)", soft_clip(0.1f), 0.1, 2e-4);
     near("soft_clip(5)", soft_clip(5), 1, 1e-6);
@@ -417,6 +421,34 @@ static void blocks() {
         a.add_noise(ya.data(), 100, 0.5f);
         for (float &y : yb) y += 0.5f * b.bipolar();
         same("add_noise = bipolar", ya, yb);
+    }
+    // Math on buffers and SVF coefficients for many filters against the scalar functions.
+    {
+        std::vector<float> x(77), e, r, t, ge(77), k(77);
+        Random noise;
+        for (float &v : x) v = noise.bipolar();
+        e = r = t = x;
+        for (float &v : e) v *= 40.0f;
+        for (float &v : t) v = std::fabs(v) * 0.5f;
+        std::vector<float> e2 = e, r2 = r, t2 = t;
+        enaga_exp2_buffer(e.data(), 77);
+        enaga_reciprocal_buffer(r.data(), 77);
+        enaga_tan_pi_buffer(t.data(), 77);
+        for (float &v : e2) v = exp2(v);
+        for (float &v : r2) v = reciprocal(v);
+        for (float &v : t2) v = tan_pi(v);
+        same("exp2_buffer = exp2", e, e2);
+        same("reciprocal_buffer = reciprocal", r, r2);
+        same("tan_pi_buffer = tan_pi", t, t2);
+        for (int i = 0; i < 77; i++) { ge[i] = t[i]; k[i] = 2.0f - 1.98f * noise.unipolar(); }
+        std::vector<SvfCoefficients> c(77);
+        enaga_svf_coefficients_buffer(ge.data(), k.data(), c.data(), 77);
+        bool all = true;
+        for (int i = 0; i < 77; i++) {
+            auto f = SvfCoefficients::from_g(ge[i], k[i]);
+            all = all && c[i].a1 == f.a1 && c[i].a2 == f.a2 && c[i].a3 == f.a3 && c[i].k == f.k;
+        }
+        check(all, "svf_coefficients_buffer = from_g", all, 1);
     }
     // Buffer arithmetic against plain loops.
     {

@@ -31,6 +31,13 @@ void enaga_mix(float *out, const float *in, int n, float gain);          /* out 
 void enaga_scale(float *buf, int n, float gain);                         /* buf *= gain */
 void enaga_multiply(float *buf, const float *gain, int n);               /* buf *= gain (sample by sample) */
 void enaga_soft_clip_buffer(float *buf, int n, float drive);             /* buf = soft_clip(drive * buf) */
+/* Math on a buffer: the same values as math.h's functions, several times faster under cl6x than calling those
+ * one value at a time. For control-rate values too: gather a step's pitches or cutoffs of all voices into one
+ * array and convert them in one call. cl6x's pipelined loops for exp2 and tan_pi need 10 values or more; fewer
+ * take a slower plain loop, so pad a short buffer (8 voices' values plus 8 spare cost less than 8). */
+void enaga_exp2_buffer(float *buf, int n);                               /* buf = enaga_exp2(buf) */
+void enaga_reciprocal_buffer(float *buf, int n);                         /* buf = enaga_reciprocal(buf) */
+void enaga_tan_pi_buffer(float *buf, int n);                             /* buf = enaga_tan_pi(buf) */
 /* left += in * gl, right += in * gr, where gl and gr step by step_l and step_r before each sample (a gain ramp
  * across the block); *gl and *gr are left at their final values. */
 void enaga_ramp_stereo_add(const float *in, float *left, float *right, int n, float *gl, float *gr,
@@ -75,6 +82,9 @@ typedef struct { float a1, a2, a3, k; } enaga_svf_coefficients;
 typedef struct { float s1, s2; } enaga_svf;
 
 enum { ENAGA_SVF_LOW, ENAGA_SVF_BAND, ENAGA_SVF_HIGH };
+
+/* n sets of coefficients from g[i] and k[i] (see above), as SvfCoefficients::from_g: for many filters at once. */
+void enaga_svf_coefficients_buffer(const float *g, const float *k, enaga_svf_coefficients *c, int n);
 
 /* One sample: updates the state; *low, *band and *high get the three outputs. */
 static inline void enaga_svf_step(enaga_svf *s, const enaga_svf_coefficients *c, float x, float *low, float *band,

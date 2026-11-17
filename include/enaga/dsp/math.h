@@ -1,7 +1,8 @@
 /* Enaga DSP: fast float math without libm, for C and C++ (math.hpp wraps it as enaga::dsp). Provisional until 1.0.
  *
  * Accuracy is what audio needs, stated per function and checked by tests/test_dsp.py. Nothing here divides
- * except tan_pi (the C674x has no hardware divide; float division is a libgcc routine). Everything is written
+ * (the C674x has no hardware divide: a float division is a run of code, and under cl6x a call, which stops a loop
+ * from pipelining); enaga_reciprocal is 1 / x without one. Everything is written
  * with selects rather than branches, so loops that use it can be software-pipelined by cl6x (*.ti.c files). */
 #ifndef ENAGA_DSP_MATH_H
 #define ENAGA_DSP_MATH_H
@@ -28,6 +29,14 @@ static inline float enaga_bits_float(uint32_t u) {
     union { float f; uint32_t u; } v;
     v.u = u;
     return v.f;
+}
+
+/* 1 / x for 1e-37 < |x| < 1e37, relative error under 2e-7: three Newton steps from a guess made of the bits. */
+static inline float enaga_reciprocal(float x) {
+    float r = enaga_bits_float(0x7EF311C3u - enaga_float_bits(x));
+    r = r * (2.0f - x * r);
+    r = r * (2.0f - x * r);
+    return r * (2.0f - x * r);
 }
 
 /* 2^x, relative error under 3e-7 for -126 <= x <= 126 (clamped to that range). */
@@ -63,10 +72,10 @@ static inline float enaga_sin_turns(float t) {
 static inline float enaga_cos_turns(float t) { return enaga_sin_turns(t + 0.25f); }
 
 /* tan(pi x) for 0 <= x <= 0.49, relative error under 1e-4: the prewarped cutoff of a TPT filter, x = cutoff /
- * sample rate. One division. */
+ * sample rate. */
 static inline float enaga_tan_pi(float x) {
     x = enaga_clamp(x, 0.0f, 0.49f);
-    return enaga_sin_turns(0.5f * x) / enaga_cos_turns(0.5f * x);
+    return enaga_sin_turns(0.5f * x) * enaga_reciprocal(enaga_cos_turns(0.5f * x));
 }
 
 /* A soft clip: x for small x, smoothly to +-1 at |x| >= 1.5, cubic in between. */

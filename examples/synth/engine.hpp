@@ -52,6 +52,12 @@ private:
         enaga::dsp::Lfo lfo1, lfo2;
         float gain_l = 0, gain_r = 0;
     };
+    struct Control {                              // a voice's control values for one step
+        float d[destination_count];               // the matrix's sums per destination
+        float dt1, dt2, inv1, inv2;               // oscillator frequencies: cycles per sample, and 1 / that
+        enaga::dsp::SvfCoefficients c1, c2;       // c1: LP24's first stage
+        float target_l, target_r;
+    };
     struct Slot { uint8_t source, destination; float amount; };
     struct Settings {
         enaga::dsp::Wave wave1, wave2;
@@ -73,13 +79,15 @@ private:
     void handle(const NoteEvent &event);
     void start(Voice &voice, const NoteEvent &event, bool retrigger);
     Voice &allocate();
-    void render_voice(Voice &voice, float *left, float *right);
+    void control_step();
+    void render_voice(Voice &voice, const Control &control, float *left, float *right);
 
     float rate_ = 48000.0f, inv_rate_ = 1.0f / 48000.0f;
     Settings s_{};
     int16_t applied_[param_count] = {};
     bool first_ = true;
     Voice voices_[kVoices];
+    Control control_[kVoices];
     uint32_t clock_ = 0;
     float last_pitch_ = 60;
     enaga::dsp::Random random_;

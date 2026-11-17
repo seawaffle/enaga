@@ -2,8 +2,8 @@
 //
 // The C++ names for math.h (enaga_exp2 is enaga::dsp::exp2, and so on), where the accuracy of each is stated.
 // Block functions on buffers (enaga_mix, enaga_scale, ...) are in <enaga/dsp.h>, callable as they are.
-// Nothing here divides except tan_pi; the C674x has no hardware divide and float division goes through a libgcc
-// routine.
+// Nothing here divides (the C674x has no hardware divide); reciprocal is 1 / x without a division. Block forms of
+// exp2, reciprocal and tan_pi, for control values gathered into an array (one per voice, say), are in dsp.h.
 #pragma once
 
 #include <cstdint>
@@ -17,6 +17,7 @@ inline constexpr float pi = ENAGA_PI;
 inline float clamp(float x, float lo, float hi) { return enaga_clamp(x, lo, hi); }
 inline float lerp(float a, float b, float t) { return enaga_lerp(a, b, t); }
 inline int floor_int(float x) { return enaga_floor_int(x); }
+inline float reciprocal(float x) { return enaga_reciprocal(x); }
 inline float exp2(float x) { return enaga_exp2(x); }
 inline float exp(float x) { return enaga_exp(x); }
 inline float semitones(float s) { return enaga_semitones(s); }

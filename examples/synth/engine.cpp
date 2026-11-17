@@ -182,62 +182,98 @@ void Engine::handle(const NoteEvent &e) {
     }
 }
 
-void Engine::render_voice(Voice &v, float *left, float *right) {
-    // Modulation, once per control step.
-    float src[source_count];
-    src[src_off] = 0.0f;
-    src[src_env2] = v.env2.step(s_.env2);
-    src[src_env3] = v.env3.step(s_.env3);
-    src[src_lfo1] = v.lfo1.step(s_.lfo_shape[0], s_.lfo_rate[0] * v.lfo_rate[0], random_);
-    src[src_lfo2] = v.lfo2.step(s_.lfo_shape[1], s_.lfo_rate[1] * v.lfo_rate[1], random_);
-    src[src_velocity] = v.velocity;
-    src[src_pressure] = v.pressure;
-    src[src_key] = (float(v.note) - 60.0f) * (1.0f / 24.0f);
-    src[src_random] = v.random;
-    float d[destination_count] = {};
-    for (int i = 0; i < s_.slot_count; i++) d[s_.slots[i].destination] += s_.slots[i].amount * src[s_.slots[i].source];
-    v.lfo_rate[0] = exp2(clamp(d[dst_lfo1_rate], -1.0f, 1.0f) * 4.0f);   // +-4 octaves
-    v.lfo_rate[1] = exp2(clamp(d[dst_lfo2_rate], -1.0f, 1.0f) * 4.0f);
+// Modulation for every sounding voice, once per control step. The scalar part (envelopes, LFOs, the matrix) runs
+// voice by voice; the exponentials, tangents and reciprocals are gathered into arrays across the voices and
+// converted by the library's block functions, which cl6x pipelines: one voice at a time they were a third of the
+// synth's CPU.
+void Engine::control_step() {
+    constexpr int V = kVoices;
+    float ex[5 * V] = {};                         // exponents: LFO 1 and 2 rates, oscillators 1 and 2, cutoff
+    float g[2 * V] = {}, k[2 * V], inv[2 * V];
+    for (int j = 0; j < 2 * V; j++) k[j] = inv[j] = 1.0f;
+    for (int j = 0; j < V; j++) {
+        Voice &v = voices_[j];
+        if (!v.amp.active()) continue;
+        Control &c = control_[j];
+        float src[source_count];
+        src[src_off] = 0.0f;
+        src[src_env2] = v.env2.step(s_.env2);
+        src[src_env3] = v.env3.step(s_.env3);
+        src[src_lfo1] = v.lfo1.step(s_.lfo_shape[0], s_.lfo_rate[0] * v.lfo_rate[0], random_);
+        src[src_lfo2] = v.lfo2.step(s_.lfo_shape[1], s_.lfo_rate[1] * v.lfo_rate[1], random_);
+        src[src_velocity] = v.velocity;
+        src[src_pressure] = v.pressure;
+        src[src_key] = (float(v.note) - 60.0f) * (1.0f / 24.0f);
+        src[src_random] = v.random;
+        float d[destination_count] = {};          // a local: stores to it can't alias the settings
+        for (int i = 0; i < s_.slot_count; i++) d[s_.slots[i].destination] += s_.slots[i].amount * src[s_.slots[i].source];
+        ex[j] = clamp(d[dst_lfo1_rate], -1.0f, 1.0f) * 4.0f;                 // +-4 octaves
+        ex[V + j] = clamp(d[dst_lfo2_rate], -1.0f, 1.0f) * 4.0f;
 
-    v.pitch += s_.glide * (v.target - v.pitch);
-    float pitch = v.pitch + 12.0f * d[dst_pitch];
-    float hz1 = 440.0f * semitones(pitch + s_.offset1 + 12.0f * d[dst_pitch1] - 69.0f);
-    float hz2 = 440.0f * semitones(pitch + s_.offset2 + 12.0f * d[dst_pitch2] - 69.0f);
-    float dt1 = clamp(hz1 * inv_rate_, 1e-5f, 0.45f), dt2 = clamp(hz2 * inv_rate_, 1e-5f, 0.45f);
-    float inv1 = 1.0f / dt1, inv2 = 1.0f / dt2;
+        v.pitch += s_.glide * (v.target - v.pitch);
+        float pitch = v.pitch + 12.0f * d[dst_pitch];
+        ex[2 * V + j] = (pitch + s_.offset1 + 12.0f * d[dst_pitch1] - 69.0f) * (1.0f / 12.0f);
+        ex[3 * V + j] = (pitch + s_.offset2 + 12.0f * d[dst_pitch2] - 69.0f) * (1.0f / 12.0f);
+        float cutoff = s_.cutoff + s_.filter_env * src[src_env2] + s_.filter_key * (float(v.note) - 60.0f) +
+                       s_.filter_velocity * (v.velocity - 1.0f) + 60.0f * d[dst_cutoff];
+        ex[4 * V + j] = (cutoff - 69.0f) * (1.0f / 12.0f);
+        k[j] = 2.0f - 1.98f * clamp(s_.resonance + d[dst_resonance], 0.0f, 1.0f);
+        k[V + j] = 1.85f;
 
-    float cutoff = s_.cutoff + s_.filter_env * src[src_env2] + s_.filter_key * (float(v.note) - 60.0f) +
-                   s_.filter_velocity * (v.velocity - 1.0f) + 60.0f * d[dst_cutoff];
-    float g = tan_pi(clamp(440.0f * semitones(cutoff - 69.0f) * inv_rate_, 0.0002f, 0.45f));
-    float resonance = clamp(s_.resonance + d[dst_resonance], 0.0f, 1.0f);
-    SvfCoefficients c2 = SvfCoefficients::from_g(g, 2.0f - 1.98f * resonance);
+        float gain = (1.0f - s_.velocity_amp * (1.0f - v.velocity)) * clamp(1.0f + d[dst_amp], 0.0f, 2.0f);
+        float pan = clamp(d[dst_pan], -1.0f, 1.0f);
+        c.target_l = 0.5f * gain * (pan > 0.0f ? 1.0f - pan : 1.0f);
+        c.target_r = 0.5f * gain * (pan < 0.0f ? 1.0f + pan : 1.0f);
+        for (int i = 0; i < destination_count; i++) c.d[i] = d[i];
+    }
 
-    float gain = (1.0f - s_.velocity_amp * (1.0f - v.velocity)) * clamp(1.0f + d[dst_amp], 0.0f, 2.0f);
-    float pan = clamp(d[dst_pan], -1.0f, 1.0f);
-    float target_l = 0.5f * gain * (pan > 0.0f ? 1.0f - pan : 1.0f);
-    float target_r = 0.5f * gain * (pan < 0.0f ? 1.0f + pan : 1.0f);
+    enaga_exp2_buffer(ex, 5 * V);
+    for (int j = 0; j < V; j++) {
+        Voice &v = voices_[j];
+        if (!v.amp.active()) continue;
+        Control &c = control_[j];
+        v.lfo_rate[0] = ex[j];
+        v.lfo_rate[1] = ex[V + j];
+        inv[j] = c.dt1 = clamp(440.0f * ex[2 * V + j] * inv_rate_, 1e-5f, 0.45f);
+        inv[V + j] = c.dt2 = clamp(440.0f * ex[3 * V + j] * inv_rate_, 1e-5f, 0.45f);
+        g[j] = clamp(440.0f * ex[4 * V + j] * inv_rate_, 0.0002f, 0.45f);
+    }
+    for (int j = 0; j < V; j++) g[V + j] = g[j];
+    enaga_tan_pi_buffer(g, 2 * V);                // 16 rather than 8: see dsp.h on short buffers
+    enaga_reciprocal_buffer(inv, 2 * V);
+    SvfCoefficients coefficients[2 * V];
+    enaga_svf_coefficients_buffer(g, k, coefficients, s_.filter_type == filter_lp24 ? 2 * V : V);
+    for (int j = 0; j < V; j++) {
+        Control &c = control_[j];
+        c.inv1 = inv[j];
+        c.inv2 = inv[V + j];
+        c.c2 = coefficients[j];
+        c.c1 = coefficients[V + j];
+    }
+}
 
+void Engine::render_voice(Voice &v, const Control &c, float *left, float *right) {
+    const float *d = c.d;
     // Oscillators and noise. These, the filter and the amplitude are the library's block functions, built by cl6x
     // when it is installed.
     float buffer[kControl] = {};
     float level1 = s_.level1 * clamp(1.0f + d[dst_osc1], 0.0f, 2.0f);
     float level2 = s_.level2 * clamp(1.0f + d[dst_osc2], 0.0f, 2.0f);
     const float width = 0.45f * d[dst_width];
-    if (level1 > 0.0f) v.osc1.render_add(buffer, kControl, s_.wave1, dt1, inv1, level1, s_.width1 + width);
-    if (level2 > 0.0f) v.osc2.render_add(buffer, kControl, s_.wave2, dt2, inv2, level2, s_.width2 + width);
-    if (s_.level_sub > 0.0f) v.sub.render_add(buffer, kControl, Wave::pulse, 0.5f * dt1, 2.0f * inv1, s_.level_sub);
+    if (level1 > 0.0f) v.osc1.render_add(buffer, kControl, s_.wave1, c.dt1, c.inv1, level1, s_.width1 + width);
+    if (level2 > 0.0f) v.osc2.render_add(buffer, kControl, s_.wave2, c.dt2, c.inv2, level2, s_.width2 + width);
+    if (s_.level_sub > 0.0f)
+        v.sub.render_add(buffer, kControl, Wave::pulse, 0.5f * c.dt1, 2.0f * c.inv1, s_.level_sub);
     float noise = s_.level_noise * clamp(1.0f + d[dst_noise], 0.0f, 2.0f);
     if (noise > 0.0f) random_.add_noise(buffer, kControl, noise);
 
     // Drive and filter.
     enaga_soft_clip_buffer(buffer, kControl, s_.drive);
     switch (s_.filter_type) {
-    case filter_lp12: v.svf2.process(buffer, buffer, kControl, c2, Svf::low_pass); break;
-    case filter_lp24:
-        Svf::cascade(v.svf1, SvfCoefficients::from_g(g, 1.85f), v.svf2, c2, buffer, buffer, kControl);
-        break;
-    case filter_bp: v.svf2.process(buffer, buffer, kControl, c2, Svf::band_pass); break;
-    default: v.svf2.process(buffer, buffer, kControl, c2, Svf::high_pass); break;
+    case filter_lp12: v.svf2.process(buffer, buffer, kControl, c.c2, Svf::low_pass); break;
+    case filter_lp24: Svf::cascade(v.svf1, c.c1, v.svf2, c.c2, buffer, buffer, kControl); break;
+    case filter_bp: v.svf2.process(buffer, buffer, kControl, c.c2, Svf::band_pass); break;
+    default: v.svf2.process(buffer, buffer, kControl, c.c2, Svf::high_pass); break;
     }
 
     // Amplitude, per sample, with the control-rate gains ramped across the step.
@@ -245,10 +281,10 @@ void Engine::render_voice(Voice &v, float *left, float *right) {
     v.amp.render(amp, kControl, s_.amp);
     enaga_multiply(buffer, amp, kControl);
     float gl = v.gain_l, gr = v.gain_r;
-    enaga_ramp_stereo_add(buffer, left, right, kControl, &gl, &gr, (target_l - gl) * (1.0f / kControl),
-                          (target_r - gr) * (1.0f / kControl));
-    v.gain_l = target_l;
-    v.gain_r = target_r;
+    enaga_ramp_stereo_add(buffer, left, right, kControl, &gl, &gr, (c.target_l - gl) * (1.0f / kControl),
+                          (c.target_r - gr) * (1.0f / kControl));
+    v.gain_l = c.target_l;
+    v.gain_r = c.target_r;
 }
 
 void Engine::render(float *out, uint32_t frames) {
@@ -265,8 +301,9 @@ void Engine::render(float *out, uint32_t frames) {
     for (uint32_t at = 0; at < frames; at += kControl) {
         free_lfo_[0].step(s_.lfo_shape[0], s_.lfo_rate[0], random_);
         free_lfo_[1].step(s_.lfo_shape[1], s_.lfo_rate[1], random_);
-        for (Voice &v : voices_)
-            if (v.amp.active()) render_voice(v, left + at, right + at);
+        control_step();
+        for (int j = 0; j < kVoices; j++)
+            if (voices_[j].amp.active()) render_voice(voices_[j], control_[j], left + at, right + at);
     }
     for (Voice &v : voices_) active += v.amp.active();
     active_voices = active;

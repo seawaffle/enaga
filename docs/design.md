@@ -171,7 +171,7 @@ a unit", the CHECK app in `tests/unit/check`, `tools/unit_card.py`) and not yet 
 E2 has begun ahead of that session, driven by its exit app: pads as press / release with velocity, the start of
 the DSP library (`include/enaga/dsp`, tested on the host), and `examples/synth`, an eight-voice virtual analogue
 synthesizer (emulator-tested). The library's block functions, and apps' own `*.ti.c` files, are built with TI's
-cl6x when it is installed (GCC otherwise); the synth's worst case is 27 % of the audio budget that way and 52 % with
+cl6x when it is installed (GCC otherwise); the synth's worst case is 25 % of the audio budget that way and 55 % with
 GCC alone. Asynchronous file
 I/O and sample streaming, the rest of E2, are not started.
 
@@ -192,11 +192,12 @@ I/O and sample streaming, the rest of E2, are not started.
   with velocity at provisional thresholds (press 800, release under 600, velocity 127 from 12,000). To set from
   readings on a unit: the release threshold, the velocity scale, whether one reading after the threshold gives a
   usable velocity (a pad is read every 3.8 ms), per-pad calibration.
-- Synth on the unit: its CPU load with real caches (worst case on the emulator 27 % with cl6x, 52 % GCC only),
+- Synth on the unit: its CPU load with real caches (worst case on the emulator 25 % with cl6x, 55 % GCC only),
   the pad keyboard's feel. Saving patches waits for the file API; edits last until the app stops.
 - DSP library: the SVF runs at 21 cycles a sample under cl6x (its recurrence), twice a biquad's 10; a faster
-  form is worth trying. The synth's largest cost is now its per-voice modulation (8.3 % of the budget: exp2, tan_pi and three float
-  divisions per voice and control step, through libgcc), which is the app's own C++. The library is built from source with each app for now; a
+  form is worth trying. The synth's modulation is 6.4 % of the budget with cl6x, most of it the scalar part
+  (matrix 1.5 %, LFOs 1.1 %, envelopes 0.7 %); GCC compiles the math-buffer loops poorly (about 80 cycles an
+  exp2, mostly NOPs and constants rebuilt per use), so the GCC-only build lost 3 points to the restructure. The library is built from source with each app for now; a
   release SDK would ship it prebuilt. Before shipping cl6x-built code, check that it calls none of TI's run-time
   library (the link would show it: apps link only libgcc) and TI's licence terms.
 - USB stack: the C6748's USB0 is a Mentor MUSB controller; a TinyUSB port (TinyUSB has a MUSB driver for
@@ -539,3 +540,26 @@ against sin to 2e-6 and backwards; deliberately wrong FIR, delay, wavetable and 
 Emulator, one 64-sample block, cycles (GCC / cl6x; the same samples): biquad 1699 / 628, two in series 3032 / 664,
 FIR 16 taps 3269 / 1071, 128 taps 20559 / 6223, wavetable 1226 / 315, morph 2155 / 397, modulated delay read
 1180 / 306; for comparison the SVF 1444 / 1395. 32 tests pass.
+
+### The synth's modulation in blocks across voices (2026-11-17)
+
+Profiled per voice and control step (cl6x build), the modulation was 8.5 % of the budget: envelopes, LFOs and the
+matrix 2.7 %, pitch 3.2 % (five exp2 and two divisions), filter coefficients 2.3 % (tan_pi and two divisions),
+all scalar GCC code. GCC inlines float division (RCPSP and two refinements, not a libgcc call), so the cost was
+long serial chains. `Engine::control_step` now runs the scalar part voice by voice, gathers the exponents
+(LFO rates, both oscillators, cutoff), the frequencies to invert and the filters' g and k into arrays across the
+eight voices, and converts them with new library block functions: `enaga_exp2_buffer`, `enaga_tan_pi_buffer`,
+`enaga_reciprocal_buffer`, `enaga_svf_coefficients_buffer`. `render_voice` keeps only the audio.
+
+`enaga_reciprocal` (math.h): 1 / x by three Newton steps from a guess made of the bits, relative error under
+2e-7, only multiplies and adds. A division in a loop is a call under cl6x, which stops it pipelining; the
+reciprocal also gives the same bits under both compilers, where GCC's estimate-based division and cl6x's exact
+routine can differ in the last place. `tan_pi` and `SvfCoefficients::from_g` use it, so scalar and block forms
+agree exactly. cl6x pipelines exp2 at 7 cycles a value, tan_pi 16, reciprocal 5, but its pipelined exp2 and
+tan_pi loops need ten iterations: eight cutoffs went through the plain fallback loop (1,000 cycles a step), so
+the synth converts sixteen. Accumulating the matrix into the `Control` struct's array cost 30 % more than a
+local array (the stores might alias the settings).
+
+Result, worst case: cl6x 27 % to 25 % (modulation 8.5 % to 6.4 %: block math 1.2 %, the scalar part 5 %); GCC
+alone 52 % to 55 %, since GCC's code for the buffer loops is poor (above) and the padding doubles its tan_pi work.
+A four-way interleave for GCC and -O3 did not help. 32 tests pass.

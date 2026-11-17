@@ -1,6 +1,18 @@
 /* Enaga DSP: filters (include/enaga/dsp.h). Built by cl6x when installed, else GCC. */
 #include <enaga/dsp.h>
 
+void enaga_svf_coefficients_buffer(const float *restrict g, const float *restrict k,
+                                   enaga_svf_coefficients *restrict c, int n) {
+    int i;
+    for (i = 0; i < n; i++) {
+        const float a1 = enaga_reciprocal(1.0f + g[i] * (g[i] + k[i])), a2 = g[i] * a1;
+        c[i].k = k[i];
+        c[i].a1 = a1;
+        c[i].a2 = a2;
+        c[i].a3 = g[i] * a2;
+    }
+}
+
 void enaga_svf_process(enaga_svf *s, const enaga_svf_coefficients *c, int output, const float *in, float *out,
                        int n) {
     /* Coefficients and state in locals, so the loops keep them in registers. */

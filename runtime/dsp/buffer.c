@@ -51,3 +51,18 @@ void enaga_noise_add(uint32_t *state, float *restrict out, int n, float level) {
     for (i = 0; i < n; i++) out[i] += level * enaga_bipolar(enaga_xorshift(&x));
     *state = x;
 }
+
+void enaga_exp2_buffer(float *restrict buf, int n) {
+    int i;
+    for (i = 0; i < n; i++) buf[i] = enaga_exp2(buf[i]);
+}
+
+void enaga_reciprocal_buffer(float *restrict buf, int n) {
+    int i;
+    for (i = 0; i < n; i++) buf[i] = enaga_reciprocal(buf[i]);
+}
+
+void enaga_tan_pi_buffer(float *restrict buf, int n) {
+    int i;
+    for (i = 0; i < n; i++) buf[i] = enaga_tan_pi(buf[i]);
+}

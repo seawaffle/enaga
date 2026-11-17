@@ -20,12 +20,15 @@ struct SvfCoefficients : enaga_svf_coefficients {
     static SvfCoefficients from_g(float g, float k) {
         SvfCoefficients c;
         c.k = k;
-        c.a1 = 1.0f / (1.0f + g * (g + k));
+        c.a1 = reciprocal(1.0f + g * (g + k));
         c.a2 = g * c.a1;
         c.a3 = g * c.a2;
         return c;
     }
 };
+
+// The same layout as the C struct, so an array of either serves enaga_svf_coefficients_buffer.
+static_assert(sizeof(SvfCoefficients) == sizeof(enaga_svf_coefficients));
 
 class Svf {
 public:

@@ -53,14 +53,15 @@ ENAGA_APP(Beep)
   modulated, interpolated block reads for chorus and flanging), a stereo delay and a reverb. Its classes wrap a C interface, `<enaga/dsp.h>`:
   plain state structs, per-sample steps, and block functions that process a buffer per call (`Svf::process`,
   `Envelope::render`, `Oscillator::render_add`, `StereoDelay::process`, `Reverb::process`, delay-line block reads
-  and writes, and buffer arithmetic such as `enaga_mix`, `enaga_multiply`, `enaga_ramp_stereo_add`). The block functions (`runtime/dsp`) are built with TI's C6000 compiler (cl6x) when it
+  and writes, buffer arithmetic such as `enaga_mix`, `enaga_multiply`, `enaga_ramp_stereo_add`, and `exp2`, `tan_pi` and
+  `reciprocal` over a buffer, for control values gathered across voices). The block functions (`runtime/dsp`) are built with TI's C6000 compiler (cl6x) when it
   is installed, several times faster than GCC's code, and with GCC otherwise; both give the same samples. Process
   in blocks: per-sample `step()` calls are there for code that needs them (feedback loops), but compile with GCC.
 - Inner loops of your own can go in `*.ti.c` files, built by cl6x the same way (see "Building"). cl6x pipelines
   only loops without branches inside: use `cond ? a : b` selects rather than `if`. The files must be C, compile
   with GCC too, and export plain C functions, since C++ objects don't mix between the two compilers; they can
   include `<enaga/dsp.h>` and work on the library's state. Everything else builds with GCC (`-O2
-  -funroll-loops`). The synth's worst case takes 27% of the audio budget with cl6x and 52% with GCC alone
+  -funroll-loops`). The synth's worst case takes 25% of the audio budget with cl6x and 55% with GCC alone
   (emulator figures).
 - `enaga::fatal(reason)` stops the app; Enaga shows the reason and keeps running. Enaga's watchdog stops an
   app the same way when a main-loop call (including `init` and `stop`) has not returned after 1 s, or `audio`
