@@ -12,6 +12,7 @@ const char *const kSync[] = {"FREE", "KEY"};
 const char *const kModes[] = {"POLY", "MONO", "LEGATO"};
 const char *const kDelayModes[] = {"STEREO", "PING"};
 const char *const kLayouts[] = {"PIANO", "CHROMA"};
+const char *const kOnOff[] = {"OFF", "ON"};
 const char *const kSources[] = {"OFF", "ENV2", "ENV3", "LFO1", "LFO2", "VELO", "PRESS", "KEY", "RANDOM"};
 const char *const kDestinations[] = {"PITCH", "PITCH1", "PITCH2", "WIDTH", "OSC1", "OSC2", "NOISE", "CUTOFF",
                                      "RESO", "AMP", "PAN", "L1RATE", "L2RATE"};
@@ -82,6 +83,17 @@ constexpr ParamInfo kAfterMod[] = {
     {"VOLUME", 0, 100, 70, Unit::number, nullptr},
     {"PADS", 0, 1, layout_piano, Unit::choice, kLayouts},
     {"STEPVL", 1, 127, 100, Unit::number, nullptr},     // the velocity STEP keys play at
+
+    {"SYNC", 0, 1, 0, Unit::choice, kOnOff},            // OSC 2 restarts with OSC 1
+    {"RING", 0, 100, 0, Unit::number, nullptr},          // OSC 1 x OSC 2 into the mixer
+    {"FADE", 0, 127, 0, Unit::time, nullptr},            // LFO 1 fades in over this after the note starts
+    {"FADE", 0, 127, 0, Unit::time, nullptr},
+    {"RATE", 0, 127, 47, Unit::rate, nullptr},           // chorus sweep, 0.5 Hz
+    {"DEPTH", 0, 100, 50, Unit::number, nullptr},
+    {"MIX", 0, 100, 0, Unit::number, nullptr},
+    {"VOICES", 1, 4, 1, Unit::number, nullptr},          // voices per note
+    {"DETUNE", 0, 100, 15, Unit::number, nullptr},       // cents either side, outermost voices
+    {"SPREAD", 0, 100, 50, Unit::number, nullptr},       // across the stereo field
 };
 
 static_assert(sizeof kTable / sizeof kTable[0] == mod_first, "parameter table out of step with Param");
@@ -135,7 +147,10 @@ void format(int param, int value, char *text) {
     case Unit::decay:
     case Unit::delay_time: {
         float s = p.unit == Unit::time ? seconds(value) : p.unit == Unit::decay ? decay_s(value) : delay_s(value);
-        if (param == voice_glide && value == 0) { append(out, "OFF"); break; }
+        if ((param == voice_glide || param == lfo1_fade || param == lfo2_fade) && value == 0) {
+            append(out, "OFF");
+            break;
+        }
         if (s < 1.0f) { append_short(out, s * 1000.0f); append(out, "MS"); }
         else { append_short(out, s); *out++ = 'S'; }
         break;

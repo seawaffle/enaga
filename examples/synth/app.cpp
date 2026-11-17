@@ -1,8 +1,9 @@
 // Synth: an eight-voice virtual analogue synthesizer, the example of a whole Enaga app.
 //
-// Sound: two oscillators (saw, pulse, triangle, sine) with a sub-oscillator and noise; a state-variable filter
-// (low-pass 12 or 24 dB, band-pass, high-pass) with drive; three ADSR envelopes (amplitude, and ENV2 / ENV3 to
-// assign); two LFOs; an eight-slot modulation matrix; a stereo delay and a reverb. POLY, MONO or LEGATO, with glide.
+// Sound: two oscillators (saw, pulse, triangle, sine) with a sub-oscillator and noise, hard sync of OSC 2 to
+// OSC 1 and a ring modulator; a state-variable filter (low-pass 12 or 24 dB, band-pass, high-pass) with drive;
+// three ADSR envelopes (amplitude, and ENV2 / ENV3 to assign); two LFOs that can fade in; an eight-slot modulation
+// matrix; chorus, a stereo delay and a reverb. POLY, MONO or LEGATO, with glide; up to four unison voices a note.
 //
 // Playing: the pads are a keyboard (the lower row the white keys C to C, the upper row the black ones; or all
 // fifteen chromatic), velocity from the pad and pressure as a modulation source. STEP 1-16 play the chromatic
@@ -38,6 +39,7 @@ constexpr Group kOsc[] = {
     {"OSC 1", 4, {osc1_wave, osc1_width, osc1_semi, osc1_fine}},
     {"OSC 2", 4, {osc2_wave, osc2_width, osc2_semi, osc2_fine}},
     {"MIXER", 4, {mix_osc1, mix_osc2, mix_sub, mix_noise}},
+    {"OSC MOD", 2, {osc2_sync, mix_ring}},
 };
 constexpr Group kFilter[] = {
     {"FILTER", 4, {filter_type, filter_cutoff, filter_resonance, filter_drive}},
@@ -49,8 +51,8 @@ constexpr Group kEnv[] = {
     {"ENV 3", 4, {env3_attack, env3_decay, env3_sustain, env3_release}},
 };
 constexpr Group kLfo[] = {
-    {"LFO 1", 3, {lfo1_shape, lfo1_rate, lfo1_sync}},
-    {"LFO 2", 3, {lfo2_shape, lfo2_rate, lfo2_sync}},
+    {"LFO 1", 4, {lfo1_shape, lfo1_rate, lfo1_sync, lfo1_fade}},
+    {"LFO 2", 4, {lfo2_shape, lfo2_rate, lfo2_sync, lfo2_fade}},
 };
 constexpr Group kMod[] = {
 #define SLOT(n) {"MOD " #n, 3, {mod_source(n - 1), mod_destination(n - 1), mod_amount(n - 1)}}
@@ -58,18 +60,20 @@ constexpr Group kMod[] = {
 #undef SLOT
 };
 constexpr Group kFx[] = {
+    {"CHORUS", 3, {chorus_rate, chorus_depth, chorus_mix}},
     {"DELAY", 4, {delay_time, delay_feedback, delay_tone, delay_mix}},
     {"REVERB", 3, {reverb_decay, reverb_damping, reverb_mix}},
     {"DELAY ROUTING", 2, {delay_mode, delay_send}},
 };
 constexpr Group kVoice[] = {
     {"VOICE", 4, {voice_mode, voice_glide, voice_velocity, voice_volume}},
+    {"UNISON", 3, {unison_voices, unison_detune, unison_spread}},
     {"KEYS", 2, {voice_layout, voice_step_velocity}},
 };
 constexpr Page kPages[] = {
-    {"OSC", ENAGA_KEY_F2, kOsc, 3}, {"FILTER", ENAGA_KEY_F3, kFilter, 2}, {"ENV", ENAGA_KEY_F4, kEnv, 3},
-    {"LFO", ENAGA_KEY_F5, kLfo, 2}, {"MOD", ENAGA_KEY_F6, kMod, 8}, {"FX", ENAGA_KEY_F7, kFx, 3},
-    {"VOICE", ENAGA_KEY_F8, kVoice, 2},
+    {"OSC", ENAGA_KEY_F2, kOsc, 4}, {"FILTER", ENAGA_KEY_F3, kFilter, 2}, {"ENV", ENAGA_KEY_F4, kEnv, 3},
+    {"LFO", ENAGA_KEY_F5, kLfo, 2}, {"MOD", ENAGA_KEY_F6, kMod, 8}, {"FX", ENAGA_KEY_F7, kFx, 4},
+    {"VOICE", ENAGA_KEY_F8, kVoice, 3},
 };
 constexpr int kPageCount = sizeof kPages / sizeof kPages[0];
 constexpr int kPatchPage = kPageCount;      // F1 + F2; page_ == kPatchPage shows the patch list

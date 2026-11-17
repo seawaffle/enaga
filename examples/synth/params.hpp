@@ -42,6 +42,9 @@ enum Param : uint8_t {
     reverb_decay, reverb_damping, reverb_mix,
     // VOICE
     voice_mode, voice_glide, voice_velocity, voice_volume, voice_layout, voice_step_velocity,
+    // Added later, kept at the end so the earlier numbers stay: OSC MOD, the LFOs' fades, CHORUS, UNISON
+    osc2_sync, mix_ring, lfo1_fade, lfo2_fade, chorus_rate, chorus_depth, chorus_mix,
+    unison_voices, unison_detune, unison_spread,
     param_count
 };
 

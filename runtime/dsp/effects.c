@@ -237,3 +237,63 @@ void enaga_reverb_process(enaga_reverb *r, const float *in_l, const float *in_r,
         n -= m;
     }
 }
+
+/* ---- Chorus ----
+ *
+ * Chunks of up to 64 samples: the sweep's delays for the chunk, the two lines read (enaga_delay_read_linear needs
+ * every delay[i] >= i, which enaga_chorus_set's depth keeps), the input written, the wet added. Reading before
+ * writing lets out be in. */
+
+#define CHORUS_CHUNK 64
+
+static uint32_t chorus_size(float rate) { return enaga_delay_size((uint32_t)(0.016f * rate) + 4); }
+
+uint32_t enaga_chorus_memory(float rate) { return 2 * chorus_size(rate); }
+
+void enaga_chorus_init(enaga_chorus *c, float *memory, float rate) {
+    const uint32_t size = chorus_size(rate);
+    enaga_delay_init(&c->left, memory, size);
+    enaga_delay_init(&c->right, memory + size, size);
+    c->phase = c->step = 0;
+    c->base = 0.008f * rate;
+    c->depth = 0.0f;
+    c->rate = rate;
+}
+
+void enaga_chorus_set(enaga_chorus *c, float sweep_hz, float depth) {
+    const float most = enaga_clamp(0.005f * c->rate, 0.0f, c->base - (float)(CHORUS_CHUNK + 2));
+    c->step = (uint32_t)(int32_t)(enaga_clamp(sweep_hz * enaga_reciprocal(c->rate), 0.0f, 0.01f) * 4294967296.0f);
+    c->depth = enaga_clamp(depth, 0.0f, 1.0f) * most;
+}
+
+void enaga_chorus_process(enaga_chorus *c, const float *in_l, const float *in_r, float *out_l, float *out_r, int n,
+                          float mix) {
+    const float base = c->base, depth = c->depth;
+    const uint32_t step = c->step;
+    uint32_t phase = c->phase;
+    while (n > 0) {
+        const int m = n < CHORUS_CHUNK ? n : CHORUS_CHUNK;
+        float dl[CHORUS_CHUNK], dr[CHORUS_CHUNK], wl[CHORUS_CHUNK], wr[CHORUS_CHUNK];
+        int i;
+        for (i = 0; i < m; i++) {
+            const float t = enaga_unipolar(phase + (uint32_t)i * step);
+            dl[i] = base + depth * enaga_sin_turns(t);
+            dr[i] = base + depth * enaga_sin_turns(t + 0.25f);
+        }
+        enaga_delay_read_linear(&c->left, dl, wl, m);
+        enaga_delay_read_linear(&c->right, dr, wr, m);
+        enaga_delay_write_block(&c->left, in_l, m);
+        enaga_delay_write_block(&c->right, in_r, m);
+        for (i = 0; i < m; i++) {
+            out_l[i] += mix * wl[i];
+            out_r[i] += mix * wr[i];
+        }
+        phase += (uint32_t)m * step;
+        in_l += m;
+        in_r += m;
+        out_l += m;
+        out_r += m;
+        n -= m;
+    }
+    c->phase = phase;
+}

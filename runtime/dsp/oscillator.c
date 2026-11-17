@@ -92,3 +92,90 @@ void enaga_wavetable_morph_add(enaga_oscillator *o, const float *restrict a, con
     }
     o->phase = p;
 }
+
+/* ---- Hard sync ----
+ *
+ * Each sample is the naive wave plus, for every jump of height J that happened a fraction a of a sample ago, the
+ * two-sample PolyBLEP correction: -J/2 (1 - a)^2 on this sample and J/2 a^2 on the one before (the same residual
+ * as blep() above). So a sample is finished only when the next one's jumps are known: the loop computes the phase
+ * a sample ahead and writes the sample before, which keeps it in step with enaga_oscillator_add. */
+
+/* The naive waves, as expressions of the phase x (and the pulse's width w). */
+#define NAIVE_SAW(x, w) (2.0f * (x) - 1.0f)
+#define NAIVE_PULSE(x, w) ((x) < (w) ? 1.0f : -1.0f)
+#define NAIVE_TRIANGLE(x, w) ((x) < 0.5f ? 4.0f * (x) - 1.0f : 3.0f - 4.0f * (x))
+#define NAIVE_SINE(x, w) enaga_sin_turns(x)
+
+/* One wave's loop, written out by a macro for each wave so the loop is specialised. WRAP_JUMP is the wave's own
+ * jump at the end of a cycle: saw +1 to -1, pulse -1 to +1; triangle and sine are continuous. For cl6x the loop is
+ * branch-free (both cases computed, one selected), which lets it pipeline; GCC, which doesn't pipeline, is faster
+ * branching around the restart's work (about one sample in a hundred). The arithmetic, so the result, is the
+ * same. */
+#ifdef __TI_COMPILER_VERSION__
+#define SYNC_RESTART(NAIVE)                                                                                        \
+    const float a = enaga_clamp(enaga_unipolar(pm1) * inv_dt_m, 0.0f, 1.0f);                                      \
+    const float at = enaga_unipolar(p + (uint32_t)(int32_t)((1.0f - a) * dt * TURN));                             \
+    const uint32_t p1 = restart ? (uint32_t)(int32_t)(a * dt * TURN) : free;                                       \
+    const float x0 = enaga_unipolar(p), x1 = enaga_unipolar(p1);                                                  \
+    const float jump = restart ? NAIVE(0.0f, width) - NAIVE(at, width) : wrap ? wrap_jump : 0.0f;                 \
+    const float since = restart ? a : x1 * inv_dt;
+#else
+#define SYNC_RESTART(NAIVE)                                                                                        \
+    float a = 0.0f, at = 0.0f, jump, since;                                                                        \
+    uint32_t p1 = free;                                                                                            \
+    if (restart) {                                                                                                 \
+        a = enaga_clamp(enaga_unipolar(pm1) * inv_dt_m, 0.0f, 1.0f);                                              \
+        at = enaga_unipolar(p + (uint32_t)(int32_t)((1.0f - a) * dt * TURN));                                     \
+        p1 = (uint32_t)(int32_t)(a * dt * TURN);                                                                   \
+    }                                                                                                              \
+    const float x0 = enaga_unipolar(p), x1 = enaga_unipolar(p1);                                                  \
+    if (restart) {                                                                                                 \
+        jump = NAIVE(0.0f, width) - NAIVE(at, width);                                                              \
+        since = a;                                                                                                 \
+    } else {                                                                                                       \
+        jump = wrap ? wrap_jump : 0.0f;                                                                            \
+        since = x1 * inv_dt;                                                                                       \
+    }
+#endif
+#define SYNC_LOOP(NAIVE, PULSE, WRAP_JUMP)                                                                         \
+    for (i = 0; i < n; i++) {                                                                                      \
+        const float wrap_jump = (WRAP_JUMP);                                                                       \
+        const uint32_t pm1 = pm + dpm, free = p + dp;                                                              \
+        const int restart = pm1 < pm, wrap = free < p;                                                             \
+        /* If the master wrapped, a samples ago, the slave stopped at `at` and restarted; the jump this sample is \
+         * the restart's, or else the wave's own wrap, `since` samples ago. */                                     \
+        SYNC_RESTART(NAIVE)                                                                                        \
+        float cur = NAIVE(x1, width) - 0.5f * jump * (1.0f - since) * (1.0f - since);                             \
+        prev += 0.5f * jump * since * since;                                                                       \
+        if (PULSE) {    /* the falling edge at width: on the way to a restart, or in a free sample */             \
+            const int edge = (x0 < width) & (restart ? at >= width : (!wrap) & (x1 >= width));                    \
+            const float e = restart ? a + (at - width) * inv_dt : (x1 - width) * inv_dt;                          \
+            cur += edge ? (1.0f - e) * (1.0f - e) : 0.0f;                                                          \
+            prev -= edge ? e * e : 0.0f;                                                                           \
+        }                                                                                                          \
+        out[i] += level * (prev + dc);                                                                             \
+        prev = cur;                                                                                                \
+        pm = pm1;                                                                                                  \
+        p = p1;                                                                                                    \
+    }
+
+void enaga_oscillator_sync_add(enaga_oscillator *o, float *carry, const enaga_oscillator *master, float dt_m,
+                               float inv_dt_m, float *restrict out, int n, int wave, float dt, float inv_dt,
+                               float level, float width) {
+    const uint32_t dpm = (uint32_t)(int32_t)(dt_m * TURN), dp = (uint32_t)(int32_t)(dt * TURN);
+    uint32_t pm = master->phase, p = o->phase;
+    float prev = *carry, dc = 0.0f;
+    int i;
+    width = enaga_clamp(width, 0.05f, 0.95f);
+    switch (wave) {
+    case ENAGA_WAVE_SAW: SYNC_LOOP(NAIVE_SAW, 0, -2.0f) break;
+    case ENAGA_WAVE_PULSE:
+        dc = 1.0f - 2.0f * width;       /* DC removed, as enaga_oscillator_add's pulse */
+        SYNC_LOOP(NAIVE_PULSE, 1, 2.0f)
+        break;
+    case ENAGA_WAVE_TRIANGLE: SYNC_LOOP(NAIVE_TRIANGLE, 0, 0.0f) break;
+    default: SYNC_LOOP(NAIVE_SINE, 0, 0.0f) break;
+    }
+    o->phase = p;
+    *carry = prev;
+}

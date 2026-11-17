@@ -607,6 +607,143 @@ static void building_blocks() {
     }
 }
 
+// Chorus, hard sync and the product mix.
+static void synth_blocks() {
+    Random noise;
+    std::vector<float> in(4096);
+    for (float &x : in) x = noise.bipolar();
+    const int sizes[] = {64, 37, 1, 16, 100, 64, 13, 200};
+    // Chorus against a per-sample reference on DelayLine (tap_linear, then write), also in place, at two rates.
+    for (float rate : {48000.0f, 22050.0f}) {
+        Chorus a, b;
+        a.init(rate);
+        b.init(rate);
+        a.set(1.3f, 0.8f);
+        b.set(1.3f, 0.8f);
+        DelayLine rl(uint32_t(0.016f * rate) + 4), rr(uint32_t(0.016f * rate) + 4);
+        const enaga_chorus &c = a.state_;
+        std::vector<float> al(in.size()), ar(in.size()), bl = in, br = in, wl(in.size()), wr(in.size());
+        std::vector<float> in_r(in.rbegin(), in.rend());
+        std::vector<float> br2 = in_r;
+        for (size_t at = 0, k = 0; at < in.size(); k++) {
+            int n = int(std::min<size_t>(sizes[k % 8], in.size() - at));
+            a.process(&in[at], &in_r[at], &al[at], &ar[at], n, 0.7f);
+            b.process(&bl[at], &br2[at], &bl[at], &br2[at], n, 0.7f);
+            at += n;
+        }
+        for (size_t i = 0; i < in.size(); i++) {
+            const float t = enaga_unipolar(uint32_t(i) * c.step);
+            wl[i] = 0.7f * rl.tap_linear(c.base + c.depth * sin_turns(t));
+            wr[i] = 0.7f * rr.tap_linear(c.base + c.depth * sin_turns(t + 0.25f));
+            rl.write(in[i]);
+            rr.write(in_r[i]);
+        }
+        same("chorus left = per sample", al, wl);
+        same("chorus right = per sample", ar, wr);
+        for (size_t i = 0; i < in.size(); i++) { wl[i] += in[i]; wr[i] += in_r[i]; }
+        same("chorus in place left", bl, wl);
+        same("chorus in place right", br2, wr);
+        check(c.base - c.depth >= 66, "chorus shortest delay", c.base - c.depth, 66);
+    }
+    // Hard sync with a master that never wraps: the wave's own jumps alone, as render_add band-limits them.
+    for (Wave wave : {Wave::saw, Wave::pulse}) {
+        Oscillator master, a, b;
+        float carry = 0.0f;
+        const float dt = 0.0173f;
+        std::vector<float> ya(4096), yb(4096);
+        a.sync_add(ya.data(), 4096, master, 1e-6f, 1e6f, carry, wave, dt, 1 / dt, 1.0f, 0.3f);
+        b.render_add(yb.data(), 4096, wave, dt, 1 / dt, 1.0f, 0.3f);
+        double worst = 0;
+        for (int i = 1; i < 4096; i++) worst = std::fmax(worst, std::fabs(ya[i] - yb[i]));
+        near(wave == Wave::saw ? "sync saw without restarts = render_add" : "sync pulse without restarts = render_add",
+             worst, 0, 2e-5);
+    }
+    // Hard sync: blocks of 64 against uneven blocks; periodic at the master's period (128 samples); smoother than
+    // the naive restart (second differences: the energy above the band).
+    for (int wave = 0; wave < 4; wave++) {
+        const float dt_m = 1.0f / 128, dt = 0.0291f;
+        auto run = [&](int block, std::vector<float> &y) {
+            Oscillator master, o;
+            float carry = 0.0f;
+            for (size_t at = 0, k = 0; at < y.size(); k++) {
+                int n = block ? block : int(std::min<size_t>(sizes[k % 8], y.size() - at));
+                n = int(std::min<size_t>(size_t(n), y.size() - at));
+                o.sync_add(&y[at], n, master, dt_m, 1 / dt_m, carry, Wave(wave), dt, 1 / dt, 1.0f, 0.4f);
+                master.advance(n, dt_m);
+                at += n;
+            }
+        };
+        std::vector<float> ya(4096), yb(4096);
+        run(64, ya);
+        run(0, yb);
+        same("sync in blocks of 64 or uneven", ya, yb);
+        double worst = 0;
+        for (int i = 128; i + 128 < 4096; i++) worst = std::fmax(worst, std::fabs(ya[i] - ya[i + 128]));
+        near("sync period = the master's", worst, 0, 1e-6);
+        if (wave <= int(Wave::pulse)) {
+            double smooth = 0, rough = 0;
+            for (int i = 2; i < 4096; i++) {
+                auto naive = [&](int j) {
+                    double x = std::fmod(std::fmod(j * double(dt_m), 1.0) / dt_m * dt, 1.0);
+                    return wave == int(Wave::saw) ? 2 * x - 1 : (x < 0.4 ? 1.0 : -1.0);
+                };
+                double d2 = ya[i] - 2 * ya[i - 1] + ya[i - 2], n2 = naive(i) - 2 * naive(i - 1) + naive(i - 2);
+                smooth += d2 * d2;
+                rough += n2 * n2;
+            }
+            check(smooth < 0.5 * rough, "sync band-limited: less energy at the top", smooth / rough, 0.5);
+        }
+    }
+    // Hard sync with restarts between samples (a master period of 100.37 samples): a sine away from its restarts
+    // follows the exact synced phase, and a pulse whose falling edge often shares a sample with a restart keeps the
+    // continuous wave's mean (each jump's correction in the right place).
+    {
+        const float dt_m = 1.0f / 100.37f, dt = dt_m * 1.45f;
+        const uint32_t dpm = uint32_t(int32_t(dt_m * 4294967296.0f)), dp = uint32_t(int32_t(dt * 4294967296.0f));
+        Oscillator m, o;
+        float carry = 0.0f;
+        std::vector<float> y(64 * 312);
+        for (size_t at = 0; at < y.size(); at += 64) {
+            o.sync_add(&y[at], 64, m, dt_m, 1 / dt_m, carry, Wave::sine, dt, 1 / dt, 1.0f);
+            m.advance(64, dt_m);
+        }
+        double worst = 0;
+        for (size_t j = 0; j < y.size(); j++) {
+            double since = double(uint32_t(j * dpm)) / dpm;      // samples since the master's last wrap
+            // A restart's correction touches the samples either side of it: skip the first after and the last before.
+            if (since < 1 || since + 1 >= 1 / double(dt_m) || j < 200) continue;
+            worst = std::fmax(worst, std::fabs(y[j] - std::sin(2 * M_PI * std::fmod(since * dp / 4294967296.0, 1.0))));
+        }
+        near("sync sine follows the synced phase", worst, 0, 1e-4);
+
+        // Ratios 1.45 and 1.441: the edge 0.7 and 0.07 of a sample before the restart.
+        for (float ratio : {1.45f, 1.441f}) {
+            const float width = 0.44f, dts = dt_m * ratio;
+            Oscillator m2, q;
+            carry = 0.0f;
+            std::vector<float> z(200000);
+            for (size_t at = 0; at < z.size(); at += 64) {
+                q.sync_add(&z[at], 64, m2, dt_m, 1 / dt_m, carry, Wave::pulse, dts, 1 / dts, 1.0f, width);
+                m2.advance(64, dt_m);
+            }
+            double mean = 0;
+            for (float v : z) mean += v;
+            mean /= double(z.size());
+            // Over a master period the slave runs `ratio` cycles, high for 2 x 0.44 of them; DC removal 1 - 2 width.
+            const double continuous = (2 * width - (ratio - 2 * width)) / ratio + (1 - 2 * width);
+            near("sync pulse mean = the continuous wave's", mean, continuous, 3e-4);
+        }
+    }
+    // Product mix.
+    {
+        std::vector<float> a(37), b(37), y1(37, 0.25f), y2 = y1;
+        for (int i = 0; i < 37; i++) { a[i] = noise.bipolar(); b[i] = noise.bipolar(); }
+        enaga_mix_product(y1.data(), a.data(), b.data(), 37, 0.6f);
+        for (int i = 0; i < 37; i++) y2[i] += 0.6f * a[i] * b[i];
+        same("mix_product", y1, y2);
+    }
+}
+
 int main() {
     math();
     oscillators();
@@ -616,6 +753,7 @@ int main() {
     blocks();
     effects_against_reference();
     building_blocks();
+    synth_blocks();
     if (!failures) std::printf("ok\n");
     return failures ? 1 : 0;
 }

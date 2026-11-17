@@ -12,6 +12,7 @@ float percent(int v) { return float(v) * 0.01f; }
 void Engine::init(float sample_rate) {
     rate_ = sample_rate;
     inv_rate_ = 1.0f / sample_rate;
+    chorus_.init(sample_rate);
     delay_.init(1.6f, sample_rate);
     reverb_.init(sample_rate);
     for (int p = 0; p < param_count; p++) values[p] = info(p).init;
@@ -67,7 +68,16 @@ void Engine::update_settings() {
         s_.lfo_shape[i] = LfoShape(v[base]);
         s_.lfo_rate[i] = rate_hz(v[base + 1]) / control_rate;
         s_.lfo_key_sync[i] = v[base + 2] != 0;
+        int fade = v[i ? lfo2_fade : lfo1_fade];
+        s_.lfo_fade_step[i] = fade == 0 ? 1.0f : 1.0f / (seconds(fade) * control_rate);
     }
+    s_.sync = v[osc2_sync] != 0;
+    s_.ring = percent(v[mix_ring]);
+    s_.unison = v[unison_voices];
+    s_.detune = 0.01f * float(v[unison_detune]);
+    s_.spread = percent(v[unison_spread]);
+    static constexpr float kUnisonGain[] = {1.0f, 0.7071f, 0.5774f, 0.5f};   // 1 / sqrt(voices)
+    s_.unison_gain = kUnisonGain[s_.unison - 1];
     s_.slot_count = 0;
     for (int i = 0; i < mod_slots; i++)
         if (v[mod_source(i)] != src_off && v[mod_amount(i)] != 0)
@@ -78,6 +88,8 @@ void Engine::update_settings() {
     s_.velocity_amp = percent(v[voice_velocity]);
     s_.volume = percent(v[voice_volume]) * percent(v[voice_volume]);
 
+    chorus_.set(rate_hz(v[chorus_rate]), percent(v[chorus_depth]));
+    chorus_mix_ = percent(v[chorus_mix]);
     delay_.set(delay_s(v[delay_time]), percent(v[delay_feedback]), percent(v[delay_tone]), v[delay_mode] != 0);
     delay_mix_ = percent(v[delay_mix]);
     delay_send_ = percent(v[delay_send]);
@@ -97,7 +109,8 @@ Engine::Voice &Engine::allocate() {
     return *best;
 }
 
-void Engine::start(Voice &voice, const NoteEvent &event, bool retrigger) {
+void Engine::start(Voice &voice, const NoteEvent &event, bool retrigger, float unison) {
+    voice.unison = unison;
     voice.key = event.key;
     voice.note = event.note;
     voice.gate = true;
@@ -109,9 +122,18 @@ void Engine::start(Voice &voice, const NoteEvent &event, bool retrigger) {
     voice.random = random_.bipolar();
     bool glide = s_.glide < 1.0f && (s_.mode != mode_legato);
     voice.pitch = glide ? last_pitch_ : voice.target;
-    voice.osc1.reset();
-    voice.osc2.reset();
-    voice.sub.reset();
+    if (s_.unison > 1) {                          // unison: each voice from its own phase, or they start as one
+        voice.osc1.reset(random_.unipolar());
+        voice.osc2.reset(random_.unipolar());
+        voice.sub.reset(random_.unipolar());
+    } else {
+        voice.osc1.reset();
+        voice.osc2.reset();
+        voice.sub.reset();
+    }
+    voice.sync_carry = 0.0f;
+    voice.lfo_fade[0] = s_.lfo_fade_step[0] >= 1.0f ? 1.0f : 0.0f;
+    voice.lfo_fade[1] = s_.lfo_fade_step[1] >= 1.0f ? 1.0f : 0.0f;
     voice.svf1.reset();
     voice.svf2.reset();
     voice.amp.gate_on();
@@ -121,48 +143,49 @@ void Engine::start(Voice &voice, const NoteEvent &event, bool retrigger) {
     voice.lfo2.reset(s_.lfo_key_sync[1] ? 0.0f : free_lfo_[1].phase());
 }
 
+void Engine::release(Voice &v) {
+    v.gate = false;
+    v.amp.gate_off();
+    v.env2.gate_off();
+    v.env3.gate_off();
+}
+
 void Engine::handle(const NoteEvent &e) {
     switch (e.type) {
     case NoteEvent::on:
         if (s_.mode == mode_poly) {
-            start(allocate(), e, true);
+            for (int k = 0; k < s_.unison; k++) start(allocate(), e, true, unison_place(k));
         } else {
             if (held_count_ == 16) {              // forget the oldest
                 for (int i = 1; i < 16; i++) held_[i - 1] = held_[i];
                 held_count_--;
             }
             held_[held_count_++] = {e.key, e.note, e.value};
-            Voice &v = voices_[0];
-            bool legato = s_.mode == mode_legato && v.gate;
-            start(v, e, !legato);
+            bool legato = s_.mode == mode_legato && voices_[0].gate;
+            for (int k = 0; k < s_.unison; k++) start(voices_[k], e, !legato, unison_place(k));
+            for (int k = s_.unison; k < kVoices; k++)         // left over from more unison voices
+                if (voices_[k].gate) release(voices_[k]);
         }
         last_pitch_ = float(e.note);
         break;
     case NoteEvent::off:
         if (s_.mode == mode_poly) {
             for (Voice &v : voices_)
-                if (v.gate && v.key == e.key) {
-                    v.gate = false;
-                    v.amp.gate_off();
-                    v.env2.gate_off();
-                    v.env3.gate_off();
-                }
+                if (v.gate && v.key == e.key) release(v);
         } else {
             int i = 0;
             while (i < held_count_ && held_[i].key != e.key) i++;
             if (i == held_count_) break;
             for (; i + 1 < held_count_; i++) held_[i] = held_[i + 1];
             held_count_--;
-            Voice &v = voices_[0];
-            if (v.key != e.key || !v.gate) break;
+            if (voices_[0].key != e.key || !voices_[0].gate) break;
             if (held_count_) {                    // back to the last key still held
                 const Held &h = held_[held_count_ - 1];
-                start(v, {NoteEvent::on, h.key, h.note, h.velocity}, s_.mode == mode_mono);
+                const NoteEvent back = {NoteEvent::on, h.key, h.note, h.velocity};
+                for (int k = 0; k < s_.unison; k++) start(voices_[k], back, s_.mode == mode_mono, unison_place(k));
             } else {
-                v.gate = false;
-                v.amp.gate_off();
-                v.env2.gate_off();
-                v.env3.gate_off();
+                for (Voice &v : voices_)
+                    if (v.gate) release(v);
             }
         }
         break;
@@ -199,8 +222,10 @@ void Engine::control_step() {
         src[src_off] = 0.0f;
         src[src_env2] = v.env2.step(s_.env2);
         src[src_env3] = v.env3.step(s_.env3);
-        src[src_lfo1] = v.lfo1.step(s_.lfo_shape[0], s_.lfo_rate[0] * v.lfo_rate[0], random_);
-        src[src_lfo2] = v.lfo2.step(s_.lfo_shape[1], s_.lfo_rate[1] * v.lfo_rate[1], random_);
+        src[src_lfo1] = v.lfo_fade[0] * v.lfo1.step(s_.lfo_shape[0], s_.lfo_rate[0] * v.lfo_rate[0], random_);
+        src[src_lfo2] = v.lfo_fade[1] * v.lfo2.step(s_.lfo_shape[1], s_.lfo_rate[1] * v.lfo_rate[1], random_);
+        v.lfo_fade[0] = clamp(v.lfo_fade[0] + s_.lfo_fade_step[0], 0.0f, 1.0f);
+        v.lfo_fade[1] = clamp(v.lfo_fade[1] + s_.lfo_fade_step[1], 0.0f, 1.0f);
         src[src_velocity] = v.velocity;
         src[src_pressure] = v.pressure;
         src[src_key] = (float(v.note) - 60.0f) * (1.0f / 24.0f);
@@ -211,7 +236,7 @@ void Engine::control_step() {
         ex[V + j] = clamp(d[dst_lfo2_rate], -1.0f, 1.0f) * 4.0f;
 
         v.pitch += s_.glide * (v.target - v.pitch);
-        float pitch = v.pitch + 12.0f * d[dst_pitch];
+        float pitch = v.pitch + 12.0f * d[dst_pitch] + s_.detune * v.unison;
         ex[2 * V + j] = (pitch + s_.offset1 + 12.0f * d[dst_pitch1] - 69.0f) * (1.0f / 12.0f);
         ex[3 * V + j] = (pitch + s_.offset2 + 12.0f * d[dst_pitch2] - 69.0f) * (1.0f / 12.0f);
         float cutoff = s_.cutoff + s_.filter_env * src[src_env2] + s_.filter_key * (float(v.note) - 60.0f) +
@@ -220,8 +245,9 @@ void Engine::control_step() {
         k[j] = 2.0f - 1.98f * clamp(s_.resonance + d[dst_resonance], 0.0f, 1.0f);
         k[V + j] = 1.85f;
 
-        float gain = (1.0f - s_.velocity_amp * (1.0f - v.velocity)) * clamp(1.0f + d[dst_amp], 0.0f, 2.0f);
-        float pan = clamp(d[dst_pan], -1.0f, 1.0f);
+        float gain = (1.0f - s_.velocity_amp * (1.0f - v.velocity)) * clamp(1.0f + d[dst_amp], 0.0f, 2.0f) *
+                     s_.unison_gain;
+        float pan = clamp(d[dst_pan] + s_.spread * v.unison, -1.0f, 1.0f);
         c.target_l = 0.5f * gain * (pan > 0.0f ? 1.0f - pan : 1.0f);
         c.target_r = 0.5f * gain * (pan < 0.0f ? 1.0f + pan : 1.0f);
         for (int i = 0; i < destination_count; i++) c.d[i] = d[i];
@@ -260,8 +286,23 @@ void Engine::render_voice(Voice &v, const Control &c, float *left, float *right)
     float level1 = s_.level1 * clamp(1.0f + d[dst_osc1], 0.0f, 2.0f);
     float level2 = s_.level2 * clamp(1.0f + d[dst_osc2], 0.0f, 2.0f);
     const float width = 0.45f * d[dst_width];
-    if (level1 > 0.0f) v.osc1.render_add(buffer, kControl, s_.wave1, c.dt1, c.inv1, level1, s_.width1 + width);
-    if (level2 > 0.0f) v.osc2.render_add(buffer, kControl, s_.wave2, c.dt2, c.inv2, level2, s_.width2 + width);
+    if (s_.sync || s_.ring > 0.0f) {
+        // Each oscillator on its own, for the ring modulator's product; OSC 2 synced to OSC 1 first, while OSC 1's
+        // phase is still the block's start.
+        float b1[kControl] = {}, b2[kControl] = {};
+        if (s_.sync)
+            v.osc2.sync_add(b2, kControl, v.osc1, c.dt1, c.inv1, v.sync_carry, s_.wave2, c.dt2, c.inv2, 1.0f,
+                            s_.width2 + width);
+        else
+            v.osc2.render_add(b2, kControl, s_.wave2, c.dt2, c.inv2, 1.0f, s_.width2 + width);
+        v.osc1.render_add(b1, kControl, s_.wave1, c.dt1, c.inv1, 1.0f, s_.width1 + width);
+        enaga_mix(buffer, b1, kControl, level1);
+        enaga_mix(buffer, b2, kControl, level2);
+        if (s_.ring > 0.0f) enaga_mix_product(buffer, b1, b2, kControl, s_.ring);
+    } else {
+        if (level1 > 0.0f) v.osc1.render_add(buffer, kControl, s_.wave1, c.dt1, c.inv1, level1, s_.width1 + width);
+        if (level2 > 0.0f) v.osc2.render_add(buffer, kControl, s_.wave2, c.dt2, c.inv2, level2, s_.width2 + width);
+    }
     if (s_.level_sub > 0.0f)
         v.sub.render_add(buffer, kControl, Wave::pulse, 0.5f * c.dt1, 2.0f * c.inv1, s_.level_sub);
     float noise = s_.level_noise * clamp(1.0f + d[dst_noise], 0.0f, 2.0f);
@@ -308,9 +349,17 @@ void Engine::render(float *out, uint32_t frames) {
     for (Voice &v : voices_) active += v.amp.active();
     active_voices = active;
 
-    // Effects: the delay's echoes join the dry signal; the reverb gets the dry signal and `delay_send_` of the echoes.
+    // Effects. The chorus works in place; with its mix at 0 it only takes in the signal, so turning it up never
+    // plays stale audio. Then the delay's echoes join the dry signal; the reverb gets the dry signal and
+    // `delay_send_` of the echoes.
     float wet_l[ENAGA_BLOCK_FRAMES] = {}, wet_r[ENAGA_BLOCK_FRAMES] = {};
     float send_l[ENAGA_BLOCK_FRAMES] = {}, send_r[ENAGA_BLOCK_FRAMES] = {};
+    if (chorus_mix_ > 0.0f) {
+        chorus_.process(left, right, left, right, int(frames), chorus_mix_);
+    } else {
+        enaga_delay_write_block(&chorus_.state_.left, left, int(frames));
+        enaga_delay_write_block(&chorus_.state_.right, right, int(frames));
+    }
     delay_.process(left, right, wet_l, wet_r, int(frames), delay_mix_);
     for (uint32_t i = 0; i < frames; i++) {
         send_l[i] = left[i] + delay_send_ * wet_l[i];

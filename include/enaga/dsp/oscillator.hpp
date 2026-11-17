@@ -21,6 +21,15 @@ public:
     void render_add(float *out, int n, Wave wave, float dt, float inv_dt, float level, float width = 0.5f) {
         enaga_oscillator_add(&state_, out, n, int(wave), dt, inv_dt, level, width);
     }
+    // Moves the phase on as render_add would, silently (a muted sync master).
+    void advance(int n, float dt) { enaga_oscillator_advance(&state_, n, dt); }
+    // Hard sync to master, which is read and not moved on (render this first): enaga_oscillator_sync_add. carry
+    // holds a sample between blocks (zero it at the note's start).
+    void sync_add(float *out, int n, const Oscillator &master, float master_dt, float master_inv_dt, float &carry,
+                  Wave wave, float dt, float inv_dt, float level, float width = 0.5f) {
+        enaga_oscillator_sync_add(&state_, &carry, &master.state_, master_dt, master_inv_dt, out, n, int(wave), dt,
+                                  inv_dt, level, width);
+    }
     // Adds level x a table the app fills: 2^bits samples of a cycle and a guard sample equal to the first
     // (enaga_wavetable_add). dt in (-0.5, 0.5).
     void table_add(float *out, int n, const float *table, int bits, float dt, float level) {

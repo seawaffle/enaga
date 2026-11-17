@@ -67,11 +67,35 @@ constexpr C kNoiseSweep[] = {
     {mod_source(0), src_lfo2}, {mod_destination(0), dst_cutoff}, {mod_amount(0), 40},
     {amp_attack, 40}, {amp_release, 80}, {reverb_mix, 40}, {delay_mix, 20}, kEnd};
 
+constexpr C kSyncLead[] = {
+    {voice_mode, mode_legato}, {voice_glide, 55},
+    {mix_osc1, 0}, {mix_osc2, 80}, {osc2_sync, 1}, {osc2_semi, 7}, {osc2_fine, 0},
+    {filter_cutoff, 105}, {filter_resonance, 20},
+    {env2_attack, 0}, {env2_decay, 78}, {env2_sustain, 25}, {env2_release, 60},
+    {lfo1_shape, lfo_sine}, {lfo1_rate, 72}, {lfo1_sync, 1}, {lfo1_fade, 88},
+    {mod_source(0), src_env2}, {mod_destination(0), dst_pitch2}, {mod_amount(0), 100},
+    {mod_source(1), src_lfo1}, {mod_destination(1), dst_pitch}, {mod_amount(1), 2},
+    {delay_time, 85}, {delay_feedback, 35}, {delay_mix, 25}, {reverb_mix, 20}, kEnd};
+
+constexpr C kSupersaw[] = {
+    {unison_voices, 4}, {unison_detune, 25}, {unison_spread, 80},
+    {mix_osc1, 70}, {mix_osc2, 60}, {osc2_fine, 9},
+    {filter_cutoff, 96}, {filter_resonance, 10},
+    {amp_attack, 30}, {amp_decay, 90}, {amp_sustain, 85}, {amp_release, 80},
+    {chorus_mix, 40}, {reverb_decay, 80}, {reverb_mix, 30}, kEnd};
+
+constexpr C kRingMetal[] = {
+    {osc1_wave, wave_sine}, {osc2_wave, wave_triangle}, {osc2_semi, 5}, {osc2_fine, 31},
+    {mix_osc1, 15}, {mix_osc2, 0}, {mix_ring, 90},
+    {amp_decay, 95}, {amp_sustain, 0}, {amp_release, 90}, {voice_velocity, 70},
+    {chorus_mix, 25}, {reverb_decay, 85}, {reverb_mix, 40}, kEnd};
+
 }  // namespace
 
 const Patch patches[] = {
     {"INIT", kInit}, {"BRASS", kBrass}, {"PAD", kPad}, {"BASS", kBass}, {"LEAD", kLead},
     {"PLUCK", kPluck}, {"WOBBLE", kWobble}, {"BELLS", kBells}, {"NOISE S+H", kNoiseSweep},
+    {"SYNC LEAD", kSyncLead}, {"SUPERSAW", kSupersaw}, {"RING METAL", kRingMetal},
 };
 const int patch_count = sizeof patches / sizeof patches[0];
 

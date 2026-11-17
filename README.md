@@ -50,7 +50,8 @@ ENAGA_APP(Beep)
   `soft_clip`), band-limited oscillators, wavetable oscillators on the app's tables (with a morph between two),
   a state-variable filter (and a two-stage cascade), cookbook biquads (low- and high-pass, band-pass, notch,
   all-pass, peak, shelves), FIR filters on the app's taps, a one-pole, ADSR envelopes, LFOs, delay lines (with
-  modulated, interpolated block reads for chorus and flanging), a stereo delay and a reverb. Its classes wrap a C interface, `<enaga/dsp.h>`:
+  modulated, interpolated block reads), a chorus, a stereo delay and a reverb; hard sync between oscillators
+  (`Oscillator::sync_add`, band-limited). Its classes wrap a C interface, `<enaga/dsp.h>`:
   plain state structs, per-sample steps, and block functions that process a buffer per call (`Svf::process`,
   `Envelope::render`, `Oscillator::render_add`, `StereoDelay::process`, `Reverb::process`, delay-line block reads
   and writes, buffer arithmetic such as `enaga_mix`, `enaga_multiply`, `enaga_ramp_stereo_add`, and `exp2`, `tan_pi` and
@@ -61,15 +62,16 @@ ENAGA_APP(Beep)
   only loops without branches inside: use `cond ? a : b` selects rather than `if`. The files must be C, compile
   with GCC too, and export plain C functions, since C++ objects don't mix between the two compilers; they can
   include `<enaga/dsp.h>` and work on the library's state. Everything else builds with GCC (`-O2
-  -funroll-loops`). The synth's worst case takes 25% of the audio budget with cl6x and 55% with GCC alone
+  -funroll-loops`). The synth's worst case takes 30% of the audio budget with cl6x and 65% with GCC alone
   (emulator figures).
 - `enaga::fatal(reason)` stops the app; Enaga shows the reason and keeps running. Enaga's watchdog stops an
   app the same way when a main-loop call (including `init` and `stop`) has not returned after 1 s, or `audio`
   after 100 ms.
 
 See `examples/tone` for a minimal app and `examples/synth` for a whole instrument: an eight-voice virtual
-analogue synthesizer with a filter, three envelopes, two LFOs, a modulation matrix, delay and reverb, played
-from the pads and STEP keys and edited page by page.
+analogue synthesizer with hard sync and a ring modulator, a filter, three envelopes, two LFOs that can fade in,
+a modulation matrix, unison, chorus, delay and reverb, played from the pads and STEP keys and edited page by
+page.
 
 ## Building
 

@@ -59,6 +59,26 @@ private:
     Memory memory_;
 };
 
+// A chorus: each channel through a delay of about 8 ms swept by a sine, the channels a quarter turn apart, so a
+// mono input comes out wide. enaga_chorus_*: block functions.
+class Chorus {
+public:
+    void init(float sample_rate) {
+        enaga_chorus_init(&state_, memory_.allocate(enaga_chorus_memory(sample_rate)), sample_rate);
+    }
+    // sweep_hz: the sweep's rate; depth 0-1 (up to +-5 ms).
+    void set(float sweep_hz, float depth) { enaga_chorus_set(&state_, sweep_hz, depth); }
+    // Adds mix x the chorused input to out_l / out_r; out may be in.
+    void process(const float *in_l, const float *in_r, float *out_l, float *out_r, int n, float mix) {
+        enaga_chorus_process(&state_, in_l, in_r, out_l, out_r, n, mix);
+    }
+
+    enaga_chorus state_{};
+
+private:
+    Memory memory_;
+};
+
 // A reverb: four Schroeder all-passes into an eight-line feedback delay network (Hadamard mixing), each line
 // damped by a low-pass and scaled for the decay time. The network's lengths are fixed; DECAY sets how long it
 // rings. enaga_reverb_*: block functions.

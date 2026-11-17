@@ -31,6 +31,7 @@ void enaga_mix(float *out, const float *in, int n, float gain);          /* out 
 void enaga_scale(float *buf, int n, float gain);                         /* buf *= gain */
 void enaga_multiply(float *buf, const float *gain, int n);               /* buf *= gain (sample by sample) */
 void enaga_soft_clip_buffer(float *buf, int n, float drive);             /* buf = soft_clip(drive * buf) */
+void enaga_mix_product(float *out, const float *a, const float *b, int n, float gain);   /* out += gain * a * b */
 /* Math on a buffer: the same values as math.h's functions, several times faster under cl6x than calling those
  * one value at a time. For control-rate values too: gather a step's pitches or cutoffs of all voices into one
  * array and convert them in one call. cl6x's pipelined loops for exp2 and tan_pi need 10 values or more; fewer
@@ -63,6 +64,18 @@ static inline void enaga_oscillator_reset(enaga_oscillator *o, float phase) {
  * at control rate; pulse width 0.05-0.95. */
 void enaga_oscillator_add(enaga_oscillator *o, float *out, int n, int wave, float dt, float inv_dt, float level,
                           float width);
+/* Moves the phase on n samples without sound, exactly as enaga_oscillator_add would: for a silent sync master. */
+static inline void enaga_oscillator_advance(enaga_oscillator *o, int n, float dt) {
+    o->phase += (uint32_t)n * (uint32_t)(int32_t)(dt * 4294967296.0f);
+}
+/* Hard sync: adds level x the wave of o, its phase restarted whenever master's wraps, to out. master (dt_m, with
+ * inv_dt_m = 1 / dt_m) is read, not moved on: call this before rendering master's own block. Every jump, the
+ * restarts' and the wave's own, is band-limited by a correction spread over two samples, so each sample is
+ * finished a sample later: the function runs a sample ahead (in step with enaga_oscillator_add) and *carry holds
+ * the sample in hand between blocks (zero it when the note starts). */
+void enaga_oscillator_sync_add(enaga_oscillator *o, float *carry, const enaga_oscillator *master, float dt_m,
+                               float inv_dt_m, float *out, int n, int wave, float dt, float inv_dt, float level,
+                               float width);
 
 /* ---- Wavetable oscillators: the same phase, reading a table the app fills ---- */
 
@@ -239,6 +252,23 @@ void enaga_reverb_init(enaga_reverb *r, float *memory, float rate);
 void enaga_reverb_set(enaga_reverb *r, float decay_s, float damping);
 /* Adds mix x the reverb of in_l + in_r to out_l / out_r. */
 void enaga_reverb_process(enaga_reverb *r, const float *in_l, const float *in_r, float *out_l, float *out_r, int n,
+                          float mix);
+
+/* ---- Chorus: two lines, each read at a delay swept by a sine, the two a quarter turn apart ---- */
+
+typedef struct {
+    enaga_delay_line left, right;
+    uint32_t phase, step;           /* the sweep: a 32-bit fraction of a turn, and its step per sample */
+    float base, depth, rate;        /* base and depth in samples */
+} enaga_chorus;
+
+/* The floats of memory enaga_chorus_init needs (zeroed) at this sample rate. */
+uint32_t enaga_chorus_memory(float rate);
+void enaga_chorus_init(enaga_chorus *c, float *memory, float rate);
+/* sweep_hz: the sweep's rate; depth 0-1, up to +-5 ms around an 8 ms delay. */
+void enaga_chorus_set(enaga_chorus *c, float sweep_hz, float depth);
+/* Adds mix x the chorused in_l / in_r to out_l / out_r. out may be in (in place). */
+void enaga_chorus_process(enaga_chorus *c, const float *in_l, const float *in_r, float *out_l, float *out_r, int n,
                           float mix);
 
 /* ---- ADSR envelope: one-pole segments ---- */

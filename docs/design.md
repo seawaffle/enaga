@@ -171,8 +171,8 @@ a unit", the CHECK app in `tests/unit/check`, `tools/unit_card.py`) and not yet 
 E2 has begun ahead of that session, driven by its exit app: pads as press / release with velocity, the start of
 the DSP library (`include/enaga/dsp`, tested on the host), and `examples/synth`, an eight-voice virtual analogue
 synthesizer (emulator-tested). The library's block functions, and apps' own `*.ti.c` files, are built with TI's
-cl6x when it is installed (GCC otherwise); the synth's worst case is 25 % of the audio budget that way and 55 % with
-GCC alone. Asynchronous file
+cl6x when it is installed (GCC otherwise); the synth's worst case is 30 % of the audio budget that way and 65 % with
+GCC alone (every feature on: sync, ring, chorus, eight voices). Asynchronous file
 I/O and sample streaming, the rest of E2, are not started.
 
 ## Open items
@@ -192,7 +192,7 @@ I/O and sample streaming, the rest of E2, are not started.
   with velocity at provisional thresholds (press 800, release under 600, velocity 127 from 12,000). To set from
   readings on a unit: the release threshold, the velocity scale, whether one reading after the threshold gives a
   usable velocity (a pad is read every 3.8 ms), per-pad calibration.
-- Synth on the unit: its CPU load with real caches (worst case on the emulator 25 % with cl6x, 55 % GCC only),
+- Synth on the unit: its CPU load with real caches (worst case on the emulator 30 % with cl6x, 65 % GCC only),
   the pad keyboard's feel. Saving patches waits for the file API; edits last until the app stops.
 - DSP library: the SVF runs at 21 cycles a sample under cl6x (its recurrence), twice a biquad's 10; a faster
   form is worth trying. The synth's modulation is 6.4 % of the budget with cl6x, most of it the scalar part
@@ -578,3 +578,45 @@ both builds. The same note: `_smpyh`, `_smpyhl` and `_smpylh` from GCC's `c6x_in
 gains about 30 instructions GCC can emit (MPYH and family, saturating arithmetic, the packed ADD2 / SUB2 / ADD4 /
 MAX2 / SWAP4) in smpltrek's working tree, not yet committed: rebuild the emulator and rerun the tests after that
 commit. 32 tests pass.
+
+### Synth: chorus, unison, hard sync, ring modulation, LFO fade-in (2026-11-17)
+
+The owner kept `synth-modulation` (cl6x 25 %, GCC alone 55 %) and asked for these five, offered after the synth's
+first version. Ten parameters, added at the end of the table so earlier numbers (and patches) stay: OSC MOD
+(SYNC, RING) on the OSC page, FADE on each LFO, CHORUS (RATE, DEPTH, MIX) first on the FX page, UNISON (VOICES
+1-4, DETUNE in cents at the outermost voices, SPREAD) on the VOICE page. Three patches show them: SYNC LEAD (OSC 2
+alone, synced, ENV2 sweeping its pitch, vibrato fading in), SUPERSAW (four voices, chorus), RING METAL.
+
+- Chorus: `enaga_chorus` / `Chorus` in the library, two lines read at 8 ms +-5 ms swept by a sine, the channels a
+  quarter turn apart, on `enaga_delay_read_linear` in 64-sample chunks (the depth is capped so every delay stays
+  over the chunk). In place; the synth runs it on the voices before the delay, and with MIX at 0 only feeds its
+  lines, so turning it up plays nothing stale. 0.6 % of the budget.
+- Hard sync: `enaga_oscillator_sync_add` / `Oscillator::sync_add`. Every jump, the restart's and the wave's own
+  (and a pulse's falling edge, also when it falls in a restart's sample), gets the two-sample PolyBLEP correction
+  -J/2 (1 - a)^2 now and J/2 a^2 on the sample before; the loop runs a sample ahead so the output stays in step
+  with `enaga_oscillator_add` (`carry` holds the sample in hand). The master is read, not moved; a silent master
+  moves with `enaga_oscillator_advance`. A loop per wave written out by a macro: cl6x would not inline a generic
+  helper (it emitted calls, which stop pipelining), and the per-wave copies pipeline at 12 (saw), 24 (pulse) and
+  15 (triangle) cycles a sample; sine, with three sin_turns a sample, does not pipeline. Branch-free for cl6x,
+  branching around the restart for GCC, the same arithmetic: the cl6x / GCC test now runs with sync, ring and
+  chorus on and still matches sample for sample.
+- Ring: OSC 1 x OSC 2 (`enaga_mix_product`) into the mixer. With sync or ring on, the two oscillators render to
+  their own buffers.
+- LFO fade-in: a per-voice linear ramp from note-on over FADE, multiplying both LFOs' outputs.
+- Unison: a note takes VOICES voices (POLY: allocated as usual, so polyphony divides; MONO / LEGATO: voices 0 to
+  N - 1), each at its place -1..1 for detune and pan, from random oscillator phases (one phase would make them
+  one), gain 1 / sqrt(N).
+
+Host tests: the chorus against a per-sample reference on `DelayLine` (and in place, two rates); the synced
+oscillator without restarts equal to `render_add` (saw and pulse), equal over block sizes, periodic at the
+master's period, smoother than naive sync, a sine following the exact synced phase with restarts between
+samples, and a pulse's mean matching the continuous wave's at two ratios (the edge 0.7 and 0.07 of a sample
+before the restart). Deliberately wrong code at each jump correction, the restart's phase and the chorus's
+quadrature was caught; the first versions of the tests missed the restart phase (restarts on whole samples) and
+the edge-before-restart terms, so the last three checks were added. Emulator tests: sync makes OSC 2 a fourth up
+play at OSC 1's pitch; ring sounds with both oscillator levels at 0; a centred voice is identical left and right
+until the chorus is up; three unison voices a note, in tune; a square LFO on pitch an octave up at once, and
+barely moved a quarter second into a 19 s fade.
+
+Worst case, now with sync, ring, LFO fade and chorus on: cl6x 30 %, GCC alone 65 % (oscillators 10.2 % / 28.7 %;
+the first, branchy sync loop took cl6x to 35 %). 34 tests pass.

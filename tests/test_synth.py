@@ -17,9 +17,12 @@ from unit_dry_run import ENCODER_PINS, turn  # noqa: E402
 
 SYNTH = HERE.parent / "examples" / "synth"
 F1, F2, F3, OK, PUSH_B, SELECT_LEFT, SELECT_RIGHT, CLR = 19, 26, 20, 23, 0, 8, 9, 30
-PARAMS = 76                                      # param_count in examples/synth/params.hpp
-CUTOFF, MIX_OSC2, MIX_SUB, MIX_NOISE, OSC1_WAVE = 13, 9, 10, 11, 0
+PARAMS = 86                                      # param_count in examples/synth/params.hpp
+CUTOFF, MIX_OSC1, MIX_OSC2, MIX_SUB, MIX_NOISE, OSC1_WAVE = 13, 8, 9, 10, 11, 0
+OSC2_WAVE, OSC2_SEMI, OSC2_FINE = 4, 6, 7
 FILTER_TYPE, RESONANCE, DRIVE, FILTER_ENV, MOD_FIRST, VOICE_MODE = 12, 14, 15, 16, 37, 70
+LFO1_SHAPE, LFO1_RATE, LFO1_SYNC = 31, 32, 33
+OSC2_SYNC, MIX_RING, LFO1_FADE, CHORUS_MIX, UNISON_VOICES, UNISON_DETUNE = 76, 77, 78, 82, 83, 84
 
 
 def hz(note):
@@ -51,6 +54,10 @@ class Synth(unittest.TestCase):
         for param, value in changes.items():
             v[param] = value
         emu.cpu.write(emu.values, struct.pack(f"<{PARAMS}h", *v))
+
+    def active_voices(self, emu):
+        # Engine::active_voices follows values[] (int16_t each), at the next word.
+        return struct.unpack("<I", emu.cpu.read(emu.values + (2 * PARAMS + 3) // 4 * 4, 4))[0]
 
     def press(self, emu, key):
         emu.key(key, True)
@@ -93,9 +100,10 @@ class Synth(unittest.TestCase):
 
     def test_worst_case_stays_inside_the_audio_budget(self):
         with self.start() as emu:
-            # Everything on: pulse and saw, sub and noise, 24 dB filter with drive, all eight slots routed.
+            # Everything on: pulse and a synced saw, ring, sub and noise, 24 dB filter with drive, all eight slots
+            # routed, LFO fade, chorus.
             changes = {OSC1_WAVE: 1, MIX_OSC2: 80, MIX_SUB: 60, MIX_NOISE: 30, FILTER_TYPE: 1, CUTOFF: 70,
-                       RESONANCE: 50, DRIVE: 40}
+                       RESONANCE: 50, DRIVE: 40, OSC2_SYNC: 1, MIX_RING: 50, LFO1_FADE: 60, CHORUS_MIX: 50}
             for slot in range(8):
                 changes.update({MOD_FIRST + 3 * slot: 1 + slot, MOD_FIRST + 3 * slot + 1: slot + 3,
                                 MOD_FIRST + 3 * slot + 2: 10})
@@ -150,6 +158,67 @@ class Synth(unittest.TestCase):
             emu.run(50 * MS)
             self.assertLess(max(map(abs, samples(emu)[-960:])), 2 ** 20)
 
+    def test_hard_sync_and_ring(self):
+        with self.start() as emu:
+            # OSC 2 alone, a fourth up (five semitones): its own pitch; synced, it repeats at OSC 1's.
+            self.set_values(emu, {MIX_OSC1: 0, MIX_OSC2: 80, OSC2_SEMI: 5, OSC2_FINE: 0})
+            emu.run(5 * MS)
+            emu.key(STEP1, True)
+            emu.run(250 * MS)
+            self.assertAlmostEqual(self.pitch(emu), hz(53), delta=0.5)
+            self.set_values(emu, {OSC2_SYNC: 1})
+            emu.run(250 * MS)
+            self.assertAlmostEqual(self.pitch(emu), hz(48), delta=0.5)
+            # Both oscillators' levels at 0: only the ring modulator sounds.
+            self.set_values(emu, {OSC2_SYNC: 0, MIX_OSC2: 0})
+            emu.run(100 * MS)
+            self.assertLess(max(map(abs, samples(emu)[-960:])), 2 ** 20)
+            self.set_values(emu, {MIX_RING: 100})
+            emu.run(100 * MS)
+            self.assertGreater(max(map(abs, samples(emu)[-960:])), 2 ** 26)
+            self.assertEqual(emu.word("audio_overruns"), 0)
+
+    def test_unison_chorus_and_lfo_fade(self):
+        with self.start() as emu:
+            # A centred voice: left = right, until the chorus sweeps the two sides apart.
+            emu.key(STEP1, True)
+            emu.run(200 * MS)
+            out = samples(emu)[-9600:]
+            self.assertGreater(max(map(abs, out)), 2 ** 26)
+            self.assertEqual(out[0::2], out[1::2])
+            self.set_values(emu, {CHORUS_MIX: 80})
+            emu.run(200 * MS)
+            out = samples(emu)[-9600:]
+            self.assertNotEqual(out[0::2], out[1::2])
+            emu.key(STEP1, False)
+            self.set_values(emu, {CHORUS_MIX: 0, UNISON_VOICES: 3, UNISON_DETUNE: 0})
+            emu.run(1500 * MS)
+            self.assertEqual(self.active_voices(emu), 0)
+            # Three voices a note, in tune with no detune (sines: from their random phases they sum to one sine, where
+            # three saws would cross zero three times a cycle).
+            self.set_values(emu, {OSC1_WAVE: 3})
+            emu.run(5 * MS)
+            emu.key(STEP1, True)
+            emu.run(250 * MS)
+            self.assertEqual(self.active_voices(emu), 3)
+            self.assertAlmostEqual(self.pitch(emu), hz(48), delta=0.5)
+            emu.key(STEP1, False)
+            # LFO 1, a square held high (0.05 Hz, from the key), an octave up on pitch: at once without a fade,
+            # hardly at all in the first quarter second of a 19 s fade.
+            self.set_values(emu, {UNISON_VOICES: 1, OSC1_WAVE: 0, LFO1_SHAPE: 3, LFO1_RATE: 0, LFO1_SYNC: 1,
+                                  MOD_FIRST: 3, MOD_FIRST + 1: 0, MOD_FIRST + 2: 100})
+            emu.run(1500 * MS)
+            emu.key(STEP1, True)
+            emu.run(250 * MS)
+            self.assertAlmostEqual(self.pitch(emu), hz(60), delta=1)
+            emu.key(STEP1, False)
+            self.set_values(emu, {LFO1_FADE: 127})
+            emu.run(1500 * MS)
+            emu.key(STEP1, True)
+            emu.run(250 * MS)
+            self.assertAlmostEqual(self.pitch(emu), hz(48), delta=1.5)
+            self.assertEqual(emu.word("audio_overruns"), 0)
+
     @unittest.skipUnless(paths.ti_present(), "TI's cl6x not installed (tools/paths.py, TI_CGT)")
     def test_cl6x_and_gcc_builds_sound_the_same(self):
         # The DSP library (runtime/dsp) is built by cl6x when it is installed, by GCC otherwise. Both do the same IEEE
@@ -160,7 +229,7 @@ class Synth(unittest.TestCase):
             with mock.patch.object(paths, "TI_CGT", paths.TI_CGT if ti else None), self.start() as emu:
                 self.assertEqual("dsplib/cl6x/" in (WORK / "apps" / "synth" / "app.map").read_text(), ti)
                 self.set_values(emu, {OSC1_WAVE: 1, MIX_OSC2: 80, MIX_SUB: 60, FILTER_TYPE: 1, CUTOFF: 80,
-                                      RESONANCE: 50, DRIVE: 40})
+                                      RESONANCE: 50, DRIVE: 40, OSC2_SYNC: 1, MIX_RING: 40, CHORUS_MIX: 50})
                 for n in (0, 4, 7):
                     emu.key(STEP1 + n, True)
                 emu.run(250 * MS)
