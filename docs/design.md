@@ -435,6 +435,6 @@ data. Traced to the emulator, not Enaga or GCC: libgcc's `__c6xabi_divi` issues 
 delay slots of its call to `__c6xabi_divu`, relying on ADDKPC's NOP cycles happening even when the predicate is
 false (as BNOP's do). The emulator (smpltrek bcce9b3, `core/core.cpp`) drops them for a false predicate, so with
 both operands non-negative divi falls into the next packet's `b b5` and returns twice; the caller's loop then
-runs with two branches in flight. With the two-line fix applied to a private copy of the emulator all 31 tests
-pass; the fix in smpltrek waits for the owner. Until then `test_synth.py` fails on the stock emulator.
+runs with two branches in flight. smpltrek's emulator now has the two-line fix (in its working tree after
+bcce9b3, not yet committed there), and all 31 tests pass against it; emulators without it fail `test_synth.py`.
 
