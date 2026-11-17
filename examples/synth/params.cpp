@@ -71,6 +71,7 @@ constexpr ParamInfo kAfterMod[] = {
     {"TONE", 0, 100, 60, Unit::number, nullptr},
     {"MIX", 0, 100, 0, Unit::number, nullptr},
     {"MODE", 0, 1, 0, Unit::choice, kDelayModes},
+    {"TO REV", 0, 100, 100, Unit::number, nullptr},     // how much of the echoes the reverb gets
     {"DECAY", 0, 127, 60, Unit::decay, nullptr},
     {"DAMP", 0, 100, 40, Unit::number, nullptr},
     {"MIX", 0, 100, 0, Unit::number, nullptr},
@@ -80,6 +81,7 @@ constexpr ParamInfo kAfterMod[] = {
     {"VELO", 0, 100, 50, Unit::number, nullptr},
     {"VOLUME", 0, 100, 70, Unit::number, nullptr},
     {"PADS", 0, 1, layout_piano, Unit::choice, kLayouts},
+    {"STEPVL", 1, 127, 100, Unit::number, nullptr},     // the velocity STEP keys play at
 };
 
 static_assert(sizeof kTable / sizeof kTable[0] == mod_first, "parameter table out of step with Param");

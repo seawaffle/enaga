@@ -38,10 +38,10 @@ enum Param : uint8_t {
     mod_first,
     mod_last = mod_first + 8 * 3 - 1,
     // FX
-    delay_time, delay_feedback, delay_tone, delay_mix, delay_mode,
+    delay_time, delay_feedback, delay_tone, delay_mix, delay_mode, delay_send,
     reverb_decay, reverb_damping, reverb_mix,
     // VOICE
-    voice_mode, voice_glide, voice_velocity, voice_volume, voice_layout,
+    voice_mode, voice_glide, voice_velocity, voice_volume, voice_layout, voice_step_velocity,
     param_count
 };
 

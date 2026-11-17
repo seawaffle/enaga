@@ -94,7 +94,7 @@ private:
 
     enaga::dsp::StereoDelay delay_;
     enaga::dsp::Reverb reverb_;
-    float delay_mix_ = 0, reverb_mix_ = 0;
+    float delay_mix_ = 0, delay_send_ = 1, reverb_mix_ = 0;
 };
 
 }  // namespace synth

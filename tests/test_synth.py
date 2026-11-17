@@ -14,10 +14,10 @@ sys.path.insert(0, str(HERE.parent / "tools"))
 from unit_dry_run import ENCODER_PINS, turn  # noqa: E402
 
 SYNTH = HERE.parent / "examples" / "synth"
-F3, LEFT, RIGHT, UP, DOWN, SELECT_RIGHT, CLR = 20, 24, 18, 17, 25, 9, 30
-PARAMS = 74                                      # param_count in examples/synth/params.hpp
+F1, F2, F3, OK, PUSH_B, SELECT_LEFT, SELECT_RIGHT, CLR = 19, 26, 20, 23, 0, 8, 9, 30
+PARAMS = 76                                      # param_count in examples/synth/params.hpp
 CUTOFF, MIX_OSC2, MIX_SUB, MIX_NOISE, OSC1_WAVE = 13, 9, 10, 11, 0
-FILTER_TYPE, RESONANCE, DRIVE, MOD_FIRST, VOICE_MODE = 12, 14, 15, 37, 69
+FILTER_TYPE, RESONANCE, DRIVE, FILTER_ENV, MOD_FIRST, VOICE_MODE = 12, 14, 15, 16, 37, 70
 
 
 def hz(note):
@@ -109,17 +109,25 @@ class Synth(unittest.TestCase):
 
     def test_pages_knobs_and_patches(self):
         with self.start() as emu:
-            self.press(emu, F3)                   # FILTER page; knob B is CUTOFF
+            self.press(emu, F3)                   # FILTER page, first group: TYPE CUTOFF RESO DRIVE on A-D
             turn(emu, 1, -3)
             self.assertEqual(self.values(emu)[CUTOFF], 124)
-            self.press(emu, DOWN)                 # the knob left the cursor on CUTOFF: down to RESO, then VALUE
-            turn(emu, 4, -4)
-            self.assertEqual(self.values(emu)[RESONANCE], 0)   # clamped at its minimum
-            self.press(emu, UP)
-            turn(emu, 4, -4)
-            self.assertEqual(self.values(emu)[CUTOFF], 120)
-            self.press(emu, SELECT_RIGHT)         # the next patch, BRASS
-            self.assertEqual(self.values(emu)[CUTOFF], 50)
+            turn(emu, 4, 5)                       # VALUE does nothing on a parameter page
+            self.assertEqual(self.values(emu)[CUTOFF], 124)
+            self.press(emu, SELECT_RIGHT)         # the next group, FILTER MOD: A is ENV2's amount
+            turn(emu, 0, 5)
+            self.assertEqual(self.values(emu)[FILTER_ENV], 5)
+            self.press(emu, SELECT_LEFT)          # back to FILTER; pushing B restores the patch's cutoff
+            self.press(emu, PUSH_B)
+            self.assertEqual(self.values(emu)[CUTOFF], 127)
+            emu.key(F1, True)                     # F1 + F2: PATCH; VALUE chooses, OK loads
+            self.press(emu, F2)
+            emu.key(F1, False)
+            turn(emu, 4, 1)
+            self.assertEqual(self.values(emu)[CUTOFF], 127)   # chosen, not loaded yet
+            self.press(emu, OK)
+            self.assertEqual(self.values(emu)[CUTOFF], 50)    # BRASS
+            emu.run(60 * MS)
             frame, _ = emu.cpu.oled_frame()
             self.assertTrue(any(frame))
             self.assertEqual(emu.report()["app_status"], "APP RUNNING")

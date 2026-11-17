@@ -415,9 +415,26 @@ load is measured there):
   two assignable), two LFOs (free or key-synced), an eight-slot matrix (sources ENV2, ENV3, LFO1, LFO2, velocity,
   pad pressure, key, per-note random; 13 destinations), POLY / MONO / LEGATO with glide, delay (stereo or ping-
   pong) and reverb, nine factory patches. Modulation runs every 16 frames (3 kHz), the amplitude envelope per
-  sample. Pages on F2-F8 (F1 stays free for Enaga's menu), knobs A-D on the group's first four parameters, the
-  cursor and VALUE for any. Pads are a piano keyboard by their physical rows (docs/hardware.md "Panel MCU").
+  sample. Pages on F2-F8; the controls were reworked the same day (next entry). Pads are a piano keyboard by their physical rows (docs/hardware.md "Panel MCU").
 - Measured on the emulator: reverb and delay alone 16 % of the audio budget; eight voices of INIT 43 %; the
   worst case (both oscillators, sub, noise, LP24 with drive, all eight slots) 67 %. `tests/test_synth.py`
   checks pitch from keys and pads, the worst case under 80 %, knobs, pages, patches, and MONO's note priority.
+
+### Synth controls reworked; an emulator bug in predicated ADDKPC (2026-11-17)
+
+The owner's model for editing, now the synth's: a page holds groups of at most four parameters, one per knob
+A-D; the selection buttons under the screen flip between the groups; the D-pad has no job on parameter pages.
+F1 is the app's function button, as in the stock firmware (Enaga's menu is the F1 + POWER chord, decision 3,
+so F1 alone belongs to the app): F1 + F2 opens PATCH, where VALUE chooses and OK loads. Pushing a knob puts its
+parameter back to the patch's value; edited values show dimmer than stored ones. The five-parameter groups were
+split (FX gained DELAY ROUTING with the delay's mode and a new delay-to-reverb send; VOICE gained KEYS with the
+pad layout and a new STEP velocity).
+
+The rework crashed the synth on the emulator: a value bar's fill ran 22 KB past the canvas and wiped kernel
+data. Traced to the emulator, not Enaga or GCC: libgcc's `__c6xabi_divi` issues `[a1] addkpc ..., b3, 4` in the
+delay slots of its call to `__c6xabi_divu`, relying on ADDKPC's NOP cycles happening even when the predicate is
+false (as BNOP's do). The emulator (smpltrek bcce9b3, `core/core.cpp`) drops them for a false predicate, so with
+both operands non-negative divi falls into the next packet's `b b5` and returns twice; the caller's loop then
+runs with two branches in flight. With the two-line fix applied to a private copy of the emulator all 31 tests
+pass; the fix in smpltrek waits for the owner. Until then `test_synth.py` fails on the stock emulator.
 

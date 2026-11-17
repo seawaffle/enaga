@@ -8,10 +8,11 @@
 // fifteen chromatic), velocity from the pad and pressure as a modulation source. STEP 1-16 play the chromatic
 // notes from the same C at a fixed velocity. The octave buttons shift both by an octave.
 //
-// Editing: F2-F8 choose the page (OSC, FILTER, ENV, LFO, MOD, FX, VOICE). Each page has groups of up to five
-// parameters; left / right change the group. Knobs A-D change the group's first four; up / down move the cursor
-// and VALUE changes the parameter under it. The selection buttons step through the factory patches; CLR
-// silences every note. Edits last until the app stops (saving patches needs Enaga's file API, E2).
+// Editing: F2-F8 choose a page (OSC, FILTER, ENV, LFO, MOD, FX, VOICE). A page holds one or more groups of up to
+// four parameters, turned with knobs A-D; the selection buttons under the screen flip between the groups. Pushing
+// a knob puts its parameter back to the patch's value. F1 is the function button: F1 + F2 opens PATCH, where
+// VALUE chooses a factory patch and OK loads it. CLR silences every note. Edits last until the app stops (saving
+// patches needs Enaga's file API, E2).
 #include <enaga/app.hpp>
 
 #include "engine.hpp"
@@ -24,7 +25,7 @@ using namespace synth;
 struct Group {
     const char *title;
     uint8_t count;
-    uint8_t params[5];
+    uint8_t params[4];            // knobs A-D
 };
 struct Page {
     const char *name;
@@ -57,18 +58,22 @@ constexpr Group kMod[] = {
 #undef SLOT
 };
 constexpr Group kFx[] = {
-    {"DELAY", 5, {delay_time, delay_feedback, delay_tone, delay_mix, delay_mode}},
+    {"DELAY", 4, {delay_time, delay_feedback, delay_tone, delay_mix}},
     {"REVERB", 3, {reverb_decay, reverb_damping, reverb_mix}},
+    {"DELAY ROUTING", 2, {delay_mode, delay_send}},
 };
 constexpr Group kVoice[] = {
-    {"VOICE", 5, {voice_mode, voice_glide, voice_velocity, voice_volume, voice_layout}},
+    {"VOICE", 4, {voice_mode, voice_glide, voice_velocity, voice_volume}},
+    {"KEYS", 2, {voice_layout, voice_step_velocity}},
 };
 constexpr Page kPages[] = {
     {"OSC", ENAGA_KEY_F2, kOsc, 3}, {"FILTER", ENAGA_KEY_F3, kFilter, 2}, {"ENV", ENAGA_KEY_F4, kEnv, 3},
-    {"LFO", ENAGA_KEY_F5, kLfo, 2}, {"MOD", ENAGA_KEY_F6, kMod, 8}, {"FX", ENAGA_KEY_F7, kFx, 2},
-    {"VOICE", ENAGA_KEY_F8, kVoice, 1},
+    {"LFO", ENAGA_KEY_F5, kLfo, 2}, {"MOD", ENAGA_KEY_F6, kMod, 8}, {"FX", ENAGA_KEY_F7, kFx, 3},
+    {"VOICE", ENAGA_KEY_F8, kVoice, 2},
 };
 constexpr int kPageCount = sizeof kPages / sizeof kPages[0];
+constexpr int kPatchPage = kPageCount;      // F1 + F2; page_ == kPatchPage shows the patch list
+constexpr int kPatchKey = ENAGA_KEY_F2;
 
 // Pads by MCU channel: channels run left to right alternating lower and upper row (docs/hardware.md).
 constexpr int8_t kPiano[15] = {0, 1, 2, 3, 4, -1, 5, 6, 7, 8, 9, 10, 11, -1, 12};   // semitones; -1 = no note
@@ -93,26 +98,44 @@ public:
             int step = key - ENAGA_KEY_STEP1;
             int note = kBase + 12 * octave_ + step;
             if (down) step_note_[step] = uint8_t(note);
-            send(down ? NoteEvent::on : NoteEvent::off, kStepKey + step, down ? note : step_note_[step], 100);
+            send(down ? NoteEvent::on : NoteEvent::off, kStepKey + step, down ? note : step_note_[step],
+                 engine_.values[voice_step_velocity]);
             enaga::step_led(step + 1, 0, down ? 8 : 0);
             return;
         }
+        if (key == ENAGA_KEY_F1) {                // the function button: held with another key
+            function_ = down;
+            enaga::button_led(ENAGA_KEY_F1, 0, down ? 8 : 0);
+            return;
+        }
         if (!down) return;
+        if (function_ && key == kPatchKey) {
+            page_ = kPatchPage;
+            choice_ = patch_;
+            show_page_leds();
+            return;
+        }
         for (int p = 0; p < kPageCount; p++)
             if (key == kPages[p].key) {
                 page_ = p;
-                cursor_ = 0;
                 show_page_leds();
                 return;
             }
-        const Page &page = kPages[page_];
+        if (key <= ENAGA_KEY_PUSH_D && page_ != kPatchPage) {   // knob pushes: back to the patch's value
+            int knob = key == ENAGA_KEY_PUSH_A ? 0 : key == ENAGA_KEY_PUSH_B ? 1 : key == ENAGA_KEY_PUSH_C ? 2 : 3;
+            const Group &group = current_group();
+            if (knob < group.count) set(group.params[knob], patch_values_[group.params[knob]]);
+            return;
+        }
         switch (key) {
-        case ENAGA_KEY_LEFT: group_[page_] = (group_[page_] + page.count - 1) % page.count; cursor_ = 0; break;
-        case ENAGA_KEY_RIGHT: group_[page_] = (group_[page_] + 1) % page.count; cursor_ = 0; break;
-        case ENAGA_KEY_UP: if (cursor_ > 0) cursor_--; break;
-        case ENAGA_KEY_DOWN: if (cursor_ + 1 < page.groups[group_[page_]].count) cursor_++; break;
-        case ENAGA_KEY_SELECT_LEFT: load_patch((patch_ + patch_count - 1) % patch_count); break;
-        case ENAGA_KEY_SELECT_RIGHT: load_patch((patch_ + 1) % patch_count); break;
+        case ENAGA_KEY_SELECT_LEFT:
+        case ENAGA_KEY_SELECT_RIGHT:
+            if (page_ != kPatchPage) {
+                int count = kPages[page_].count;
+                group_[page_] = (group_[page_] + (key == ENAGA_KEY_SELECT_RIGHT ? 1 : count - 1)) % count;
+            }
+            break;
+        case ENAGA_KEY_OK: if (page_ == kPatchPage) load_patch(choice_); break;
         case ENAGA_KEY_OCTAVE_LEFT: if (octave_ > -3) octave_--; break;
         case ENAGA_KEY_OCTAVE_RIGHT: if (octave_ < 3) octave_++; break;
         case ENAGA_KEY_CLR: send(NoteEvent::all_off, 0, 0, 0); break;
@@ -121,16 +144,13 @@ public:
     }
 
     void on_encoder(int encoder, int delta) override {
-        const Group &group = kPages[page_].groups[group_[page_]];
-        int row = encoder == 4 ? cursor_ : encoder;
-        if (row >= group.count) return;
-        if (encoder != 4) cursor_ = row;
-        int param = group.params[row];
-        const ParamInfo &p = info(param);
-        int value = engine_.values[param] + delta;
-        engine_.values[param] = int16_t(value < p.min ? p.min : value > p.max ? p.max : value);
-        if (param == voice_layout) show_pad_leds();
-        if (param == voice_mode) send(NoteEvent::all_off, 0, 0, 0);
+        if (page_ == kPatchPage) {
+            if (encoder == 4) choice_ = (choice_ + delta % patch_count + patch_count) % patch_count;
+            return;
+        }
+        const Group &group = current_group();
+        if (encoder >= group.count) return;       // VALUE (4) and knobs past the group's end do nothing here
+        set(group.params[encoder], engine_.values[group.params[encoder]] + delta);
     }
 
     void on_pad_press(int pad, int velocity) override {
@@ -170,9 +190,30 @@ public:
         append(text, "%");
         canvas.text(128 - 6 * length(text), 0, text, 8);
 
-        const Page &page = kPages[page_];
-        const Group &group = page.groups[group_[page_]];
         canvas.rect(0, 10, 128, 1, 4);
+        if (page_ == kPatchPage) draw_patches(canvas);
+        else draw_group(canvas);
+        if (octave_) {
+            text_number(text, octave_ > 0 ? "OCT+" : "OCT", octave_);
+            canvas.text(0, 92, text, 8);
+        }
+        draw_scope(canvas, 98, 30);
+    }
+
+private:
+    const Group &current_group() const { return kPages[page_].groups[group_[page_]]; }
+
+    void set(int param, int value) {
+        const ParamInfo &p = info(param);
+        engine_.values[param] = int16_t(value < p.min ? p.min : value > p.max ? p.max : value);
+        if (param == voice_layout) show_pad_leds();
+        if (param == voice_mode) send(NoteEvent::all_off, 0, 0, 0);
+    }
+
+    void draw_group(enaga::Canvas &canvas) {
+        char text[24];
+        const Page &page = kPages[page_];
+        const Group &group = current_group();
         canvas.text(0, 14, group.title, 15);
         text[0] = 0;                          // the page, and the group's place in it: "OSC 1/3"
         append(text, page.name);
@@ -182,41 +223,49 @@ public:
             text_number(text + length(text), "", page.count);
         }
         if (page.count > 1 || !same(page.name, group.title)) canvas.text(128 - 6 * length(text), 14, text, 6);
-
         for (int row = 0; row < group.count; row++) {
             int y = 26 + 13 * row, param = group.params[row];
             const ParamInfo &p = info(param);
             int value = engine_.values[param];
-            if (row == cursor_) canvas.rect(0, y - 2, 128, 12, 3);
-            char label[2] = {row < 4 ? char('A' + row) : ' ', 0};
+            char label[2] = {char('A' + row), 0};
             canvas.text(0, y, label, 6);
             canvas.text(9, y, p.name, 12);
             format(param, value, text);
-            canvas.text(128 - 6 * length(text), y, text, 15);
+            canvas.text(128 - 6 * length(text), y, text, value == patch_values_[param] ? 15 : 11);
             int width = 40 * (value - p.min) / (p.max - p.min);   // a bar under the name
             canvas.rect(9, y + 8, 40, 1, 2);
             canvas.rect(9, y + 8, width, 1, 9);
         }
-        if (octave_) {
-            text_number(text, octave_ > 0 ? "OCT+" : "OCT", octave_);
-            canvas.text(0, 92, text, 8);
-        }
-        draw_scope(canvas, 98, 30);
     }
 
-private:
+    // The factory patches: the chosen one highlighted, the loaded one marked with a block.
+    void draw_patches(enaga::Canvas &canvas) {
+        canvas.text(0, 14, "PATCH", 15);
+        canvas.text(128 - 6 * 8, 14, "VALUE/OK", 6);
+        int first = choice_ - 3;
+        first = first < 0 ? 0 : first > patch_count - 6 ? (patch_count > 6 ? patch_count - 6 : 0) : first;
+        for (int row = 0; row < 6 && first + row < patch_count; row++) {
+            int n = first + row, y = 26 + 11 * row;
+            if (n == choice_) canvas.rect(0, y - 2, 128, 11, 3);
+            if (n == patch_) canvas.rect(1, y + 1, 4, 5, 15);   // the loaded one
+            canvas.text(9, y, patches[n].name, n == choice_ ? 15 : 10);
+        }
+    }
+
     void send(NoteEvent::Type type, int key, int note, int value) {
         engine_.post({type, uint8_t(key), uint8_t(note), uint8_t(value)});
     }
 
     void load_patch(int n) {
         patch_ = n;
-        synth::load(patches[n], engine_.values);
+        synth::load(patches[n], patch_values_);
+        for (int p = 0; p < param_count; p++) engine_.values[p] = patch_values_[p];
         show_pad_leds();
     }
 
-    void show_page_leds() {
-        for (int p = 0; p < kPageCount; p++) enaga::button_led(kPages[p].key, 0, p == page_ ? 8 : 0);
+    void show_page_leds() {                   // the page's F key green; PATCH lights F2 red
+        for (int p = 0; p < kPageCount; p++)
+            enaga::button_led(kPages[p].key, kPages[p].key == kPatchKey && page_ == kPatchPage ? 8 : 0, p == page_ ? 8 : 0);
     }
     void show_pad_led(int pad) {
         bool note = engine_.values[voice_layout] != layout_piano || kPiano[pad] >= 0;
@@ -273,7 +322,9 @@ private:
     }
 
     Engine engine_;
-    int page_ = 0, cursor_ = 0, patch_ = 0, octave_ = 0;
+    int page_ = 0, patch_ = 0, choice_ = 0, octave_ = 0;
+    bool function_ = false;                   // F1 held
+    int16_t patch_values_[param_count] = {};  // the loaded patch, for knob-push resets
     int group_[kPageCount] = {};
     uint8_t pad_note_[15] = {}, step_note_[16] = {};
     bool pad_held_[15] = {};

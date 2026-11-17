@@ -80,6 +80,7 @@ void Engine::update_settings() {
 
     delay_.set(delay_s(v[delay_time]), percent(v[delay_feedback]), percent(v[delay_tone]), v[delay_mode] != 0);
     delay_mix_ = percent(v[delay_mix]);
+    delay_send_ = percent(v[delay_send]);
     reverb_.set(decay_s(v[reverb_decay]), percent(v[reverb_damping]));
     reverb_mix_ = 0.5f * percent(v[reverb_mix]);
 }
@@ -280,14 +281,17 @@ void Engine::render(float *out, uint32_t frames) {
     for (Voice &v : voices_) active += v.amp.active();
     active_voices = active;
 
-    // Effects: the delay's echoes join the dry signal, and both feed the reverb.
+    // Effects: the delay's echoes join the dry signal; the reverb gets the dry signal and `delay_send_` of the echoes.
     float wet_l[ENAGA_BLOCK_FRAMES] = {}, wet_r[ENAGA_BLOCK_FRAMES] = {};
+    float send_l[ENAGA_BLOCK_FRAMES] = {}, send_r[ENAGA_BLOCK_FRAMES] = {};
     delay_.process(left, right, wet_l, wet_r, int(frames), delay_mix_);
     for (uint32_t i = 0; i < frames; i++) {
+        send_l[i] = left[i] + delay_send_ * wet_l[i];
+        send_r[i] = right[i] + delay_send_ * wet_r[i];
         left[i] += wet_l[i];
         right[i] += wet_r[i];
     }
-    reverb_.process(left, right, left, right, int(frames), reverb_mix_);
+    reverb_.process(send_l, send_r, left, right, int(frames), reverb_mix_);
 
     const float volume = s_.volume;
     uint32_t w = scope_write;

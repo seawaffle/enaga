@@ -15,6 +15,6 @@ extern const Patch patches[];
 extern const int patch_count;
 
 // Writes the patch's values into values[0 .. param_count).
-void load(const Patch &patch, volatile int16_t *values);
+void load(const Patch &patch, int16_t *values);
 
 }  // namespace synth

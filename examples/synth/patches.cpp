@@ -75,7 +75,7 @@ const Patch patches[] = {
 };
 const int patch_count = sizeof patches / sizeof patches[0];
 
-void load(const Patch &patch, volatile int16_t *values) {
+void load(const Patch &patch, int16_t *values) {
     for (int p = 0; p < param_count; p++) values[p] = info(p).init;
     for (const C *c = patch.changes; c->param != param_count; c++) values[c->param] = c->value;
 }
