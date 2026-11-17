@@ -8,6 +8,10 @@ All *.cpp and *.c files in the directory are compiled with GCC tic6x-elf (C++20,
 freestanding libstdc++ headers), linked with the Enaga runtime (runtime/) at ENAGA_APP_BASE with libgcc, and
 wrapped as enaga_package_header (include/enaga/abi.h) + payload. No libc. The package format is provisional
 until 1.0.
+
+Files named *.ti.c are built with TI's cl6x instead when it is installed (tools/paths.py, TI_CGT): its
+software pipelining makes inner DSP loops several times faster than GCC's code. They must be C that GCC also
+compiles (the fallback) and export plain C functions, since C++ objects don't mix between the compilers.
 """
 import argparse
 import re
@@ -31,10 +35,14 @@ BASE = 0xC0400000
 LIMIT = 0xC8000000
 HEADER = struct.Struct("<10I24s")
 COMMON = ["-march=c674x", "-mlittle-endian", "-O2", "-ffreestanding", "-nostdlib", "-fno-asynchronous-unwind-tables",
-          "-fno-exceptions", "-msdata=none", "-ffunction-sections", "-fdata-sections", "-Wall", "-Wextra", "-Werror",
+          "-fno-exceptions", "-msdata=none", "-funroll-loops", "-ffunction-sections", "-fdata-sections", "-Wall", "-Wextra", "-Werror",
           f"-I{INCLUDE}"]
 CFLAGS = ["-std=c11", *COMMON]
 CXXFLAGS = ["-std=c++20", "-fno-rtti", *COMMON]
+# cl6x for *.ti.c: far data (Enaga apps have no data page pointer), a section per function for --gc-sections.
+TIFLAGS = ["-mv6740", "--abi=eabi", "--c99", "-O3", "--mem_model:data=far", "--mem_model:const=far",
+           "--gen_func_subsections=on", "--emit_warnings_as_errors", "--display_error_number", "--quiet",
+           f"-I{INCLUDE}"]
 
 
 def tools_present():
@@ -55,6 +63,11 @@ def symbols(elf):
 
 
 def compile_source(src, out):
+    if src.name.endswith(".ti.c") and paths.ti_present():
+        obj = out / (src.name[:-len(".ti.c")] + "_ti.o")
+        run([paths.TI_CGT / "bin" / "cl6x", *TIFLAGS, f"-I{paths.TI_CGT / 'include'}", f"--output_file={obj}",
+             "-c", src], out)
+        return obj
     obj = out / (src.stem + ("_c" if src.suffix == ".c" else "") + ".o")
     compiler, flags = (GCC, CFLAGS) if src.suffix == ".c" else (GXX, CXXFLAGS)
     run([compiler, *flags, "-c", "-o", obj, src], out)
@@ -99,7 +112,9 @@ def build(app_dir, out, name=None, app_version=1):
     entry = sym["enaga_entry"] - BASE
     header = HEADER.pack(MAGIC, HEADER.size, ABI_VERSION, BASE, len(payload), bss, entry,
                          zlib.crc32(payload) & 0xFFFFFFFF, app_version, 0, encoded)
-    return {"package": header + payload, "elf": elf, "payload_size": len(payload), "bss_size": bss, "entry": entry}
+    ti_sources = [src.name for src in sources if src.name.endswith(".ti.c")] if paths.ti_present() else []
+    return {"package": header + payload, "elf": elf, "payload_size": len(payload), "bss_size": bss, "entry": entry,
+            "ti_sources": ti_sources}
 
 
 def main(argv=None):
@@ -118,6 +133,8 @@ def main(argv=None):
     target = args.output or out / "APP.ENA"
     target.write_bytes(b["package"])
     print(f"wrote {target}: {len(b['package'])} bytes (payload {b['payload_size']}, bss {b['bss_size']}, entry +{b['entry']:#x})")
+    if b["ti_sources"]:
+        print("built with cl6x: " + ", ".join(b["ti_sources"]))
     return 0
 
 

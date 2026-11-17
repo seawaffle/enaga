@@ -49,6 +49,12 @@ ENAGA_APP(Beep)
 - `<enaga/dsp.hpp>` is a header-only DSP library: fast math without libm (`exp2`, `semitones`, `sin_turns`,
   `tan_pi`, `soft_clip`), band-limited oscillators, a state-variable filter, ADSR envelopes, LFOs, delay lines,
   a stereo delay and a reverb.
+- Inner DSP loops can go in `*.ti.c` files, which are built with TI's C6000 compiler (cl6x) when it is installed
+  and with GCC otherwise (see "Building"). Its software pipelining runs loops several times faster than GCC's
+  code, if they have no branches inside: use `cond ? a : b` selects rather than `if`. They must be C, compile
+  with GCC too, and export plain C functions, since C++ objects don't mix between the two compilers. Everything
+  else builds with GCC (`-O2 -funroll-loops`). The synth's oscillators, noise and filter are in `voice.ti.c`:
+  its worst case takes 37% of the audio budget built with cl6x and 63% with GCC alone (emulator figures).
 - `enaga::fatal(reason)` stops the app; Enaga shows the reason and keeps running. Enaga's watchdog stops an
   app the same way when a main-loop call (including `init` and `stop`) has not returned after 1 s, or `audio`
   after 100 ms.
@@ -67,7 +73,9 @@ tools/build_tic6x_binutils.sh       # a few minutes; installs into tools/tic6x
 tools/build_tic6x_gcc.sh            # 10-30 minutes
 ```
 
-Set `ENAGA_TOOLCHAIN` to use an existing installation elsewhere. Then:
+Set `ENAGA_TOOLCHAIN` to use an existing installation elsewhere. Optionally install TI's C6000 code generation
+tools (free from TI; tested with 8.5.0.LTS) for `*.ti.c` files: `tools/paths.py` uses the newest
+`~/ti/ti-cgt-c6000_*`, or `ENAGA_TI_CGT` (`ENAGA_TI_CGT=none` builds them with GCC). Then:
 
 ```sh
 python3 -B tools/build_app.py examples/tone     # -> build/apps/tone/APP.ENA
@@ -94,7 +102,7 @@ project. Point `ENAGA_EMULATOR` at its emulator directory (the one containing `c
 
 ```sh
 export ENAGA_EMULATOR=/path/to/emulator
-python3 -B -m unittest discover -s tests -v                           # 31 tests, about 3 minutes
+python3 -B -m unittest discover -s tests -v                           # 32 tests, about 3 minutes
 python3 -B tools/emulate.py examples/tone --key 32@300000000           # press STEP 1; writes build/emulate/
 ```
 

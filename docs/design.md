@@ -170,8 +170,9 @@ a unit", the CHECK app in `tests/unit/check`, `tools/unit_card.py`) and not yet 
 
 E2 has begun ahead of that session, driven by its exit app: pads as press / release with velocity, the start of
 the DSP library (`include/enaga/dsp`, tested on the host), and `examples/synth`, an eight-voice virtual analogue
-synthesizer (emulator-tested, worst case 67 % of the audio budget). Asynchronous file I/O and sample streaming,
-the rest of E2, are not started.
+synthesizer (emulator-tested). Apps can build their inner DSP loops with TI's cl6x (`*.ti.c`, GCC as the
+fallback); the synth's worst case is 37 % of the audio budget that way and 63 % with GCC alone. Asynchronous file
+I/O and sample streaming, the rest of E2, are not started.
 
 ## Open items
 
@@ -190,7 +191,13 @@ the rest of E2, are not started.
   with velocity at provisional thresholds (press 800, release under 600, velocity 127 from 12,000). To set from
   readings on a unit: the release threshold, the velocity scale, whether one reading after the threshold gives a
   usable velocity (a pad is read every 3.8 ms), per-pad calibration.
-- Synth on the unit: its CPU load with real caches (67 % worst case on the emulator), the pad keyboard's feel.
+- Synth on the unit: its CPU load with real caches (worst case on the emulator 37 % with cl6x, 63 % GCC only),
+  the pad keyboard's feel.
+- DSP library and cl6x: the library is header-only C++, so apps compile it with GCC. Its inner loops could move to
+  block functions in C built by cl6x (a library apps link, or functions in Enaga), plus low-level building blocks
+  (vector mix, FIR, biquads, interpolated delay reads) for custom DSP. Before shipping cl6x-built code, check that
+  it calls none of TI's run-time library (the link would show it: apps link only libgcc) and TI's licence terms.
+  The branch-free style that cl6x needs made the synth's GCC fallback slower (59 % to 63 %).
   Saving patches waits for the file API; edits last until the app stops.
 - USB stack: the C6748's USB0 is a Mentor MUSB controller; a TinyUSB port (TinyUSB has a MUSB driver for
   other TI parts) is plausible and unverified.
@@ -438,3 +445,29 @@ both operands non-negative divi falls into the next packet's `b b5` and returns 
 runs with two branches in flight. smpltrek's emulator now has the two-line fix (in its working tree after
 bcce9b3, not yet committed there), and all 31 tests pass against it; emulators without it fail `test_synth.py`.
 
+### cl6x for apps' inner loops (2026-11-17)
+
+Question from the owner: does GCC limit DSP apps, against TI's compiler? Measured on the emulator (fixed core),
+kernels modelled on the synth's loops, one 64-sample block, cycles (GCC -O2 / cl6x 8.5.0 -O3): LP24 filter
+4314 / 1407, 32-tap FIR 29461 / 9177, mix 916 / 162, PolyBLEP saw 2885 / 2163, envelope 2715 / 3607. The two give
+identical samples. GCC's tic6x backend does no software pipelining (`-fmodulo-sched` changes nothing) and put
+nearly all of the float work on the A side, so one multiplier; `-funroll-loops` helps it a lot (FIR 13781, mix
+387; synth worst case 67 % to 59 %), and four accumulators in the FIR bring GCC to 8661. cl6x refuses to pipeline
+a loop with branches in it ("Loop contains control code"), so its gains depend on writing loops with selects.
+
+Building Enaga itself with cl6x would not help: its own share of an audio block is about 6,000 cycles (1.2 %).
+The time is in the app's DSP, which apps compile. So the app build now takes `*.ti.c` files to cl6x when it is
+installed (`tools/paths.py` TI_CGT: `ENAGA_TI_CGT`, else the newest `~/ti/ti-cgt-c6000_*`; `none` to switch it
+off): far data model (apps have no data page pointer), function subsections for `--gc-sections`; `runtime/app.ld`
+takes `.text:NAME` and drops cl6x's `.TI.*` and `__TI_*` sections. The same file builds with GCC when cl6x is
+absent, and exports plain C functions. Everything else gains `-funroll-loops`. The owner preferred not to tie
+developers to library functions: any app can put its own loops in a `.ti.c` file.
+
+The synth's voice loops (oscillators, noise, filter) moved to `examples/synth/voice.ti.c`. Timed per stage with
+TSCL in the worst case (GCC alone / cl6x): oscillators and noise 28.3 % / 6.3 %, filter 6.6 % / 3.0 %, modulation
+8.3 %, amplitude and pan 5.8 %, reverb 9.4 %, delay 1.4 %; worst case 63 % / 37 %. Getting there took a
+branch-free oscillator: the phase as a 32-bit fraction of a turn (wrapping by itself, top 24 bits as the float
+phase) and a PolyBLEP that computes both corrections and selects one. With branches cl6x managed only 23 % for the
+oscillators. The noise now has its own xorshift state. The emulator's packet-sampling profiler under-counts code
+with many NOPs (GCC's), so the per-stage figures come from TSCL reads in a scratch copy. New test: the cl6x and GCC
+builds of the synth give identical samples (skipped without cl6x). 32 tests pass.

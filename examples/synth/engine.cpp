@@ -109,11 +109,9 @@ void Engine::start(Voice &voice, const NoteEvent &event, bool retrigger) {
     voice.random = random_.bipolar();
     bool glide = s_.glide < 1.0f && (s_.mode != mode_legato);
     voice.pitch = glide ? last_pitch_ : voice.target;
-    voice.osc1.reset();
-    voice.osc2.reset();
-    voice.sub.reset();
-    voice.svf1.reset();
-    voice.svf2.reset();
+    voice.phase1 = voice.phase2 = voice.phase_sub = 0.0f;
+    voice.svf1 = {};
+    voice.svf2 = {};
     voice.amp.gate_on();
     voice.env2.gate_on();
     voice.env3.gate_on();
@@ -221,31 +219,23 @@ void Engine::render_voice(Voice &v, float *left, float *right) {
     float buffer[kControl] = {};
     float level1 = s_.level1 * clamp(1.0f + d[dst_osc1], 0.0f, 2.0f);
     float level2 = s_.level2 * clamp(1.0f + d[dst_osc2], 0.0f, 2.0f);
-    if (level1 > 0.0f) v.osc1.render_add(buffer, kControl, s_.wave1, dt1, inv1, level1, s_.width1 + 0.45f * d[dst_width]);
-    if (level2 > 0.0f) v.osc2.render_add(buffer, kControl, s_.wave2, dt2, inv2, level2, s_.width2 + 0.45f * d[dst_width]);
-    if (s_.level_sub > 0.0f) v.sub.render_add(buffer, kControl, enaga::dsp::Wave::pulse, 0.5f * dt1, 2.0f * inv1, s_.level_sub);
+    // voice.ti.c, built by cl6x when it is installed.
+    static_assert(int(Wave::saw) == SYNTH_SAW && int(Wave::pulse) == SYNTH_PULSE && int(Wave::triangle) == SYNTH_TRIANGLE &&
+                  int(Wave::sine) == SYNTH_SINE, "waves out of step with voice.h");
+    const float width = 0.45f * d[dst_width];
+    if (level1 > 0.0f) v.phase1 = synth_oscillator(buffer, kControl, int(s_.wave1), v.phase1, dt1, inv1, level1, s_.width1 + width);
+    if (level2 > 0.0f) v.phase2 = synth_oscillator(buffer, kControl, int(s_.wave2), v.phase2, dt2, inv2, level2, s_.width2 + width);
+    if (s_.level_sub > 0.0f)
+        v.phase_sub = synth_oscillator(buffer, kControl, SYNTH_PULSE, v.phase_sub, 0.5f * dt1, 2.0f * inv1, s_.level_sub, 0.5f);
     float noise = s_.level_noise * clamp(1.0f + d[dst_noise], 0.0f, 2.0f);
-    if (noise > 0.0f)
-        for (int i = 0; i < kControl; i++) buffer[i] += noise * random_.bipolar();
+    if (noise > 0.0f) synth_noise(buffer, kControl, noise, &noise_);
 
     // Drive and filter.
-    const float drive = s_.drive;
-    switch (s_.filter_type) {
-    case filter_lp12:
-        for (int i = 0; i < kControl; i++) buffer[i] = v.svf2.low(soft_clip(drive * buffer[i]), c2);
-        break;
-    case filter_lp24: {
-        SvfCoefficients c1 = SvfCoefficients::from_g(g, 1.85f);
-        for (int i = 0; i < kControl; i++) buffer[i] = v.svf2.low(v.svf1.low(soft_clip(drive * buffer[i]), c1), c2);
-        break;
-    }
-    case filter_bp:
-        for (int i = 0; i < kControl; i++) buffer[i] = v.svf2.step(soft_clip(drive * buffer[i]), c2).band;
-        break;
-    default:
-        for (int i = 0; i < kControl; i++) buffer[i] = v.svf2.step(soft_clip(drive * buffer[i]), c2).high;
-        break;
-    }
+    static_assert(int(filter_lp12) == SYNTH_LP12 && int(filter_lp24) == SYNTH_LP24 && int(filter_bp) == SYNTH_BP &&
+                  int(filter_hp) == SYNTH_HP, "filter types out of step with voice.h");
+    const SvfCoefficients c1 = s_.filter_type == filter_lp24 ? SvfCoefficients::from_g(g, 1.85f) : c2;
+    const SynthSvfCoefficients k1{c1.a1, c1.a2, c1.a3, c1.k}, k2{c2.a1, c2.a2, c2.a3, c2.k};
+    synth_filter(buffer, kControl, s_.filter_type, s_.drive, &k1, &k2, &v.svf1, &v.svf2);
 
     // Amplitude, per sample, with the control-rate gains ramped across the step.
     float gl = v.gain_l, gr = v.gain_r;

@@ -5,7 +5,7 @@ OUTPUT_ARCH(tic6x)
 ENTRY(enaga_entry)
 MEMORY { APP (rwx) : ORIGIN = 0xC0400000, LENGTH = 0x7C00000 }   /* ENAGA_APP_BASE to the end of DDR */
 SECTIONS {
-    .text : { *(.text .text.*) } > APP
+    .text : { *(.text .text.* .text:*) } > APP    /* cl6x (*.ti.c) names function sections .text:NAME */
     /* GCC tic6x names read-only data .const and jump tables .switch (TI conventions) */
     .rodata : { *(.rodata .rodata.* .const .const.* .switch .switch.*) } > APP
     .init_array : {
@@ -25,5 +25,6 @@ SECTIONS {
     .bss (NOLOAD) : { . = ALIGN(8); __bss_start = .; *(.bss .bss.* .far .far.*) *(COMMON) . = ALIGN(8); __bss_end = .; } > APP
     /* Destructors are never run (an unloaded app's memory is discarded), and nothing unwinds. */
     /DISCARD/ : { *(.fini_array .fini_array.*) *(.dtors .dtors.*) *(.c6xabi.attributes) *(.c6xabi.exidx*) *(.c6xabi.extab*)
-                  *(.comment) *(.note*) *(.debug*) }
+                  *(.comment) *(.note*) *(.debug*)
+                  *(.TI.*) *(__TI_*) }    /* cl6x's build attributes and debug groups */
 }

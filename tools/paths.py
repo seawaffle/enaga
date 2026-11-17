@@ -4,8 +4,11 @@
     TOOLCHAIN  GCC/binutils for tic6x-elf: $ENAGA_TOOLCHAIN, or tools/tic6x (tools/build_tic6x_*.sh)
     BUILD      build output: $ENAGA_BUILD, or build/ (ignored by git)
     EMULATOR   the SmplTrek emulator directory, for tests and tools/emulate.py: $ENAGA_EMULATOR (optional)
+    TI_CGT     TI's C6000 code generation tools, for apps' *.ti.c files: $ENAGA_TI_CGT, or the newest
+               ~/ti/ti-cgt-c6000_* (optional; ENAGA_TI_CGT=none builds those files with GCC instead)
 """
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -15,6 +18,21 @@ BIN = TOOLCHAIN / "bin"
 LIBGCC_DIR = TOOLCHAIN / "lib" / "gcc" / "tic6x-elf"
 BUILD = Path(os.environ.get("ENAGA_BUILD", ROOT / "build"))
 EMULATOR = Path(os.environ["ENAGA_EMULATOR"]) if os.environ.get("ENAGA_EMULATOR") else None
+
+
+def _version(path):
+    return [int(n) for n in re.findall(r"\d+", path.name)]
+
+
+def _ti_cgt():
+    chosen = os.environ.get("ENAGA_TI_CGT")
+    if chosen:
+        return None if chosen == "none" else Path(chosen)
+    found = sorted(Path.home().glob("ti/ti-cgt-c6000_*"), key=_version)
+    return found[-1] if found else None
+
+
+TI_CGT = _ti_cgt()
 
 
 def tool(name):
@@ -30,6 +48,10 @@ def libgcc():
 
 def toolchain_present():
     return tool("g++").exists() and tool("ld").exists()
+
+
+def ti_present():
+    return TI_CGT is not None and (TI_CGT / "bin" / "cl6x").exists()
 
 
 def emulator_present():
