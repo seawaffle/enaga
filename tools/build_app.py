@@ -35,7 +35,9 @@ MAGIC = 0x41474E45
 BASE = 0xC0400000
 LIMIT = 0xC8000000
 HEADER = struct.Struct("<10I24s")
-COMMON = ["-march=c674x", "-mlittle-endian", "-O2", "-ffreestanding", "-nostdlib", "-fno-asynchronous-unwind-tables",
+# Every GCC frame must fit in the 16 KiB that Enaga's interrupt entry leaves below the interrupted stack pointer
+# (firmware/start.s, "Interrupt stack gap"): GCC can release a frame a few cycles before its last reads of it.
+COMMON = ["-march=c674x", "-mlittle-endian", "-O2", "-Werror=frame-larger-than=16384", "-Werror=vla", "-Werror=alloca", "-ffreestanding", "-nostdlib", "-fno-asynchronous-unwind-tables",
           "-fno-exceptions", "-msdata=none", "-funroll-loops", "-ffunction-sections", "-fdata-sections", "-Wall", "-Wextra", "-Werror",
           f"-I{INCLUDE}"]
 CFLAGS = ["-std=c11", *COMMON]

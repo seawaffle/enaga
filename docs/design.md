@@ -209,6 +209,9 @@ I/O and sample streaming, the rest of E2, are not started.
   also drops the power hold. Whether a reset on the unit switches it off or restarts Enaga is to be checked.
 - Loading a very large app: the loader's CRC and bss clearing run without feeding the watchdog, so an image
   that takes over a second to check would trip it. To be measured on the unit with caches on.
+- Interrupt stack gap (firmware/start.s): GCC code is held to 16 KiB frames by the build; libgcc (prebuilt, small
+  frames) and cl6x-built code are not checked. cl6x is not known to release frames early. An app that needs a
+  bigger local array puts it in a static or on the heap.
 - Licence.
 
 ## Development log
@@ -620,3 +623,24 @@ barely moved a quarter second into a 19 s fade.
 
 Worst case, now with sync, ring, LFO fade and chorus on: cl6x 30 %, GCC alone 65 % (oscillators 10.2 % / 28.7 %;
 the first, branchy sync loop took cl6x to 35 %). 34 tests pass.
+
+### GPIO enabled at start-up; a GCC stack hazard under interrupts (2026-11-17)
+
+Enaga now enables GPIO (PSC1 module 3) itself, before the power hold, as the original firmware's board set-up
+does. The bootloader leaves it on (smpltrek's own firmware, which never enables it, drove the power hold and
+read keys on a unit in session M1), so on a unit nothing changes; it lets Enaga start from the power-on state the
+emulator's panel (`stock_ui.py`) uses, so the panel runs Enaga with no wrapper:
+`stock_ui.py --firmware build/firmware/ENAGA_0_1_0.bin --card <card with /ENAGA/APPS/...>`. It runs at about
+0.5-0.6x real time on the development host, so its sound breaks up.
+
+The smpltrek emulator work found that tic6x GCC 13.3 at -O2/-O3/-Os can raise SP (release the frame) a few
+cycles before a function's last reads of a local array; an interrupt there, pushing onto the interrupted stack,
+overwrites the array. Reproduced in Enaga: `tests/apps/stack` calls such a function (`addk 72, b15` in the same
+packet as the last store, two loads after) 2 million times under audio interrupts: 6 wrong results. Their
+suggested fix, `-fno-schedule-insns2`, costs too much here (synth worst case cl6x 30 % -> 40 %, GCC alone
+65 % -> 104 %: it is GCC's scheduler for this VLIW CPU). Instead each interrupt vector first moves SP 16 KiB
+down, and back on return (one instruction each, in slots that were NOPs), so a just-released frame is not
+written; the build makes any GCC frame over 16 KiB, a VLA or alloca an error (the largest today is the reverb's
+2,824 bytes). After: 0 wrong, regression test in test_e1. The C interrupt handler was already entered through an
+assembly stub saving the registers GCC needs (their other note: GCC ignores `__attribute__((interrupt))`). 35
+tests pass; the unit dry run passes 141/141.

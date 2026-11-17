@@ -43,7 +43,9 @@ ENAGA_APP(Beep)
   `<array>`, `<algorithm>`, `<span>`, `<optional>`, `<variant>`, `<type_traits>`, `<bit>`, `<atomic>` and
   `<numbers>`. `new`/`delete` work on the app's heap (everything above Enaga, about 124 MiB). There is no
   libm yet, and no allocating standard containers. Global destructors never run: Enaga discards an app's
-  memory after calling `stop()`.
+  memory after calling `stop()`. A function's stack frame is limited to 16 KiB and VLAs and `alloca` are
+  refused at build time (Enaga's interrupt entry protects the 16 KiB below the stack pointer; see
+  `firmware/start.s`): put large arrays in statics or on the heap.
 - Panel LEDs by name, levels 0-10, from the main loop: `enaga::pad_led(pad, r, g, b)`, `step_led(n, red, green)`,
   `button_led(key, red, green)`, `vol_led`, `mic_led`, `value_led`. Enaga switches them all off when an app stops.
 - `<enaga/dsp.hpp>` is the DSP library: fast math without libm (`exp2`, `semitones`, `sin_turns`, `tan_pi`,
@@ -113,7 +115,7 @@ project. Point `ENAGA_EMULATOR` at its emulator directory (the one containing `c
 
 ```sh
 export ENAGA_EMULATOR=/path/to/emulator
-python3 -B -m unittest discover -s tests -v                           # 32 tests, about 3 minutes
+python3 -B -m unittest discover -s tests -v                           # 35 tests, about 5 minutes
 python3 -B tools/emulate.py examples/tone --key 32@300000000           # press STEP 1; writes build/emulate/
 ```
 

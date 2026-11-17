@@ -6,7 +6,13 @@
 ; and invalidates L1D and invalidates L1P, and calls main, which sets the caches (hal/cache.c); the kernel points
 ; ISTP at `vectors` and enables what it uses (kernel/irq.c).
 ;
-; Each maskable vector pushes B0/B1, loads the interrupt number into B1 and branches to isr_common, which
+; Interrupt stack gap: each maskable vector first moves SP 16 KiB down, so nothing it saves lands in the
+; 16 KiB below the interrupted stack pointer. GCC 13.3 at -O2 can release a function's frame (raise SP) a few
+; cycles before the function's last reads of a local array in it (tests/apps/stack); an interrupt there would
+; write over the array. Building GCC code with -Werror=frame-larger-than=16384 (no VLAs or alloca) keeps every
+; frame inside the gap. Found by the smpltrek emulator work, 2026-11-17.
+;
+; Each maskable vector then pushes B0/B1, loads the interrupt number into B1 and branches to isr_common, which
 ; saves every register the C calling convention lets enaga_irq clobber (A0-A9, A16-A31, B0-B9, B16-B31) plus
 ; ILC/RILC (SPLOOP state), calls enaga_irq(number) with interrupts disabled, restores, and returns through
 ; IRP. The one nesting is the watchdog inside the app's audio callback (irq_nest_begin/end, kernel/audio.c).
@@ -217,6 +223,7 @@ vectors:
 
 	.macro VECTOR number
 	.p2align 5
+	addk .S2 -16384, b15            ; skip the gap below the interrupted SP (see "Interrupt stack gap" above)
 	stw .D2T2 b1, *b15--[2]
 	stw .D2T2 b0, *b15--[2]
 	mvkl .S2 isr_common, b0
@@ -224,7 +231,6 @@ vectors:
 	b .S2 b0
 	mvk .S2 \number, b1
 	nop 4
-	nop
 	.endm
 
 	VECTOR 4
@@ -364,9 +370,9 @@ isr_return:
 	addk .S2 216, b15
 	ldw .D2T2 *++b15[2], b0         ; pushed second by the vector
 	ldw .D2T2 *++b15[2], b1
-	nop 4
 	b .S2 irp
-	nop 5
+	addk .S2 16384, b15             ; the interrupted SP again
+	nop 4
 
 ; NMI and exceptions (SPRUFE8B chapter 6; bit values as SYS/BIOS ti/sysbios/family/c64p/Exception.xdc).
 ; The faulting context is never resumed, so only what the report needs is saved: NRP, EFR, IERR, NTSR, the

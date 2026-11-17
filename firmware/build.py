@@ -24,7 +24,9 @@ OUT = paths.BUILD / "firmware"
 
 VERSION = (0, 1, 0)
 LOAD = 0xC0000000
-CFLAGS = ["-march=c674x", "-mlittle-endian", "-O2", "-ffreestanding", "-fno-builtin", "-nostdlib",
+# Every GCC frame must fit in the 16 KiB that Enaga's interrupt entry leaves below the interrupted stack pointer
+# (firmware/start.s, "Interrupt stack gap"): GCC can release a frame a few cycles before its last reads of it.
+CFLAGS = ["-march=c674x", "-mlittle-endian", "-O2", "-Werror=frame-larger-than=16384", "-Werror=vla", "-Werror=alloca", "-ffreestanding", "-fno-builtin", "-nostdlib",
           "-fno-asynchronous-unwind-tables", "-fno-exceptions", "-msdata=none", "-Wall", "-Wextra", "-Werror",
           "-Wno-main", f"-I{HERE / 'include'}", f"-I{ENAGA / 'include'}", f"-I{ENAGA / 'loader'}",
           f"-I{HERE / 'third_party' / 'fatfs'}"]

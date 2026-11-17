@@ -177,6 +177,16 @@ class E1(unittest.TestCase):
             disassembly = (emu.firmware["elf"].parent / "enaga.dis").read_text()
             self.assertIn("sploop", disassembly)   # the loader's own CRC loop is a SPLOOP too
 
+    def test_interrupts_leave_a_just_released_frame_alone(self):
+        # GCC releases pick()'s frame before its last reads of the array in it (tests/apps/stack). Before the
+        # interrupt entry skipped 16 KiB below SP, this run gave 6 wrong results in 2 million calls.
+        with Emulation(HERE / "apps" / "stack") as emu:
+            self.assertIsNone(emu.run(BOOT + 600_000_000)["error"])
+            report = emu.report()
+            self.assertEqual(report["app_status"], "APP RUNNING")
+            self.assertGreater(report["interrupts"], 1000)
+            self.assertEqual(report["log"][-1], "STACK WRONG 0")
+
     def test_fatal_in_main_context_returns_to_enaga(self):
         self.crash(STEP1, "main crash")
 
