@@ -34,7 +34,8 @@ private:
 ENAGA_APP(Beep)
 ```
 
-- `init`, `update(ms)`, `draw(canvas)`, `stop`, `on_key`, `on_encoder`, `on_pad` run in Enaga's main loop.
+- `init`, `update(ms)`, `draw(canvas)`, `stop`, `on_key`, `on_encoder`, `on_pad_press(pad, velocity)`,
+  `on_pad_release`, `on_pad` (every raw pressure reading) run in Enaga's main loop.
   `audio` runs in the audio interrupt every 64 frames (1.33 ms at 48 kHz) and must not block, allocate,
   draw or touch files.
 - The canvas is 128 x 128 pixels, one byte per pixel, grey 0 (black) to 15.
@@ -45,11 +46,16 @@ ENAGA_APP(Beep)
   memory after calling `stop()`.
 - Panel LEDs by name, levels 0-10, from the main loop: `enaga::pad_led(pad, r, g, b)`, `step_led(n, red, green)`,
   `button_led(key, red, green)`, `vol_led`, `mic_led`, `value_led`. Enaga switches them all off when an app stops.
+- `<enaga/dsp.hpp>` is a header-only DSP library: fast math without libm (`exp2`, `semitones`, `sin_turns`,
+  `tan_pi`, `soft_clip`), band-limited oscillators, a state-variable filter, ADSR envelopes, LFOs, delay lines,
+  a stereo delay and a reverb.
 - `enaga::fatal(reason)` stops the app; Enaga shows the reason and keeps running. Enaga's watchdog stops an
   app the same way when a main-loop call (including `init` and `stop`) has not returned after 1 s, or `audio`
   after 100 ms.
 
-See `examples/tone` for a complete app.
+See `examples/tone` for a minimal app and `examples/synth` for a whole instrument: an eight-voice virtual
+analogue synthesizer with a filter, three envelopes, two LFOs, a modulation matrix, delay and reverb, played
+from the pads and STEP keys and edited page by page.
 
 ## Building
 
@@ -88,11 +94,12 @@ project. Point `ENAGA_EMULATOR` at its emulator directory (the one containing `c
 
 ```sh
 export ENAGA_EMULATOR=/path/to/emulator
-python3 -B -m unittest discover -s tests -v                           # 25 tests, about 2.5 minutes
+python3 -B -m unittest discover -s tests -v                           # 31 tests, about 3 minutes
 python3 -B tools/emulate.py examples/tone --key 32@300000000           # press STEP 1; writes build/emulate/
 ```
 
-Without `ENAGA_EMULATOR` the tests are skipped. `tools/emulate.py` writes the last screen to
+Without `ENAGA_EMULATOR` the emulator tests are skipped; `tests/test_dsp.py` (the DSP library on the host) needs
+only `g++`. `tools/emulate.py` writes the last screen to
 `build/emulate/frame.png`, the captured output to `build/emulate/audio.wav`, and a JSON report.
 
 ## Layout
@@ -101,11 +108,12 @@ Without `ENAGA_EMULATOR` the tests are skipped. `tools/emulate.py` writes the la
 |---|---|
 | `include/enaga/abi.h` | The C boundary between Enaga and an app: package header, host table, app table, events, key names |
 | `include/enaga/app.hpp` | The C++ layer: `enaga::App`, `enaga::Canvas`, `ENAGA_APP(Type)`, `enaga::log`, `enaga::fatal` |
+| `include/enaga/dsp.hpp`, `dsp/` | The DSP library (header-only) |
 | `runtime/` | Linked into every app: entry point, static constructors, heap, `new`/`delete`, C++ ABI hooks, `app.ld` |
 | `loader/` | The package loader (freestanding C, used by the firmware and the tests) |
 | `firmware/` | Enaga itself: `hal/` drivers, `kernel/` (interrupts, audio engine, app host, exceptions, watchdog, main loop), `start.s`, `link.ld`, `build.py` |
-| `examples/` | `tone` (STEP 1-8 play 750 Hz x step); `cxxcheck` (exercises the C++ runtime) |
-| `tests/` | `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board; `test_check.py` and `unit/check`: the CHECK app for sessions on a unit |
+| `examples/` | `synth` (the virtual analogue synthesizer); `tone` (STEP 1-8 play 750 Hz x step); `cxxcheck` (exercises the C++ runtime) |
+| `tests/` | `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board; `test_check.py` and `unit/check`: the CHECK app for sessions on a unit; `test_synth.py`: the synth example; `test_dsp.py` and `dsp/`: the DSP library on the host |
 | `tools/` | `build_app.py`, `emulate.py`, `unit_card.py` and `unit_dry_run.py` (files for a session on a unit, and the session walked on the emulator), `sysimage.py` (the update-file format), `paths.py`, toolchain build scripts |
 | `docs/` | `design.md` (decisions, architecture, plan, log), `hardware.md` (the hardware notes) |
 

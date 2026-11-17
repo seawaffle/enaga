@@ -168,6 +168,11 @@ emulator; nothing has run on a unit yet. The watchdog, key debouncing and the st
 place (emulator-tested). Remaining for E1: the first session on the unit, prepared (docs/hardware.md "Checks on
 a unit", the CHECK app in `tests/unit/check`, `tools/unit_card.py`) and not yet run.
 
+E2 has begun ahead of that session, driven by its exit app: pads as press / release with velocity, the start of
+the DSP library (`include/enaga/dsp`, tested on the host), and `examples/synth`, an eight-voice virtual analogue
+synthesizer (emulator-tested, worst case 67 % of the audio budget). Asynchronous file I/O and sample streaming,
+the rest of E2, are not started.
+
 ## Open items
 
 - On the unit: F1 sampled during the power-key hold; the bootloader passes control normally with F1
@@ -181,8 +186,12 @@ a unit", the CHECK app in `tests/unit/check`, `tools/unit_card.py`) and not yet 
 - The SDK should give apps unaligned-safe load/store helpers for packed formats (misaligned LDW/STW/LDDW round
   the address down without a fault) and say that a null read returns garbage rather than trapping (smpltrek
   session M1; docs/hardware.md "Processor and memory"). A debug-build null check is worth considering.
-- Pad events: Enaga passes every MCU message on, about 3,930 pad events a second at rest. Thresholds, change
-  filtering and calibration are E2's (pads as press/release with velocity).
+- Pad events: Enaga passes every MCU message on, about 3,930 raw pad events a second at rest, and press / release
+  with velocity at provisional thresholds (press 800, release under 600, velocity 127 from 12,000). To set from
+  readings on a unit: the release threshold, the velocity scale, whether one reading after the threshold gives a
+  usable velocity (a pad is read every 3.8 ms), per-pad calibration.
+- Synth on the unit: its CPU load with real caches (67 % worst case on the emulator), the pad keyboard's feel.
+  Saving patches waits for the file API; edits last until the app stops.
 - USB stack: the C6748's USB0 is a Mentor MUSB controller; a TinyUSB port (TinyUSB has a MUSB driver for
   other TI parts) is plausible and unverified.
 - A fault in Enaga code called by an app (a host function given a bad pointer) currently counts as a kernel
@@ -389,3 +398,26 @@ as measured):
 - Recorded without code changes: null reads return leftover data and do not fault; misaligned accesses round
   down without faulting; an EMIFA chip-select-0 store with EMIFA not set up is dropped; USB0's bring-up order
   and reserved registers; both SPI flash chips answer `C2 20 18`, and chip 0 has block-protect bits set.
+
+### Synth example and the start of E2 (2026-11-17)
+
+Started ahead of the first unit session, since none of it needs the unit (the emulator is cycle-level, so CPU
+load is measured there):
+- Pads as notes: `ENAGA_EVENT_PAD_PRESS` (velocity 1-127) and `ENAGA_EVENT_PAD_RELEASE`, sent before the raw
+  reading that caused them; `on_pad_press` / `on_pad_release` in `enaga::App`. Thresholds in `kernel/main.c`,
+  provisional (see Open items). Tested in test_e1 through the keys app.
+- The DSP library, header-only so apps need no build change and the host can test it: `math.hpp` (exp2, log2,
+  sin_turns, tan_pi, soft_clip, Random; nothing divides), PolyBLEP oscillators, the trapezoidal SVF, ADSR and
+  LFO, a delay line, stereo delay and an eight-line FDN reverb. `tests/test_dsp.py` compiles `tests/dsp/host.cpp`
+  with the host g++ and checks accuracy, pitch, filter response, envelope times, delay time and reverb decay.
+  GCC inlines float division on the C674x (no libgcc call), and the synth has no double-precision code.
+- `examples/synth`: two oscillators with sub and noise, LP12 / LP24 / BP / HP with drive, three ADSRs (amp and
+  two assignable), two LFOs (free or key-synced), an eight-slot matrix (sources ENV2, ENV3, LFO1, LFO2, velocity,
+  pad pressure, key, per-note random; 13 destinations), POLY / MONO / LEGATO with glide, delay (stereo or ping-
+  pong) and reverb, nine factory patches. Modulation runs every 16 frames (3 kHz), the amplitude envelope per
+  sample. Pages on F2-F8 (F1 stays free for Enaga's menu), knobs A-D on the group's first four parameters, the
+  cursor and VALUE for any. Pads are a piano keyboard by their physical rows (docs/hardware.md "Panel MCU").
+- Measured on the emulator: reverb and delay alone 16 % of the audio budget; eight voices of INIT 43 %; the
+  worst case (both oscillators, sub, noise, LP24 with drive, all eight slots) 67 %. `tests/test_synth.py`
+  checks pitch from keys and pads, the worst case under 80 %, knobs, pages, patches, and MONO's note priority.
+
