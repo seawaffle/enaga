@@ -256,7 +256,11 @@ be sent whole. Enaga sends frames by EDMA (events 18 and 19, SPI1 receive and tr
   on a unit. Found in smpltrek's bring-up firmware (commit cdd968f), where a 7 ms display frame let 96 blocks
   complete against 77 counted.
 - **Channels:** with the original firmware's one-word-short first transfer, even buffer words land in slot
-  1, believed to be the **left** channel (**unconfirmed** by ear).
+  1, the **left** channel: confirmed by ear on headphones (smpltrek session M1, image 0.3.1, which uses the same
+  scheme with 256-word buffers): even words left only, odd words right only, both at the same level. The line
+  outputs and the receive side (which input lands in which words) are not yet checked; with nothing connected,
+  0.3.1's input peak sat around 2 in 32,768.
+- **Speaker:** plays with GP2[8] (speaker mute) driven low and headphones unplugged (M1). Enaga keeps it muted.
 - **Audio GPIOs:**
 
 | Pin | Use |
@@ -319,7 +323,8 @@ listen on headphones or the line output. Report each result with what the screen
    anything (it should not).
 5. **App start:** copy `app/ENAGA` to the card, switch on. Expected: the CHECK app's AUDIO page.
 6. **Channels (AUDIO page):** STEP 1 gives 750 Hz in the **left** ear only, STEP 2 1500 Hz in the **right** only,
-   STEP 3 750 Hz in both, STEP 4 off; VALUE changes the level. A swap means "Audio", Channels, is wrong.
+   STEP 3 750 Hz in both, STEP 4 off; VALUE changes the level. M1 confirmed the order on its own image; a swap
+   here means Enaga's ring differs from it. If a line output can be connected, check it the same way.
 7. **Input (AUDIO page):** a signal into INPUT L, then INPUT R (or the built-in microphone, if the input chain
    uses it) moves IN L / IN R (per mille of full scale). A swap means the receive side's channel belief ("Audio")
    is wrong. Report the readings with nothing connected, too.

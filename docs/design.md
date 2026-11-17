@@ -175,7 +175,7 @@ a unit", the CHECK app in `tests/unit/check`, `tools/unit_card.py`) and not yet 
   smpltrek session M1, well inside the 6 ms sampling and two-sample release).
 - LED map: 53 addresses known only from the code, 24 seen on another channel of their LED (docs/hardware.md
   "LED map"; smpltrek session L1); the level-to-brightness steps. Whether the unit has a hardware MIDI port;
-  physical left/right channel routing; real audio CPU headroom with caches; the key names, confirmed key by key
+  left/right on the line outputs and the inputs (headphones confirmed, M1); real audio CPU headroom with caches; the key names, confirmed key by key
   on a unit.
 - The L2 split between cache and RAM.
 - The SDK should give apps unaligned-safe load/store helpers for packed formats (misaligned LDW/STW/LDDW round
@@ -383,6 +383,9 @@ as measured):
 - CHECK's PANEL page showed the last pad, which with continuous traffic would cycle through every pad. It now
   shows the pad with the highest reading and pad messages per second, about 3,930 at rest: a direct check of
   the receive path on the unit. The dry run feeds the MCU's continuous stream in step 10 (141 checks).
+- Audio (part A, headphones and speaker only): even buffer words play left only and odd words right only on
+  headphones, with the same one-word-short first transfer Enaga uses; the speaker plays once GP2[8] is low.
+  Line outputs and inputs were not tested (no equipment), and the LED map (part F) was postponed.
 - Recorded without code changes: null reads return leftover data and do not fault; misaligned accesses round
   down without faulting; an EMIFA chip-select-0 store with EMIFA not set up is dropped; USB0's bring-up order
   and reserved registers; both SPI flash chips answer `C2 20 18`, and chip 0 has block-protect bits set.
