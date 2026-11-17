@@ -1,6 +1,6 @@
 """The synth example (examples/synth) on the emulator: notes from STEP keys and pads at the right pitch, its
 worst case inside the audio budget, the pages and knobs, patches and the voice modes, and the same sound
-whether voice.ti.c is built by TI's cl6x or by GCC.
+whether the DSP library is built by TI's cl6x or by GCC.
 
     ENAGA_EMULATOR=/path/to/emulator python3 -B -m unittest discover -s tests -p test_synth.py -v
 """
@@ -152,17 +152,22 @@ class Synth(unittest.TestCase):
 
     @unittest.skipUnless(paths.ti_present(), "TI's cl6x not installed (tools/paths.py, TI_CGT)")
     def test_cl6x_and_gcc_builds_sound_the_same(self):
-        # voice.ti.c is built by cl6x when it is installed, by GCC otherwise. Both do the same IEEE operations in
-        # the same order (the C674x has no fused multiply-add), so the samples match exactly.
+        # The DSP library (runtime/dsp) is built by cl6x when it is installed, by GCC otherwise. Both do the same IEEE
+        # operations in the same order (the C674x has no fused multiply-add), so the samples match exactly. When the
+        # keys reach the engine depends on the main loop, which runs slower under a heavier audio load: compare
+        # from each capture's first sound.
         def play(ti):
             with mock.patch.object(paths, "TI_CGT", paths.TI_CGT if ti else None), self.start() as emu:
-                self.assertEqual("voice_ti.o" in (WORK / "apps" / "synth" / "app.map").read_text(), ti)
+                self.assertEqual("dsplib/cl6x/" in (WORK / "apps" / "synth" / "app.map").read_text(), ti)
                 self.set_values(emu, {OSC1_WAVE: 1, MIX_OSC2: 80, MIX_SUB: 60, FILTER_TYPE: 1, CUTOFF: 80,
                                       RESONANCE: 50, DRIVE: 40})
                 for n in (0, 4, 7):
                     emu.key(STEP1 + n, True)
                 emu.run(250 * MS)
-                return samples(emu)[-2 * 48 * 200:]
+                captured = samples(emu)
+                start = next(i for i, v in enumerate(captured) if v)
+                self.assertLess(start, len(captured) - 2 * 48 * 200)
+                return captured[start:start + 2 * 48 * 200]
         ti, gcc = play(True), play(False)
         self.assertGreater(max(map(abs, ti)), 2 ** 28)
         self.assertEqual(ti, gcc)

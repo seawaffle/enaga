@@ -5,11 +5,12 @@
     python3 -B tools/build_app.py DIR -o /media/card/ENAGA/APPS/NAME/APP.ENA
 
 All *.cpp and *.c files in the directory are compiled with GCC tic6x-elf (C++20, -fno-exceptions -fno-rtti,
-freestanding libstdc++ headers), linked with the Enaga runtime (runtime/) at ENAGA_APP_BASE with libgcc, and
+freestanding libstdc++ headers), linked with the Enaga runtime (runtime/) and the DSP library's block functions
+(runtime/dsp, built once into build/dsplib) at ENAGA_APP_BASE with libgcc, and
 wrapped as enaga_package_header (include/enaga/abi.h) + payload. No libc. The package format is provisional
 until 1.0.
 
-Files named *.ti.c are built with TI's cl6x instead when it is installed (tools/paths.py, TI_CGT): its
+Files named *.ti.c, and the DSP library, are built with TI's cl6x instead when it is installed (tools/paths.py, TI_CGT): its
 software pipelining makes inner DSP loops several times faster than GCC's code. They must be C that GCC also
 compiles (the fallback) and export plain C functions, since C++ objects don't mix between the compilers.
 """
@@ -24,7 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import paths  # noqa: E402
 
-GCC, GXX, LD, OBJCOPY, NM = (paths.tool(name) for name in ("gcc", "g++", "ld", "objcopy", "nm"))
+GCC, GXX, LD, OBJCOPY, NM, AR = (paths.tool(name) for name in ("gcc", "g++", "ld", "objcopy", "nm", "ar"))
 RUNTIME = paths.ROOT / "runtime"
 INCLUDE = paths.ROOT / "include"
 WORK = paths.BUILD / "apps"
@@ -62,16 +63,43 @@ def symbols(elf):
     return out
 
 
+def compile_ti(src, obj, cwd):
+    run([paths.TI_CGT / "bin" / "cl6x", *TIFLAGS, f"-I{paths.TI_CGT / 'include'}", f"--output_file={obj}", "-c", src],
+        cwd)
+    return obj
+
+
 def compile_source(src, out):
     if src.name.endswith(".ti.c") and paths.ti_present():
-        obj = out / (src.name[:-len(".ti.c")] + "_ti.o")
-        run([paths.TI_CGT / "bin" / "cl6x", *TIFLAGS, f"-I{paths.TI_CGT / 'include'}", f"--output_file={obj}",
-             "-c", src], out)
-        return obj
+        return compile_ti(src, out / (src.name[:-len(".ti.c")] + "_ti.o"), out)
     obj = out / (src.stem + ("_c" if src.suffix == ".c" else "") + ".o")
     compiler, flags = (GCC, CFLAGS) if src.suffix == ".c" else (GXX, CXXFLAGS)
     run([compiler, *flags, "-c", "-o", obj, src], out)
     return obj
+
+
+def dsp_library():
+    """The DSP library's block functions (runtime/dsp/*.c, include/enaga/dsp.h) as an archive: built by cl6x when it
+    is installed, by GCC otherwise, and again only when a source, a header or this script changes."""
+    ti = paths.ti_present()
+    lib = paths.BUILD / "dsplib" / ("cl6x" if ti else "gcc")
+    archive = lib / "libenaga_dsp.a"
+    sources = sorted((RUNTIME / "dsp").glob("*.c"))
+    inputs = [*sources, INCLUDE / "enaga" / "dsp.h", *(INCLUDE / "enaga" / "dsp").glob("*.h"), Path(__file__)]
+    if archive.exists() and archive.stat().st_mtime >= max(p.stat().st_mtime for p in inputs):
+        return archive
+    lib.mkdir(parents=True, exist_ok=True)
+    objs = []
+    for src in sources:
+        obj = lib / (src.stem + ".o")
+        if ti:
+            compile_ti(src, obj, lib)
+        else:
+            run([GCC, *CFLAGS, "-c", "-o", obj, src], lib)
+        objs.append(obj)
+    archive.unlink(missing_ok=True)
+    run([AR, "rcs", archive, *objs], lib)
+    return archive
 
 
 def build(app_dir, out, name=None, app_version=1):
@@ -90,7 +118,8 @@ def build(app_dir, out, name=None, app_version=1):
     libgcc = paths.libgcc()
     elf = out / "app.elf"
     run([LD, "-EL", "-T", RUNTIME / "app.ld", "-nostdlib", "--gc-sections", "-u", "enaga_entry",
-         "--no-warn-rwx-segments", "--orphan-handling=error", "-Map", out / "app.map", "-o", elf, *objs, libgcc], out)
+         "--no-warn-rwx-segments", "--orphan-handling=error", "-Map", out / "app.map", "-o", elf, *objs, dsp_library(),
+         libgcc], out)
     undefined = subprocess.run([str(NM), "-u", str(elf)], capture_output=True, text=True, check=True).stdout.split()
     if undefined:
         raise RuntimeError("app references symbols Enaga does not provide: " + " ".join(sorted(set(undefined) - {"U"})))
@@ -133,8 +162,8 @@ def main(argv=None):
     target = args.output or out / "APP.ENA"
     target.write_bytes(b["package"])
     print(f"wrote {target}: {len(b['package'])} bytes (payload {b['payload_size']}, bss {b['bss_size']}, entry +{b['entry']:#x})")
-    if b["ti_sources"]:
-        print("built with cl6x: " + ", ".join(b["ti_sources"]))
+    print("built with cl6x: " + ", ".join(["the DSP library", *b["ti_sources"]]) if paths.ti_present() else
+          "built with GCC only (TI's cl6x not found; tools/paths.py)")
     return 0
 
 

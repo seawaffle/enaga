@@ -9,17 +9,16 @@
 namespace enaga::dsp {
 
 // ADSR settings as one-pole coefficients for a given step rate.
-struct EnvelopeShape {
-    float attack, decay, sustain, release;
+struct EnvelopeShape : enaga_envelope_shape {
 
     // Times in seconds (attack to full level, decay and release to within 1% of their target), sustain 0-1.
     static EnvelopeShape make(float attack_s, float decay_s, float sustain, float release_s, float step_rate) {
-        return {coefficient(attack_s, step_rate, kAttackSpan), coefficient(decay_s, step_rate, kSpan),
-                clamp(sustain, 0.0f, 1.0f), coefficient(release_s, step_rate, kSpan)};
+        return {{coefficient(attack_s, step_rate, kAttackSpan), coefficient(decay_s, step_rate, kSpan),
+                 clamp(sustain, 0.0f, 1.0f), coefficient(release_s, step_rate, kSpan)}};
     }
 
     // The attack heads for kAttackTarget and stops at 1: a curve like an analogue envelope's.
-    static constexpr float kAttackTarget = 1.3f;
+    static constexpr float kAttackTarget = ENAGA_ENV_ATTACK_TARGET;
     static constexpr float kAttackSpan = 1.46633707f;    // ln(1.3 / 0.3): steps to cover 1.3 x (1 - e^-span) = 1
     static constexpr float kSpan = 4.60517019f;          // ln(100)
 
@@ -32,44 +31,27 @@ private:
 
 class Envelope {
 public:
-    enum Stage : uint8_t { idle, attack, decay, sustain, release };
+    enum Stage : uint8_t {
+        idle = ENAGA_ENV_IDLE, attack = ENAGA_ENV_ATTACK, decay = ENAGA_ENV_DECAY, sustain = ENAGA_ENV_SUSTAIN,
+        release = ENAGA_ENV_RELEASE
+    };
 
     void gate_on(bool retrigger_from_zero = false) {
-        if (retrigger_from_zero) level_ = 0.0f;
-        stage_ = attack;
+        if (retrigger_from_zero) state_.level = 0.0f;
+        state_.stage = attack;
     }
-    void gate_off() { if (stage_ != idle) stage_ = release; }
-    void kill() { stage_ = idle; level_ = 0.0f; }
-    Stage stage() const { return stage_; }
-    bool active() const { return stage_ != idle; }
-    float level() const { return level_; }
+    void gate_off() { if (state_.stage != idle) state_.stage = release; }
+    void kill() { state_.stage = idle; state_.level = 0.0f; }
+    Stage stage() const { return Stage(state_.stage); }
+    bool active() const { return state_.stage != idle; }
+    float level() const { return state_.level; }
 
-    float step(const EnvelopeShape &s) {
-        switch (stage_) {
-        case attack:
-            level_ += s.attack * (EnvelopeShape::kAttackTarget - level_);
-            if (level_ >= 1.0f) { level_ = 1.0f; stage_ = decay; }
-            break;
-        case decay:
-            level_ += s.decay * (s.sustain - level_);
-            if (level_ - s.sustain < 1e-4f) stage_ = sustain;
-            break;
-        case sustain:
-            level_ += s.decay * (s.sustain - level_);   // follows sustain changes smoothly
-            break;
-        case release:
-            level_ += s.release * (-0.001f - level_);   // aims just below zero so it ends in finite time
-            if (level_ <= 0.0f) kill();
-            break;
-        case idle:
-            break;
-        }
-        return level_;
-    }
+    // One step; returns the level.
+    float step(const EnvelopeShape &s) { return enaga_envelope_step(&state_, &s); }
+    // n steps into out (the same values as n calls of step): a block function (enaga_envelope_render).
+    void render(float *out, int n, const EnvelopeShape &s) { enaga_envelope_render(&state_, &s, out, n); }
 
-private:
-    Stage stage_ = idle;
-    float level_ = 0.0f;
+    enaga_envelope state_{};     // public, for C code working on the same envelope
 };
 
 enum class LfoShape : uint8_t { sine, triangle, saw, square, sample_hold };

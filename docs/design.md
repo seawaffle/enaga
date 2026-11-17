@@ -170,8 +170,9 @@ a unit", the CHECK app in `tests/unit/check`, `tools/unit_card.py`) and not yet 
 
 E2 has begun ahead of that session, driven by its exit app: pads as press / release with velocity, the start of
 the DSP library (`include/enaga/dsp`, tested on the host), and `examples/synth`, an eight-voice virtual analogue
-synthesizer (emulator-tested). Apps can build their inner DSP loops with TI's cl6x (`*.ti.c`, GCC as the
-fallback); the synth's worst case is 37 % of the audio budget that way and 63 % with GCC alone. Asynchronous file
+synthesizer (emulator-tested). The library's block functions, and apps' own `*.ti.c` files, are built with TI's
+cl6x when it is installed (GCC otherwise); the synth's worst case is 36 % of the audio budget that way and 58 % with
+GCC alone. Asynchronous file
 I/O and sample streaming, the rest of E2, are not started.
 
 ## Open items
@@ -191,14 +192,13 @@ I/O and sample streaming, the rest of E2, are not started.
   with velocity at provisional thresholds (press 800, release under 600, velocity 127 from 12,000). To set from
   readings on a unit: the release threshold, the velocity scale, whether one reading after the threshold gives a
   usable velocity (a pad is read every 3.8 ms), per-pad calibration.
-- Synth on the unit: its CPU load with real caches (worst case on the emulator 37 % with cl6x, 63 % GCC only),
-  the pad keyboard's feel.
-- DSP library and cl6x: the library is header-only C++, so apps compile it with GCC. Its inner loops could move to
-  block functions in C built by cl6x (a library apps link, or functions in Enaga), plus low-level building blocks
-  (vector mix, FIR, biquads, interpolated delay reads) for custom DSP. Before shipping cl6x-built code, check that
-  it calls none of TI's run-time library (the link would show it: apps link only libgcc) and TI's licence terms.
-  The branch-free style that cl6x needs made the synth's GCC fallback slower (59 % to 63 %).
-  Saving patches waits for the file API; edits last until the app stops.
+- Synth on the unit: its CPU load with real caches (worst case on the emulator 36 % with cl6x, 58 % GCC only),
+  the pad keyboard's feel. Saving patches waits for the file API; edits last until the app stops.
+- DSP library, still to do: the delay and reverb onto block functions (the reverb is 9.4 % of the synth's worst
+  case, all GCC), then FIR, biquads, wavetable and interpolated delay reads for other apps. The LFO and the
+  per-control-step modulation (8.3 %) stay C++. The library is built from source with each app for now; a
+  release SDK would ship it prebuilt. Before shipping cl6x-built code, check that it calls none of TI's run-time
+  library (the link would show it: apps link only libgcc) and TI's licence terms.
 - USB stack: the C6748's USB0 is a Mentor MUSB controller; a TinyUSB port (TinyUSB has a MUSB driver for
   other TI parts) is plausible and unverified.
 - A fault in Enaga code called by an app (a host function given a bad pointer) currently counts as a kernel
@@ -471,3 +471,29 @@ phase) and a PolyBLEP that computes both corrections and selects one. With branc
 oscillators. The noise now has its own xorshift state. The emulator's packet-sampling profiler under-counts code
 with many NOPs (GCC's), so the per-stage figures come from TSCL reads in a scratch copy. New test: the cl6x and GCC
 builds of the synth give identical samples (skipped without cl6x). 32 tests pass.
+
+### The DSP library on a C core built by cl6x (2026-11-17)
+
+The owner wants app writers free to write their own DSP and still get a fast product easily, so the library is now
+three layers, all optional: the maths (`include/enaga/dsp/math.h`, static inline C, written with selects so that
+loops using it can pipeline; `math.hpp` wraps it); a C interface (`include/enaga/dsp.h`) with plain state structs,
+per-sample steps (inline) and block functions; and the C++ classes, now thin wrappers whose state is the public C
+struct, with block methods added (`Svf::process`, `Svf::cascade`, `OnePole::process`, `Envelope::render`,
+`Random::add_noise`). The block functions live in `runtime/dsp/*.c` and `tools/build_app.py` builds them into
+`build/dsplib/{cl6x,gcc}/libenaga_dsp.a` (cl6x when installed), rebuilt when a source, a header or the script
+changes, and links the archive into every app. Every cl6x loop pipelines (oscillators ii 3-9 per sample, SVF 21,
+envelope 15-17, buffer arithmetic 1-6).
+
+The envelope renders without branches: attack, decay and sustain share one loop that selects between the attack
+and decay updates (decay and sustain are the same update), release clamps at zero. The oscillator keeps the 32-bit
+phase; its PolyBLEP selects for cl6x and branches for GCC (the same arithmetic): GCC was slower with the selects.
+`Svf::cascade` runs two filters in one loop so the stages overlap: two separate calls cost the LP24 filter 6.0 %
+of the budget against 4.5 %. Host tests check each block function against the per-sample code bit for bit
+(they caught deliberately wrong envelope and one-pole code).
+
+The synth uses the library again (`voice.ti.c` is gone): worst case 36.3 % with cl6x (oscillators and noise
+6.4 %, filter 4.5 %, amplitude 3.1 %) and 57.6 % with GCC alone, better than the old header-only 59 %. The test
+that both builds sound the same now aligns the two captures at their first sound: they matched sample for sample
+but three blocks apart, because the main loop, which hands the keys to the engine, runs slower when the audio takes
+more of the CPU. 32 tests pass.
+

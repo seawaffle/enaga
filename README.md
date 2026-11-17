@@ -46,15 +46,20 @@ ENAGA_APP(Beep)
   memory after calling `stop()`.
 - Panel LEDs by name, levels 0-10, from the main loop: `enaga::pad_led(pad, r, g, b)`, `step_led(n, red, green)`,
   `button_led(key, red, green)`, `vol_led`, `mic_led`, `value_led`. Enaga switches them all off when an app stops.
-- `<enaga/dsp.hpp>` is a header-only DSP library: fast math without libm (`exp2`, `semitones`, `sin_turns`,
-  `tan_pi`, `soft_clip`), band-limited oscillators, a state-variable filter, ADSR envelopes, LFOs, delay lines,
-  a stereo delay and a reverb.
-- Inner DSP loops can go in `*.ti.c` files, which are built with TI's C6000 compiler (cl6x) when it is installed
-  and with GCC otherwise (see "Building"). Its software pipelining runs loops several times faster than GCC's
-  code, if they have no branches inside: use `cond ? a : b` selects rather than `if`. They must be C, compile
-  with GCC too, and export plain C functions, since C++ objects don't mix between the two compilers. Everything
-  else builds with GCC (`-O2 -funroll-loops`). The synth's oscillators, noise and filter are in `voice.ti.c`:
-  its worst case takes 37% of the audio budget built with cl6x and 63% with GCC alone (emulator figures).
+- `<enaga/dsp.hpp>` is the DSP library: fast math without libm (`exp2`, `semitones`, `sin_turns`, `tan_pi`,
+  `soft_clip`), band-limited oscillators, a state-variable filter (and a two-stage cascade), a one-pole, ADSR
+  envelopes, LFOs, delay lines, a stereo delay and a reverb. Its classes wrap a C interface, `<enaga/dsp.h>`:
+  plain state structs, per-sample steps, and block functions that process a buffer per call (`Svf::process`,
+  `Envelope::render`, `Oscillator::render_add`, and buffer arithmetic such as `enaga_mix`, `enaga_multiply`,
+  `enaga_ramp_stereo_add`). The block functions (`runtime/dsp`) are built with TI's C6000 compiler (cl6x) when it
+  is installed, several times faster than GCC's code, and with GCC otherwise; both give the same samples. Process
+  in blocks: per-sample `step()` calls are there for code that needs them (feedback loops), but compile with GCC.
+- Inner loops of your own can go in `*.ti.c` files, built by cl6x the same way (see "Building"). cl6x pipelines
+  only loops without branches inside: use `cond ? a : b` selects rather than `if`. The files must be C, compile
+  with GCC too, and export plain C functions, since C++ objects don't mix between the two compilers; they can
+  include `<enaga/dsp.h>` and work on the library's state. Everything else builds with GCC (`-O2
+  -funroll-loops`). The synth's worst case takes 36% of the audio budget with cl6x and 58% with GCC alone
+  (emulator figures).
 - `enaga::fatal(reason)` stops the app; Enaga shows the reason and keeps running. Enaga's watchdog stops an
   app the same way when a main-loop call (including `init` and `stop`) has not returned after 1 s, or `audio`
   after 100 ms.
@@ -74,8 +79,9 @@ tools/build_tic6x_gcc.sh            # 10-30 minutes
 ```
 
 Set `ENAGA_TOOLCHAIN` to use an existing installation elsewhere. Optionally install TI's C6000 code generation
-tools (free from TI; tested with 8.5.0.LTS) for `*.ti.c` files: `tools/paths.py` uses the newest
-`~/ti/ti-cgt-c6000_*`, or `ENAGA_TI_CGT` (`ENAGA_TI_CGT=none` builds them with GCC). Then:
+tools (free from TI; tested with 8.5.0.LTS) for the DSP library and `*.ti.c` files: `tools/paths.py` uses the newest
+`~/ti/ti-cgt-c6000_*`, or `ENAGA_TI_CGT` (`ENAGA_TI_CGT=none` builds them with GCC). The library is built once
+into `build/dsplib/` and again when it changes. Then:
 
 ```sh
 python3 -B tools/build_app.py examples/tone     # -> build/apps/tone/APP.ENA
@@ -116,7 +122,8 @@ only `g++`. `tools/emulate.py` writes the last screen to
 |---|---|
 | `include/enaga/abi.h` | The C boundary between Enaga and an app: package header, host table, app table, events, key names |
 | `include/enaga/app.hpp` | The C++ layer: `enaga::App`, `enaga::Canvas`, `ENAGA_APP(Type)`, `enaga::log`, `enaga::fatal` |
-| `include/enaga/dsp.hpp`, `dsp/` | The DSP library (header-only) |
+| `include/enaga/dsp.hpp`, `dsp.h`, `dsp/` | The DSP library: C++ classes over a C interface |
+| `runtime/dsp/` | The DSP library's block functions, built by cl6x or GCC into every app |
 | `runtime/` | Linked into every app: entry point, static constructors, heap, `new`/`delete`, C++ ABI hooks, `app.ld` |
 | `loader/` | The package loader (freestanding C, used by the firmware and the tests) |
 | `firmware/` | Enaga itself: `hal/` drivers, `kernel/` (interrupts, audio engine, app host, exceptions, watchdog, main loop), `start.s`, `link.ld`, `build.py` |

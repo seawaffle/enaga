@@ -17,9 +17,14 @@ class Dsp(unittest.TestCase):
     def test_dsp_library_on_the_host(self):
         out = ROOT / "build" / "dsp"
         out.mkdir(parents=True, exist_ok=True)
+        objs = []
+        for src in sorted((ROOT / "runtime" / "dsp").glob("*.c")):     # the block functions, in C
+            objs.append(out / (src.stem + ".o"))
+            subprocess.run(["gcc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", f"-I{ROOT / 'include'}", "-c",
+                            "-o", objs[-1], src], check=True)
         subprocess.run(["g++", "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror",
                         f"-I{ROOT / 'include'}", "-o", out / "host",
-                        HERE / "dsp" / "host.cpp"], check=True)
+                        HERE / "dsp" / "host.cpp", *objs], check=True)
         result = subprocess.run([out / "host"], capture_output=True, text=True)
         self.assertEqual((result.returncode, result.stdout.strip()), (0, "ok"), result.stdout)
 

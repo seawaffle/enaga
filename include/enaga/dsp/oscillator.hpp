@@ -13,65 +13,19 @@ enum class Wave : uint8_t { saw, pulse, triangle, sine };
 
 class Oscillator {
 public:
-    float phase() const { return phase_; }
-    void reset(float phase = 0.0f) { phase_ = phase; }
+    float phase() const { return enaga_oscillator_phase(&state_); }
+    void reset(float phase = 0.0f) { enaga_oscillator_reset(&state_, phase); }
 
     // Adds level x the waveform to out[0..n), advancing the phase. dt in (0, 0.5); pulse width 0.05-0.95.
+    // A block function (enaga_oscillator_add).
     void render_add(float *out, int n, Wave wave, float dt, float inv_dt, float level, float width = 0.5f) {
-        float t = phase_;
-        switch (wave) {
-        case Wave::saw:
-            for (int i = 0; i < n; i++) {
-                out[i] += level * (2.0f * t - 1.0f - blep(t, dt, inv_dt));
-                t += dt;
-                if (t >= 1.0f) t -= 1.0f;
-            }
-            break;
-        case Wave::pulse:
-            width = clamp(width, 0.05f, 0.95f);
-            for (int i = 0; i < n; i++) {
-                float t2 = t + 1.0f - width;
-                if (t2 >= 1.0f) t2 -= 1.0f;
-                float y = (t < width ? 1.0f : -1.0f) + blep(t, dt, inv_dt) - blep(t2, dt, inv_dt);
-                out[i] += level * (y + 1.0f - 2.0f * width);   // DC removed, so width changes don't thump
-                t += dt;
-                if (t >= 1.0f) t -= 1.0f;
-            }
-            break;
-        case Wave::triangle:
-            for (int i = 0; i < n; i++) {
-                float y = 4.0f * t - 1.0f;
-                out[i] += level * (t < 0.5f ? y : 2.0f - y);
-                t += dt;
-                if (t >= 1.0f) t -= 1.0f;
-            }
-            break;
-        case Wave::sine:
-            for (int i = 0; i < n; i++) {
-                out[i] += level * sin_turns(t);
-                t += dt;
-                if (t >= 1.0f) t -= 1.0f;
-            }
-            break;
-        }
-        phase_ = t;
+        enaga_oscillator_add(&state_, out, n, int(wave), dt, inv_dt, level, width);
     }
 
-private:
-    // The PolyBLEP residual at phase t: a step of +2 at t = 0 smoothed over one sample either side.
-    static float blep(float t, float dt, float inv_dt) {
-        if (t < dt) {
-            t *= inv_dt;
-            return t + t - t * t - 1.0f;
-        }
-        if (t > 1.0f - dt) {
-            t = (t - 1.0f) * inv_dt;
-            return t * t + t + t + 1.0f;
-        }
-        return 0.0f;
-    }
-
-    float phase_ = 0.0f;
+    enaga_oscillator state_{};     // public, for C code working on the same oscillator
 };
+
+static_assert(int(Wave::saw) == ENAGA_WAVE_SAW && int(Wave::pulse) == ENAGA_WAVE_PULSE &&
+              int(Wave::triangle) == ENAGA_WAVE_TRIANGLE && int(Wave::sine) == ENAGA_WAVE_SINE);
 
 }  // namespace enaga::dsp

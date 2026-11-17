@@ -8,7 +8,6 @@
 #include <enaga/abi.h>
 #include <enaga/dsp.hpp>
 
-#include "voice.h"
 #include "params.hpp"
 
 namespace synth {
@@ -47,8 +46,8 @@ private:
         uint32_t started = 0;
         float velocity = 0, pressure = 0, random = 0, pitch = 60, target = 60;
         float lfo_rate[2] = {1, 1};
-        float phase1 = 0, phase2 = 0, phase_sub = 0;   // oscillators: synth_oscillator (voice.ti.c)
-        SynthSvfState svf1{}, svf2{};                 // filter: synth_filter (voice.ti.c)
+        enaga::dsp::Oscillator osc1, osc2, sub;
+        enaga::dsp::Svf svf1, svf2;
         enaga::dsp::Envelope amp, env2, env3;
         enaga::dsp::Lfo lfo1, lfo2;
         float gain_l = 0, gain_r = 0;
@@ -84,7 +83,6 @@ private:
     uint32_t clock_ = 0;
     float last_pitch_ = 60;
     enaga::dsp::Random random_;
-    uint32_t noise_ = 0x9E3779B9u;      // synth_noise's xorshift state
     enaga::dsp::Lfo free_lfo_[2];                  // the phase FREE voices take at note-on
 
     struct Held { uint8_t key, note, velocity; };  // MONO and LEGATO: the keys held, last on top

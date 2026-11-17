@@ -1,5 +1,6 @@
 // The DSP library (include/enaga/dsp) on the host: accuracy of the math, oscillator pitch, filter response,
-// envelope times, delay time and reverb decay. Run by tests/test_dsp.py; prints one line per failed check and
+// envelope times, delay time and reverb decay, and the block functions (runtime/dsp) giving exactly what the
+// per-sample steps give. Run by tests/test_dsp.py; prints one line per failed check and
 // exits non-zero if any failed.
 #include <enaga/dsp.hpp>
 
@@ -153,12 +154,132 @@ static void effects() {
     check(energy(9600) > 1e-4, "reverb has a tail", energy(9600), 1e-4);
 }
 
+// Exact equality of two runs: the block functions must reproduce the per-sample code bit for bit.
+static void same(const char *what, const std::vector<float> &a, const std::vector<float> &b) {
+    size_t i = 0;
+    while (i < a.size() && i < b.size() && a[i] == b[i]) i++;
+    check(i == a.size() && i == b.size(), what, double(i), double(a.size()));
+}
+
+static void blocks() {
+    // Envelope: render in blocks of 16 against step, through attack (ending mid-block), decay into sustain, a
+    // sustain change, release to idle, a retrigger during release and idle.
+    {
+        auto shape = EnvelopeShape::make(0.003f, 0.05f, 0.4f, 0.03f, kRate);
+        Envelope a, b;
+        std::vector<float> ya, yb;
+        auto run = [&](int samples) {
+            for (int i = 0; i < samples; i += 16) {
+                float buf[16];
+                a.render(buf, 16, shape);
+                ya.insert(ya.end(), buf, buf + 16);
+                for (int j = 0; j < 16; j++) yb.push_back(b.step(shape));
+                check(a.stage() == b.stage(), "envelope stage after a block", a.stage(), b.stage());
+            }
+        };
+        a.gate_on(); b.gate_on();
+        run(9600);
+        shape.sustain = 0.7f;
+        run(4800);
+        a.gate_off(); b.gate_off();
+        run(800);
+        a.gate_on(); b.gate_on();
+        run(4800);
+        a.gate_off(); b.gate_off();
+        run(9600);
+        check(!a.active(), "envelope idle after release", a.stage(), 0);
+        same("envelope render = step", ya, yb);
+    }
+    // SVF: process against step for each output, in place and not.
+    {
+        auto c = SvfCoefficients::make(800, 0.7f, kRate);
+        Random noise;
+        std::vector<float> in(4096);
+        for (float &x : in) x = noise.bipolar();
+        for (int output = 0; output < 3; output++) {
+            Svf a, b;
+            std::vector<float> ya(in.size()), yb(in.size());
+            for (size_t i = 0; i < in.size(); i += 64) a.process(&in[i], &ya[i], 64, c, Svf::Output(output));
+            for (size_t i = 0; i < in.size(); i++) {
+                auto o = b.step(in[i], c);
+                yb[i] = output == 0 ? o.low : output == 1 ? o.band : o.high;
+            }
+            same("svf process = step", ya, yb);
+            Svf d;
+            std::vector<float> yd = in;
+            for (size_t i = 0; i < yd.size(); i += 16) d.process(&yd[i], &yd[i], 16, c, Svf::Output(output));
+            same("svf process in place", yd, yb);
+            auto c2 = SvfCoefficients::make(2500, 0.3f, kRate);
+            Svf e1, e2, f1, f2;
+            std::vector<float> ye(in.size()), yf = in;
+            Svf::cascade(e1, c, e2, c2, in.data(), ye.data(), int(in.size()), Svf::Output(output));
+            for (size_t i = 0; i < yf.size(); i += 16) {
+                f1.process(&yf[i], &yf[i], 16, c, Svf::Output(output));
+                f2.process(&yf[i], &yf[i], 16, c2, Svf::Output(output));
+            }
+            same("svf cascade = two processes", ye, yf);
+        }
+        OnePole p, q;
+        std::vector<float> pa(in.size()), pb(in.size());
+        p.process(in.data(), pa.data(), int(in.size()), 0.01f);
+        for (size_t i = 0; i < in.size(); i++) pb[i] = q.step(in[i], 0.01f);
+        same("one-pole process = step", pa, pb);
+    }
+    // Oscillators: one block of 64 against four of 16, every wave; phase() follows.
+    for (int wave = 0; wave < 4; wave++) {
+        Oscillator a, b;
+        std::vector<float> ya(256), yb(256);
+        float dt = 0.0371f;
+        for (int i = 0; i < 256; i += 64) a.render_add(&ya[i], 64, Wave(wave), dt, 1 / dt, 0.5f, 0.3f);
+        for (int i = 0; i < 256; i += 16) b.render_add(&yb[i], 16, Wave(wave), dt, 1 / dt, 0.5f, 0.3f);
+        same("oscillator in blocks of 64 or 16", ya, yb);
+        near("oscillator phase", a.phase(), std::fmod(256 * double(dt), 1.0), 1e-5);
+    }
+    // Noise: the same values as Random::bipolar.
+    {
+        Random a, b;
+        std::vector<float> ya(100), yb(100);
+        a.add_noise(ya.data(), 100, 0.5f);
+        for (float &y : yb) y += 0.5f * b.bipolar();
+        same("add_noise = bipolar", ya, yb);
+    }
+    // Buffer arithmetic against plain loops.
+    {
+        std::vector<float> x(37), g(37), l1(37, 0.1f), r1(37, -0.2f), l2 = l1, r2 = r1, y1(37), y2(37);
+        Random noise;
+        for (int i = 0; i < 37; i++) { x[i] = noise.bipolar(); g[i] = noise.unipolar(); }
+        float gl = 0.3f, gr = 0.6f, gl2 = gl, gr2 = gr;
+        enaga_ramp_stereo_add(x.data(), l1.data(), r1.data(), 37, &gl, &gr, 0.01f, -0.005f);
+        for (int i = 0; i < 37; i++) { gl2 += 0.01f; gr2 -= 0.005f; l2[i] += x[i] * gl2; r2[i] += x[i] * gr2; }
+        same("ramp_stereo_add left", l1, l2);
+        same("ramp_stereo_add right", r1, r2);
+        check(gl == gl2 && gr == gr2, "ramp_stereo_add final gains", gl, gl2);
+        y1 = x; y2 = x;
+        enaga_multiply(y1.data(), g.data(), 37);
+        enaga_scale(y1.data(), 37, 1.7f);
+        enaga_soft_clip_buffer(y1.data(), 37, 3.0f);
+        enaga_mix(y1.data(), x.data(), 37, 0.25f);
+        enaga_add(y1.data(), g.data(), 37);
+        for (int i = 0; i < 37; i++) {
+            y2[i] *= g[i];
+            y2[i] *= 1.7f;
+            y2[i] = soft_clip(3.0f * y2[i]);
+            y2[i] += 0.25f * x[i];
+            y2[i] += g[i];
+        }
+        same("buffer arithmetic", y1, y2);
+        enaga_clear(y1.data(), 37);
+        check(y1 == std::vector<float>(37), "clear", y1[0], 0);
+    }
+}
+
 int main() {
     math();
     oscillators();
     filters();
     modulation();
     effects();
+    blocks();
     if (!failures) std::printf("ok\n");
     return failures ? 1 : 0;
 }
