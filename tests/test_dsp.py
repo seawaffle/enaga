@@ -1,0 +1,28 @@
+"""The DSP library (include/enaga/dsp) compiled for the host and checked by tests/dsp/host.cpp: math accuracy,
+oscillator pitch, filter response, envelope times, delay time and reverb decay. Needs only a host g++.
+
+    python3 -B -m unittest discover -s tests -p test_dsp.py -v
+"""
+import shutil
+import subprocess
+import unittest
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
+
+
+@unittest.skipUnless(shutil.which("g++"), "host g++ not found")
+class Dsp(unittest.TestCase):
+    def test_dsp_library_on_the_host(self):
+        out = ROOT / "build" / "dsp"
+        out.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["g++", "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror",
+                        f"-I{ROOT / 'include'}", "-o", out / "host",
+                        HERE / "dsp" / "host.cpp"], check=True)
+        result = subprocess.run([out / "host"], capture_output=True, text=True)
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, "ok"), result.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()
