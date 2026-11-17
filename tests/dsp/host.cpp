@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <algorithm>
 #include <vector>
 
 using namespace enaga::dsp;
@@ -161,6 +162,180 @@ static void same(const char *what, const std::vector<float> &a, const std::vecto
     check(i == a.size() && i == b.size(), what, double(i), double(a.size()));
 }
 
+// The delay and reverb as they were written per sample (before the block functions), as references.
+namespace ref {
+class DelayLine {
+public:
+    explicit DelayLine(uint32_t max_samples = 0) { allocate(max_samples); }
+    void allocate(uint32_t max_samples) {
+        uint32_t size = 1;
+        while (size < max_samples + 2) size <<= 1;
+        buffer_.assign(size, 0.0f);
+        mask_ = size - 1;
+        write_ = 0;
+    }
+    uint32_t capacity() const { return mask_ - 1; }
+    void write(float x) { buffer_[write_ = (write_ + 1) & mask_] = x; }
+    float tap(uint32_t delay) const { return buffer_[(write_ - delay) & mask_]; }
+    float tap_linear(float delay) const {
+        int whole = int(delay);
+        float frac = delay - float(whole);
+        return lerp(tap(uint32_t(whole)), tap(uint32_t(whole) + 1), frac);
+    }
+
+private:
+    std::vector<float> buffer_;
+    uint32_t mask_ = 0, write_ = 0;
+};
+
+class StereoDelay {
+public:
+    void init(float max_seconds, float sample_rate) {
+        rate_ = sample_rate;
+        left_.allocate(uint32_t(max_seconds * sample_rate) + 4);
+        right_.allocate(uint32_t(max_seconds * sample_rate) + 4);
+        current_ = target_ = 0.25f * sample_rate;
+    }
+    void set(float seconds, float feedback, float tone, bool ping_pong) {
+        target_ = clamp(seconds * rate_, 16.0f, float(left_.capacity() - 2));
+        feedback_ = clamp(feedback, 0.0f, 0.95f);
+        tone_ = OnePole::coefficient(lerp(800.0f, 16000.0f, clamp(tone, 0.0f, 1.0f) * clamp(tone, 0.0f, 1.0f)), rate_);
+        ping_pong_ = ping_pong;
+    }
+    void process(const float *in_l, const float *in_r, float *out_l, float *out_r, int n, float mix) {
+        for (int i = 0; i < n; i++) {
+            current_ += 0.0005f * (target_ - current_);
+            float dl = left_.tap_linear(current_), dr = right_.tap_linear(current_);
+            float fl = damp_l_.step(dl, tone_), fr = damp_r_.step(dr, tone_);
+            if (ping_pong_) {
+                left_.write(0.5f * (in_l[i] + in_r[i]) + feedback_ * fr);
+                right_.write(feedback_ * fl);
+            } else {
+                left_.write(in_l[i] + feedback_ * fl);
+                right_.write(in_r[i] + feedback_ * fr);
+            }
+            out_l[i] += mix * dl;
+            out_r[i] += mix * dr;
+        }
+    }
+
+private:
+    DelayLine left_, right_;
+    OnePole damp_l_, damp_r_;
+    float rate_ = 48000.0f, current_ = 0.0f, target_ = 0.0f, feedback_ = 0.0f, tone_ = 1.0f;
+    bool ping_pong_ = false;
+};
+
+class Reverb {
+public:
+    static constexpr int kLines = 8;
+    void init(float sample_rate) {
+        rate_ = sample_rate;
+        float scale = sample_rate / 48000.0f;
+        for (int i = 0; i < kLines; i++) {
+            length_[i] = uint32_t(float(kLengths[i]) * scale);
+            lines_[i].allocate(length_[i]);
+        }
+        for (int i = 0; i < 4; i++) {
+            diffuse_length_[i] = uint32_t(float(kDiffuse[i]) * scale);
+            diffusers_[i].allocate(diffuse_length_[i]);
+        }
+        set(2.0f, 0.5f);
+    }
+    void set(float decay_s, float damping) {
+        decay_s = clamp(decay_s, 0.2f, 30.0f);
+        for (int i = 0; i < kLines; i++) gain_[i] = exp2(-9.96578428f * float(length_[i]) / (decay_s * rate_));
+        damping_ = OnePole::coefficient(lerp(14000.0f, 1500.0f, clamp(damping, 0.0f, 1.0f)), rate_);
+    }
+    void process(const float *in_l, const float *in_r, float *out_l, float *out_r, int n, float mix) {
+        for (int i = 0; i < n; i++) {
+            float x = 0.25f * (in_l[i] + in_r[i]);
+            for (int d = 0; d < 4; d++) {
+                float delayed = diffusers_[d].tap(diffuse_length_[d] - 1);
+                float v = x + 0.6f * delayed;
+                diffusers_[d].write(v);
+                x = delayed - 0.6f * v;
+            }
+            float s[kLines];
+            for (int j = 0; j < kLines; j++) s[j] = damp_[j].step(lines_[j].tap(length_[j] - 1), damping_) * gain_[j];
+            hadamard(s);
+            for (int j = 0; j < kLines; j++) lines_[j].write(s[j] + x);
+            float l = s[0] + s[2] + s[4] + s[6], r = s[1] + s[3] + s[5] + s[7];
+            out_l[i] += mix * l;
+            out_r[i] += mix * r;
+        }
+    }
+
+private:
+    static void hadamard(float *s) {
+        for (int span = 1; span < kLines; span <<= 1)
+            for (int j = 0; j < kLines; j += span << 1)
+                for (int k = j; k < j + span; k++) {
+                    float a = s[k], b = s[k + span];
+                    s[k] = a + b;
+                    s[k + span] = a - b;
+                }
+        for (int j = 0; j < kLines; j++) s[j] *= 0.35355339f;
+    }
+    static constexpr uint32_t kLengths[kLines] = {1123, 1361, 1597, 1823, 2083, 2357, 2689, 3037};
+    static constexpr uint32_t kDiffuse[4] = {149, 211, 293, 397};
+    DelayLine lines_[kLines], diffusers_[4];
+    OnePole damp_[kLines];
+    uint32_t length_[kLines] = {}, diffuse_length_[4] = {};
+    float gain_[kLines] = {}, damping_ = 1.0f, rate_ = 48000.0f;
+};
+}  // namespace ref
+
+// The block delay and reverb against the references, bit for bit, over uneven block sizes and setting changes.
+static void effects_against_reference() {
+    const int sizes[] = {64, 37, 1, 16, 100, 64, 13, 200};
+    Random noise(7);
+    std::vector<float> in_l(48000), in_r(48000);
+    for (int i = 0; i < 48000; i++) { in_l[i] = noise.bipolar(); in_r[i] = 0.5f * noise.bipolar(); }
+    for (int ping = 0; ping < 2; ping++) {
+        StereoDelay a;
+        ref::StereoDelay b;
+        a.init(0.5f, kRate);
+        b.init(0.5f, kRate);
+        std::vector<float> al(48000, 0.1f), ar(48000), bl = al, br = ar;
+        // The time glides (a time constant of 2000 samples): 30000 samples at the shortest delay (16 samples, as
+        // long as a chunk) bring it all the way down; then longer and shorter again, with feedback and tone.
+        const int change_at[] = {0, 30000, 36000, 42000, 48000};
+        const float times[] = {0.0001f, 0.1f, 0.0004f, 0.25f};
+        int at = 0, k = 0, change = 0;
+        while (at < 48000) {
+            if (at >= change_at[change]) {
+                a.set(times[change], 0.7f, 0.3f * float(change), ping != 0);
+                b.set(times[change], 0.7f, 0.3f * float(change), ping != 0);
+                change++;
+            }
+            int n = std::min({sizes[k++ % 8], 48000 - at, change_at[change] - at});
+            a.process(&in_l[at], &in_r[at], &al[at], &ar[at], n, 0.8f);
+            b.process(&in_l[at], &in_r[at], &bl[at], &br[at], n, 0.8f);
+            at += n;
+        }
+        same(ping ? "ping-pong delay left = per sample" : "stereo delay left = per sample", al, bl);
+        same(ping ? "ping-pong delay right = per sample" : "stereo delay right = per sample", ar, br);
+    }
+    for (float rate : {48000.0f, 22050.0f}) {
+        Reverb a;
+        ref::Reverb b;
+        a.init(rate);
+        b.init(rate);
+        std::vector<float> al(48000, -0.2f), ar(48000), bl = al, br = ar;
+        int at = 0, k = 0;
+        while (at < 48000) {
+            if (at == 12000) { a.set(5.0f, 0.1f); b.set(5.0f, 0.1f); }
+            int n = std::min(sizes[k++ % 8], 48000 - at);
+            a.process(&in_l[at], &in_r[at], &al[at], &ar[at], n, 0.6f);
+            b.process(&in_l[at], &in_r[at], &bl[at], &br[at], n, 0.6f);
+            at += n;
+        }
+        same("reverb left = per sample", al, bl);
+        same("reverb right = per sample", ar, br);
+    }
+}
+
 static void blocks() {
     // Envelope: render in blocks of 16 against step, through attack (ending mid-block), decay into sustain, a
     // sustain change, release to idle, a retrigger during release and idle.
@@ -280,6 +455,7 @@ int main() {
     modulation();
     effects();
     blocks();
+    effects_against_reference();
     if (!failures) std::printf("ok\n");
     return failures ? 1 : 0;
 }

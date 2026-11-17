@@ -58,7 +58,7 @@ public:
 class OnePole {
 public:
     static float coefficient(float cutoff, float sample_rate) {
-        return 1.0f - exp(-2.0f * pi * cutoff / sample_rate);
+        return enaga_one_pole_coefficient(cutoff, sample_rate);
     }
     float step(float x, float a) { return enaga_one_pole_step(&state_, x, a); }
     // A block (out may be in): enaga_one_pole_process.

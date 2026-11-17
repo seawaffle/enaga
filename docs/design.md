@@ -171,7 +171,7 @@ a unit", the CHECK app in `tests/unit/check`, `tools/unit_card.py`) and not yet 
 E2 has begun ahead of that session, driven by its exit app: pads as press / release with velocity, the start of
 the DSP library (`include/enaga/dsp`, tested on the host), and `examples/synth`, an eight-voice virtual analogue
 synthesizer (emulator-tested). The library's block functions, and apps' own `*.ti.c` files, are built with TI's
-cl6x when it is installed (GCC otherwise); the synth's worst case is 36 % of the audio budget that way and 58 % with
+cl6x when it is installed (GCC otherwise); the synth's worst case is 27 % of the audio budget that way and 52 % with
 GCC alone. Asynchronous file
 I/O and sample streaming, the rest of E2, are not started.
 
@@ -192,11 +192,11 @@ I/O and sample streaming, the rest of E2, are not started.
   with velocity at provisional thresholds (press 800, release under 600, velocity 127 from 12,000). To set from
   readings on a unit: the release threshold, the velocity scale, whether one reading after the threshold gives a
   usable velocity (a pad is read every 3.8 ms), per-pad calibration.
-- Synth on the unit: its CPU load with real caches (worst case on the emulator 36 % with cl6x, 58 % GCC only),
+- Synth on the unit: its CPU load with real caches (worst case on the emulator 27 % with cl6x, 52 % GCC only),
   the pad keyboard's feel. Saving patches waits for the file API; edits last until the app stops.
-- DSP library, still to do: the delay and reverb onto block functions (the reverb is 9.4 % of the synth's worst
-  case, all GCC), then FIR, biquads, wavetable and interpolated delay reads for other apps. The LFO and the
-  per-control-step modulation (8.3 %) stay C++. The library is built from source with each app for now; a
+- DSP library, still to do: FIR, biquads, wavetable and interpolated delay reads (a block form) for other apps.
+  The synth's largest cost is now its per-voice modulation (8.3 % of the budget: exp2, tan_pi and three float
+  divisions per voice and control step, through libgcc), which is the app's own C++. The library is built from source with each app for now; a
   release SDK would ship it prebuilt. Before shipping cl6x-built code, check that it calls none of TI's run-time
   library (the link would show it: apps link only libgcc) and TI's licence terms.
 - USB stack: the C6748's USB0 is a Mentor MUSB controller; a TinyUSB port (TinyUSB has a MUSB driver for
@@ -496,4 +496,23 @@ The synth uses the library again (`voice.ti.c` is gone): worst case 36.3 % with 
 that both builds sound the same now aligns the two captures at their first sound: they matched sample for sample
 but three blocks apart, because the main loop, which hands the keys to the engine, runs slower when the audio takes
 more of the CPU. 32 tests pass.
+
+### Delay and reverb as block functions (2026-11-17)
+
+`enaga_stereo_delay` and `enaga_reverb` (C state and block functions in `runtime/dsp/effects.c`; the C++ classes
+wrap them, with their memory on the app heap as before) and delay-line block reads and writes. Both effects work
+in chunks no longer than their shortest delay (the stereo delay's 16-sample minimum, the reverb's first diffuser,
+149 samples at 48 kHz, capped at 64): everything a chunk reads was written before it, so each chunk reads its
+lines, computes and writes after, which gives the per-sample results and keeps loads and stores of one buffer out
+of the same loop. The reverb's eight damping one-poles run side by side in one loop, and the Hadamard transform is
+written out. All of the effect loops pipeline under cl6x except the chunk loops, which call functions.
+
+The host test keeps the old per-sample delay and reverb as references and compares bit for bit over uneven block
+sizes, setting changes, ping-pong and 22.05 kHz. Its first version never brought the gliding delay time near the
+16-sample minimum and so missed a deliberately too-long chunk; it now holds the shortest time long enough.
+cl6x subsections constant tables (`.const:NAME`), so `runtime/app.ld` places `.const:*` and the other data
+subsections.
+
+Synth worst case (GCC alone / cl6x): reverb 9.4 % to 4.3 % / 1.3 %, delay 1.4 % to 1.2 % / 0.4 %; the whole worst
+case 52 % / 27 % of the audio budget. 32 tests pass.
 

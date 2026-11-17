@@ -88,8 +88,87 @@ void enaga_svf_cascade(enaga_svf *s1, const enaga_svf_coefficients *c1, enaga_sv
 /* ---- One-pole low-pass: y += a (x - y) ---- */
 
 typedef struct { float y; } enaga_one_pole;
+/* a = 1 - exp(-2 pi cutoff / rate) */
+static inline float enaga_one_pole_coefficient(float cutoff, float rate) {
+    return 1.0f - enaga_exp(-2.0f * ENAGA_PI * cutoff / rate);
+}
 static inline float enaga_one_pole_step(enaga_one_pole *p, float x, float a) { return p->y += a * (x - p->y); }
 void enaga_one_pole_process(enaga_one_pole *p, float a, const float *in, float *out, int n);   /* out may be in */
+
+/* ---- Delay lines ---- */
+
+/* A ring of a power-of-two size: buffer[write] is the last sample written. The memory is the caller's
+ * (enaga_delay_size floats, zeroed); DelayLine in effects.hpp allocates it on the app heap. */
+typedef struct { float *buffer; uint32_t mask, write; } enaga_delay_line;
+
+/* The buffer size for delays up to max_samples. */
+static inline uint32_t enaga_delay_size(uint32_t max_samples) {
+    uint32_t size = 1;
+    while (size < max_samples + 2) size <<= 1;
+    return size;
+}
+static inline void enaga_delay_init(enaga_delay_line *d, float *buffer, uint32_t size) {
+    d->buffer = buffer;
+    d->mask = size - 1;
+    d->write = 0;
+}
+static inline uint32_t enaga_delay_capacity(const enaga_delay_line *d) { return d->mask - 1; }
+static inline void enaga_delay_write(enaga_delay_line *d, float x) { d->buffer[d->write = (d->write + 1) & d->mask] = x; }
+/* The sample written `delay` writes ago (0 = the last). */
+static inline float enaga_delay_tap(const enaga_delay_line *d, uint32_t delay) {
+    return d->buffer[(d->write - delay) & d->mask];
+}
+/* A fractional delay, 0 to capacity, linearly interpolated. */
+static inline float enaga_delay_tap_linear(const enaga_delay_line *d, float delay) {
+    int whole = (int)delay;
+    float frac = delay - (float)whole;
+    return enaga_lerp(enaga_delay_tap(d, (uint32_t)whole), enaga_delay_tap(d, (uint32_t)whole + 1), frac);
+}
+/* Block reads and writes. In a block of n samples whose writes come after its reads, sample i would see
+ * tap(delay) = out[i] of enaga_delay_read(d, delay, out, n), provided delay >= n - 1 (so every sample read was
+ * written before the block). Reading the block first and writing it after keeps the loops free of memory
+ * dependencies, which is what lets them pipeline. */
+void enaga_delay_read(const enaga_delay_line *d, uint32_t delay, float *out, int n);
+void enaga_delay_write_block(enaga_delay_line *d, const float *in, int n);
+
+/* ---- Stereo delay: feedback through a low-pass (tone), optional ping-pong, a gliding time ---- */
+
+typedef struct {
+    enaga_delay_line left, right;
+    enaga_one_pole damp_l, damp_r;
+    float rate, current, target, feedback, tone;    /* current and target: the delay in samples */
+    int32_t ping_pong;
+} enaga_stereo_delay;
+
+/* The floats of memory enaga_stereo_delay_init needs (zeroed) for delays up to max_seconds. */
+uint32_t enaga_stereo_delay_memory(float max_seconds, float rate);
+void enaga_stereo_delay_init(enaga_stereo_delay *s, float *memory, float max_seconds, float rate);
+/* seconds; feedback 0-0.95; tone 0 (dark) to 1 (bright); ping_pong crosses the feedback. The time glides there. */
+void enaga_stereo_delay_set(enaga_stereo_delay *s, float seconds, float feedback, float tone, int ping_pong);
+/* Feeds in_l / in_r through the delay and adds mix x the echoes to out_l / out_r. */
+void enaga_stereo_delay_process(enaga_stereo_delay *s, const float *in_l, const float *in_r, float *out_l,
+                                float *out_r, int n, float mix);
+
+/* ---- Reverb: four Schroeder all-passes into an eight-line Hadamard feedback delay network ---- */
+
+#define ENAGA_REVERB_LINES 8
+#define ENAGA_REVERB_DIFFUSERS 4
+
+typedef struct {
+    enaga_delay_line lines[ENAGA_REVERB_LINES], diffusers[ENAGA_REVERB_DIFFUSERS];
+    enaga_one_pole damp[ENAGA_REVERB_LINES];
+    uint32_t length[ENAGA_REVERB_LINES], diffuse_length[ENAGA_REVERB_DIFFUSERS];
+    float gain[ENAGA_REVERB_LINES], damping, rate;
+} enaga_reverb;
+
+/* The floats of memory enaga_reverb_init needs (zeroed) at this sample rate. */
+uint32_t enaga_reverb_memory(float rate);
+void enaga_reverb_init(enaga_reverb *r, float *memory, float rate);
+/* decay_s: time to fall 60 dB (0.2-30); damping 0 (bright) to 1 (dark). */
+void enaga_reverb_set(enaga_reverb *r, float decay_s, float damping);
+/* Adds mix x the reverb of in_l + in_r to out_l / out_r. */
+void enaga_reverb_process(enaga_reverb *r, const float *in_l, const float *in_r, float *out_l, float *out_r, int n,
+                          float mix);
 
 /* ---- ADSR envelope: one-pole segments ---- */
 

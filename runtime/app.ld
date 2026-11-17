@@ -7,7 +7,7 @@ MEMORY { APP (rwx) : ORIGIN = 0xC0400000, LENGTH = 0x7C00000 }   /* ENAGA_APP_BA
 SECTIONS {
     .text : { *(.text .text.* .text:*) } > APP    /* cl6x (*.ti.c) names function sections .text:NAME */
     /* GCC tic6x names read-only data .const and jump tables .switch (TI conventions) */
-    .rodata : { *(.rodata .rodata.* .const .const.* .switch .switch.*) } > APP
+    .rodata : { *(.rodata .rodata.* .const .const.* .const:* .switch .switch.*) } > APP   /* cl6x: .const:NAME */
     .init_array : {
         . = ALIGN(4);
         __init_array_start = .;
@@ -21,8 +21,8 @@ SECTIONS {
         KEEP(*(.ctors))
         __ctors_end = .;
     } > APP
-    .data : { *(.data .data.* .fardata .fardata.* .neardata .neardata.*) . = ALIGN(8); } > APP
-    .bss (NOLOAD) : { . = ALIGN(8); __bss_start = .; *(.bss .bss.* .far .far.*) *(COMMON) . = ALIGN(8); __bss_end = .; } > APP
+    .data : { *(.data .data.* .fardata .fardata.* .fardata:* .neardata .neardata.* .neardata:*) . = ALIGN(8); } > APP
+    .bss (NOLOAD) : { . = ALIGN(8); __bss_start = .; *(.bss .bss.* .bss:* .far .far.* .far:*) *(COMMON) . = ALIGN(8); __bss_end = .; } > APP
     /* Destructors are never run (an unloaded app's memory is discarded), and nothing unwinds. */
     /DISCARD/ : { *(.fini_array .fini_array.*) *(.dtors .dtors.*) *(.c6xabi.attributes) *(.c6xabi.exidx*) *(.c6xabi.extab*)
                   *(.comment) *(.note*) *(.debug*)
