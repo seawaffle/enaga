@@ -64,7 +64,11 @@ enum enaga_led {
 enum enaga_event_type {
     ENAGA_EVENT_KEY = 1,                    /* id: key bit; value: 1 down, 0 up */
     ENAGA_EVENT_ENCODER = 2,                /* id: 0-3 = A-D, 4 = VALUE; value: signed detents */
-    ENAGA_EVENT_PAD = 3                     /* id: pad 0-14; value: 14-bit pressure reading (raw, E1) */
+    ENAGA_EVENT_PAD = 3,                    /* id: pad 0-14; value: 14-bit pressure reading, every reading (raw) */
+    /* Pads as notes, before the raw reading that caused them. Thresholds are provisional until measured on a unit
+     * (docs/hardware.md "Panel MCU"): a press at 800, the original firmware's, a release below 600. */
+    ENAGA_EVENT_PAD_PRESS = 4,              /* id: pad 0-14; value: velocity 1-127, from the first reading over 800 */
+    ENAGA_EVENT_PAD_RELEASE = 5             /* id: pad 0-14 */
 };
 
 typedef struct enaga_event {

@@ -10,8 +10,8 @@
  * flight delays the next draw), and the power key held one second switches the unit off. With no app
  * (none found, or one that failed) Enaga shows its own status page. Each pass feeds the watchdog (watchdog.c).
  *
- * Not yet: F1 at power-on / F1 + POWER and the Enaga menu, and pad thresholds (raw readings are
- * delivered). Keys are debounced in keys.c. */
+ * Pads are delivered raw and as press / release with velocity (provisional thresholds, on_pad). Not yet: F1 at
+ * power-on / F1 + POWER and the Enaga menu. Keys are debounced in keys.c. */
 
 extern char __bss_start[], __bss_end[];
 static u64 last_keys;
@@ -51,11 +51,29 @@ static void poll_for(u32 ms)                  /* a pause in the MCU start messag
     while (timer_ms() - start < ms) uart1_poll();
 }
 
+/* Pad thresholds, provisional until readings are measured on a unit: a press at the original firmware's 800, a
+ * release below 600, and velocity from the first reading over the threshold, 127 at PAD_FULL or more. */
+#define PAD_PRESS    800u
+#define PAD_RELEASE  600u
+#define PAD_FULL     12000u
+static u8 pad_down[15];
+
 static void on_pad(int channel, unsigned value)
 {
     enaga_event_t e;
     if (channel >= 15) return;                /* channel 15 is the battery */
-    e.type = ENAGA_EVENT_PAD; e.id = (u16)channel; e.value = (int)value; e.ms = timer_ms();
+    e.id = (u16)channel; e.ms = timer_ms();
+    if (!pad_down[channel] && value >= PAD_PRESS) {
+        pad_down[channel] = 1;
+        e.type = ENAGA_EVENT_PAD_PRESS;
+        e.value = 1 + (int)(126u * ((value < PAD_FULL ? value : PAD_FULL) - PAD_PRESS) / (PAD_FULL - PAD_PRESS));
+        apps_event(&e);
+    } else if (pad_down[channel] && value < PAD_RELEASE) {
+        pad_down[channel] = 0;
+        e.type = ENAGA_EVENT_PAD_RELEASE; e.value = 0;
+        apps_event(&e);
+    }
+    e.type = ENAGA_EVENT_PAD; e.value = (int)value;
     apps_event(&e);
 }
 

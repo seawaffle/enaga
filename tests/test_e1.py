@@ -324,6 +324,19 @@ class E1(unittest.TestCase):
                 emu.run(20 * MS)
             self.assertEqual(self.key_events(emu), ["K32 1", "K32 0"] * 4)
 
+    def test_pads_give_press_and_release_with_velocity(self):
+        def reading(pad, value):
+            emu.cpu.uart_receive(1, bytes([0xB0 | pad, value & 0x7F, value >> 7]))
+            emu.run(4 * MS)                     # the MCU reads each pad about every 3.8 ms
+        with Emulation(HERE / "apps" / "keys") as emu:
+            self.assertIsNone(emu.run(BOOT)["error"])
+            for value in (90, 799, 6400, 9000, 700, 610, 599, 300, 12000, 16383, 0):
+                reading(3, value)
+            reading(12, 800)
+            pads = [line for line in emu.report()["log"] if line[:1] == "P"]
+            # 800 is a press; under 600 a release; velocity 1 + 126 (reading - 800) / 11200, 127 from 12000.
+            self.assertEqual(pads, ["P3 64", "P3 0", "P3 127", "P3 0", "P12 1"])
+
     # Panel LED addresses (a, b, c), transcribed from the smpltrek notes (docs/hardware.md "Panel MCU"):
     # pads by MCU channel as (red, green, blue); STEP and button LEDs as their green address (red at c + 1).
     LED_PADS = [((2, 1, 5), (2, 1, 4), (2, 1, 6)), ((2, 1, 2), (2, 1, 1), (2, 1, 3)), ((0, 1, 5), (0, 1, 4), (0, 1, 6)),

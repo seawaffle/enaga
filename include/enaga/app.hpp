@@ -66,7 +66,9 @@ public:
     virtual void stop() {}
     virtual void on_key(int key, bool down) { (void)key; (void)down; }   // key: enaga_key or bit number
     virtual void on_encoder(int encoder, int delta) { (void)encoder; (void)delta; }
-    virtual void on_pad(int pad, unsigned pressure) { (void)pad; (void)pressure; }
+    virtual void on_pad(int pad, unsigned pressure) { (void)pad; (void)pressure; }   // every raw reading, 0-16383
+    virtual void on_pad_press(int pad, int velocity) { (void)pad; (void)velocity; }   // velocity 1-127
+    virtual void on_pad_release(int pad) { (void)pad; }
     // Audio context: see enaga_app_t::audio. Interleaved stereo, `frames` frames.
     virtual void audio(const float *in, float *out, uint32_t frames) {
         (void)in;
@@ -87,6 +89,8 @@ inline void event(void *app, const enaga_event_t *e) {
     if (e->type == ENAGA_EVENT_KEY) a->on_key(e->id, e->value != 0);
     else if (e->type == ENAGA_EVENT_ENCODER) a->on_encoder(e->id, e->value);
     else if (e->type == ENAGA_EVENT_PAD) a->on_pad(e->id, unsigned(e->value));
+    else if (e->type == ENAGA_EVENT_PAD_PRESS) a->on_pad_press(e->id, e->value);
+    else if (e->type == ENAGA_EVENT_PAD_RELEASE) a->on_pad_release(e->id);
 }
 inline void audio(void *app, const float *in, float *out, uint32_t frames) {
     static_cast<App *>(app)->audio(in, out, frames);
