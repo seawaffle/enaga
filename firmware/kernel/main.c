@@ -192,6 +192,8 @@ void main(void)
     splash("CARD");
     apps_mount();
     last_keys = keys_reset(timer_ms());       /* keys held through start-up do not become events */
+    uart1_irq_start();                        /* the MCU's bytes by interrupt from here (start-up may have lost some) */
+    irq_enable(1u << IRQ_UART1);
     irq_global_enable();                      /* audio blocks start being serviced (silence until an app) */
     log_line("ENAGA " ENAGA_VERSION);
     log_cache(cache_entry_config(), cache_config());

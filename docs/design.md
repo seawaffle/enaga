@@ -171,14 +171,18 @@ a unit", the CHECK app in `tests/unit/check`, `tools/unit_card.py`) and not yet 
 ## Open items
 
 - On the unit: F1 sampled during the power-key hold; the bootloader passes control normally with F1
-  held; F1 + POWER mid-run; power-key bounce; how long the matrix keys bounce (the 6 ms sampling and
-  two-sample release follow the original firmware, not a measurement).
+  held; F1 + POWER mid-run; power-key bounce; bounce of keys other than STEP 1 (STEP 1 settles within 784 µs,
+  smpltrek session M1, well inside the 6 ms sampling and two-sample release).
 - LED map: 53 addresses known only from the code, 24 seen on another channel of their LED (docs/hardware.md
   "LED map"; smpltrek session L1); the level-to-brightness steps. Whether the unit has a hardware MIDI port;
   physical left/right channel routing; real audio CPU headroom with caches; the key names, confirmed key by key
   on a unit.
-- The L2 split between cache and RAM. The bootloader's cache state at entry is simulated only (docs/hardware.md
-  "Checks on a unit").
+- The L2 split between cache and RAM.
+- The SDK should give apps unaligned-safe load/store helpers for packed formats (misaligned LDW/STW/LDDW round
+  the address down without a fault) and say that a null read returns garbage rather than trapping (smpltrek
+  session M1; docs/hardware.md "Processor and memory"). A debug-build null check is worth considering.
+- Pad events: Enaga passes every MCU message on, about 3,930 pad events a second at rest. Thresholds, change
+  filtering and calibration are E2's (pads as press/release with velocity).
 - USB stack: the C6748's USB0 is a Mentor MUSB controller; a TinyUSB port (TinyUSB has a MUSB driver for
   other TI parts) is plausible and unverified.
 - A fault in Enaga code called by an app (a host function given a bad pointer) currently counts as a kernel
@@ -363,3 +367,22 @@ Two bugs reported from smpltrek's bring-up firmware (commit cdd968f) had the sam
   than a block (a callback overrunning, or a long section with GIE clear); the PaRAM choice holds either way.
   The smpltrek note about reading EDMA registers before its power module is on does not apply: the interrupt
   is enabled only after audio set-up.
+
+### Session M1 results (2026-11-16)
+
+smpltrek's bench session M1 measured on the unit what Enaga had assumed (docs/hardware.md now marks each
+as measured):
+- The bootloader's cache hand-over matches the simulation, so the unit check's `CACHE 043 8F>444 FF` stands.
+- STEP 1 bounces for at most 784 µs: the 6 ms two-sample release filter is ample.
+- The panel MCU sends every channel all the time, about 4,192 messages (12,600 bytes) a second, so UART1's
+  16-byte FIFO fills in about 1.3 ms. Enaga polled it once per main-loop pass: on the emulator, at 85 % audio
+  load on CHECK's LOAD page, polling lost 94 of 840 messages. UART1 now has a receive interrupt (CPU interrupt
+  6 <- event 46) filling a 1 KiB ring that `uart1_poll` parses; it may nest in the app's audio callback, whose
+  block can last up to 1.33 ms. `uart1_overruns` counts LSR OE. `test_check.py` floods 840 messages at the
+  measured rate under that load and expects all of them parsed with no overrun.
+- CHECK's PANEL page showed the last pad, which with continuous traffic would cycle through every pad. It now
+  shows the pad with the highest reading and pad messages per second, about 3,930 at rest: a direct check of
+  the receive path on the unit. The dry run feeds the MCU's continuous stream in step 10 (141 checks).
+- Recorded without code changes: null reads return leftover data and do not fault; misaligned accesses round
+  down without faulting; an EMIFA chip-select-0 store with EMIFA not set up is dropped; USB0's bring-up order
+  and reserved registers; both SPI flash chips answer `C2 20 18`, and chip 0 has block-protect bits set.

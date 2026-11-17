@@ -27,7 +27,7 @@ BOOT = 300_000_000          # past card, app load and audio start
 STEP1 = 32
 BLOCK_CYCLES = 64 * 372_000_000 // 48_000
 MS = 372_000
-CACHE_LOG = "CACHE 443 00>444 FF"   # the emulator's hand-over (L1D half RAM, DDR uncached), then after set-up
+CACHE_LOG = "CACHE 043 8F>444 FF"   # the bootloader's hand-over as measured (smpltrek M1), then after set-up
 
 
 def samples(emu):

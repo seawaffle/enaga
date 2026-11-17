@@ -100,6 +100,16 @@ def turn(emu, encoder, detents):
             emu.run(3 * MS)
 
 
+def mcu_traffic(emu, ms, pressed=None):
+    """The panel MCU's continuous stream: every channel in turn, 4,192 messages a second (smpltrek M1)."""
+    pressed = pressed or {}
+    for i in range(ms * 4192 // 1000):
+        channel = i % 16
+        value = pressed.get(channel, 0)
+        emu.cpu.uart_receive(1, bytes([0xB0 | channel, value & 0x7F, value >> 7]))
+        emu.run(372_000_000 // 4192)
+
+
 def leds(emu):
     return emu.cpu.read(emu.names["led_level"], 144)
 
@@ -229,16 +239,20 @@ def main():
         run.check("MIC after C +4", [4, 4, 4], row0(2))
         run.check("VALUE LED after VALUE +1 (blue, green, red)", [0, 10, 0], [row0(3)[0], row0(4)[0], row0(5)[0]])
         run.shot(emu, "encoders", "PANEL page after A +3 -1, B +1, C +4, D +1 -2, VALUE +1: A 2 B 1 C 4 D -1 VALUE 1")
+        messages, overruns = emu.word("pad_messages"), emu.word("uart1_overruns")
+        mcu_traffic(emu, 2100)
+        run.check("pad messages parsed in 2.1 s of MCU traffic", 8803, emu.word("pad_messages") - messages)
+        run.shot(emu, "pads-rest", "PANEL page with the MCU's continuous traffic, no pad touched: PAD MSG/S about "
+                 "3930 (15 pads; the battery channel is not delivered)")
         for pad in range(15):
-            emu.cpu.uart_receive(1, bytes([0xB0 | pad, 0x7F, 0x7F]))    # 16383, pressed hard
-            emu.run(20 * MS)
+            mcu_traffic(emu, 30, {pad: 16383})                        # pressed hard
             green = address(E1.LED_PADS[pad][1])
             run.check(f"pad {pad}: green at full pressure", 10, leds(emu)[green])
             if pad == 7:
-                run.shot(emu, "pad-7", "PANEL page with pad 7 pressed hard (RAW 16383)")
-            emu.cpu.uart_receive(1, bytes([0xB0 | pad, 0x00, 0x00]))
-            emu.run(20 * MS)
+                run.shot(emu, "pad-7", "PANEL page with pad 7 pressed hard: PAD 7 RAW 16383")
+            mcu_traffic(emu, 30)
             run.check(f"pad {pad}: off at rest", 0, leds(emu)[green])
+        run.check("no UART1 receive overruns", 0, emu.word("uart1_overruns") - overruns)
         report = emu.report()
         run.check("app still running", "APP RUNNING", report["app_status"])
 

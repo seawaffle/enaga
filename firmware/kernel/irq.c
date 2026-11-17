@@ -4,10 +4,11 @@
  * INTMUX1-3 at INTC + 0x104..0x10C pick the event for CPU interrupts 4-15, one byte each. Two are used: CPU
  * interrupt 4 <- event 4 (T64P0_TINT12, the watchdog tick; the original firmware's clock tick is the same event)
  * and CPU interrupt 8 <- event 8 (EDMA3_0_CC0_INT1, the DSP's shadow region 1, the audio block). Both are also
- * the reset mapping, written explicitly so the kernel does not depend on what the bootloader left.
+ * the reset mapping, written explicitly so the kernel does not depend on what the bootloader left. CPU
+ * interrupt 6 <- event 46 (UART1_INT, the panel MCU's bytes) is not.
  *
- * Handlers run with interrupts off, except the app's audio callback, during which the watchdog may nest
- * (audio.c), so irq_active counts the handlers running. */
+ * Handlers run with interrupts off, except the app's audio callback, during which the watchdog and UART1 may
+ * nest (audio.c), so irq_active counts the handlers running. */
 #define INTC     0x01800000u
 #define INTMUX1  (INTC + 0x104)
 #define INTMUX2  (INTC + 0x108)
@@ -17,7 +18,7 @@ static u32 enabled;
 
 void irq_init(void)
 {
-    REG32(INTMUX1) = (REG32(INTMUX1) & ~0x7Fu) | 4u;   /* INTSEL4 = event 4 */
+    REG32(INTMUX1) = (REG32(INTMUX1) & ~0x7F007Fu) | 4u | 46u << 16;   /* INTSEL4 = event 4, INTSEL6 = event 46 */
     REG32(INTMUX2) = (REG32(INTMUX2) & ~0x7Fu) | 8u;   /* INTSEL8 = event 8 */
     irq_set_istp((u32)vectors);
 }
@@ -32,6 +33,7 @@ void enaga_irq(unsigned number)
 {
     irq_active++;
     if (number == IRQ_WATCHDOG) watchdog_isr();
+    else if (number == IRQ_UART1) uart1_isr();
     else if (number == IRQ_AUDIO) audio_isr();
     irq_active--;
 }

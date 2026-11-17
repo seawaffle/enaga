@@ -3,7 +3,10 @@
 /* Panel MCU link on UART1 (docs/hardware.md "Panel MCU"), set up as the original firmware does: PSC1 module 12,
  * PINMUX4 nibbles 6 and 7 = UART1 RXD/TXD, MDR = 0 (16x), DLL = 25, DLH = 0 (186 MHz / 16 / 25 = 465,000),
  * LCR = 3 (8N1), FCR = 7 then 1 (FIFOs reset, trigger 1), then the two enables PWREMU_MGMT = 0x2001 and
- * 0x6001. The original firmware enables receive interrupts (IER = 5); this polls, so IER stays 0. */
+ * 0x6001. The MCU sends all 16 analogue channels continuously, about 4,200 messages (12,600 bytes) a second
+ * whether or not a pad is touched (smpltrek session M1, measured), so the 16-byte FIFO fills in about 1.3 ms.
+ * Start-up polls; from uart1_irq_start on, the receive interrupt (IER = 1, trigger level 1) moves every byte
+ * into a ring that uart1_poll parses in the main loop. The original firmware also takes receive interrupts. */
 #define UART_RBR  0x00
 #define UART_THR  0x00
 #define UART_IER  0x04
@@ -16,6 +19,7 @@
 #define UART_PWREMU 0x30
 #define UART_MDR  0x34
 #define LSR_DR    0x01
+#define LSR_OE    0x02
 #define LSR_THRE  0x20
 #define LSR_TEMT  0x40
 #define MCR_LOOP  0x10
@@ -24,6 +28,8 @@ u16 pad_value[16];
 u8 mcu_info[6];
 u32 pad_messages, mcu_replies, uart1_dropped;
 u32 uart1_rx_bytes;                      /* every byte the receiver delivered, message or not */
+u32 uart1_overruns;                      /* LSR OE seen: bytes lost in the receive FIFO */
+u32 uart1_ring_lost;                     /* bytes dropped because the ring was full */
 u8 uart1_rx_last;
 int uart1_loopback_ok;                   /* the receiver self-test at set-up: a byte sent in internal loopback came back */
 void (*pad_callback)(int channel, unsigned value);
@@ -82,11 +88,39 @@ void uart1_send(u8 byte)
 static u8 msg[8];
 static unsigned msg_len, msg_need;
 
+#define RING 1024u                              /* bytes: about 80 ms of the MCU's traffic */
+static u8 ring[RING];
+static volatile u32 ring_head, ring_tail;      /* head: written by the receiver; tail: by uart1_poll */
+static int irq_on;
+
+static void drain(void)                        /* the FIFO into the ring */
+{
+    u32 lsr;
+    while ((lsr = REG32(UART1 + UART_LSR)) & LSR_DR) {
+        u8 b = (u8)REG32(UART1 + UART_RBR);
+        if (lsr & LSR_OE) uart1_overruns++;
+        if (ring_head - ring_tail < RING) ring[ring_head++ % RING] = b;
+        else uart1_ring_lost++;
+    }
+    if (lsr & LSR_OE) uart1_overruns++;
+}
+
+void uart1_isr(void) { drain(); }
+
+void uart1_irq_start(void)                     /* call with interrupts off; the caller enables the CPU interrupt */
+{
+    drain();
+    REG32(UART1 + UART_IER) = 1;               /* received data available */
+    irq_on = 1;
+}
+
 int uart1_poll(void)
 {
     int completed = 0;
-    while (REG32(UART1 + UART_LSR) & LSR_DR) {
-        u8 b = (u8)REG32(UART1 + UART_RBR);
+    if (!irq_on) drain();
+    while (ring_tail != ring_head) {
+        u8 b = ring[ring_tail % RING];
+        ring_tail++;
         uart1_rx_bytes++;
         uart1_rx_last = b;
         if (msg_need == 0) {

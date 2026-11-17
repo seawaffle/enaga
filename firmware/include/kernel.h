@@ -22,6 +22,7 @@ extern char _stack_top[];
 
 /* irq.c */
 #define IRQ_WATCHDOG 4                        /* CPU interrupt 4 <- event 4, T64P0_TINT12 (the highest maskable priority) */
+#define IRQ_UART1 6                           /* CPU interrupt 6 <- event 46, UART1_INT (the panel MCU's bytes) */
 #define IRQ_AUDIO 8                           /* CPU interrupt 8 <- event 8, EDMA3_0_CC0_INT1 (shadow region 1) */
 void irq_init(void);
 void irq_enable(u32 mask);                    /* IER |= mask, remembered for irq_unwind */

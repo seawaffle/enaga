@@ -41,11 +41,14 @@ extern u32 oled_dma_frames, oled_dma_timeouts;
 
 void uart1_init(void);
 void uart1_send(u8 byte);
-int  uart1_poll(void);                /* reads what the MCU sent; returns 1 when a message completed */
+int  uart1_poll(void);                /* parses what the MCU sent; returns 1 when a message completed */
+void uart1_irq_start(void);           /* from now on the receive interrupt collects the bytes */
+void uart1_isr(void);
 extern u16 pad_value[16];             /* channels 0-14 pads, 15 battery; 14-bit values */
 extern u8  mcu_info[6];               /* the A1 reply; bytes 3-5 are the MCU version */
 extern u32 pad_messages, mcu_replies, uart1_dropped;   /* dropped: bytes the transmitter never accepted */
 extern u32 uart1_rx_bytes;            /* bytes received, whether or not they made a message */
+extern u32 uart1_overruns, uart1_ring_lost;   /* receive bytes lost: in the FIFO (LSR OE), ring full */
 extern u8 uart1_rx_last;              /* the last of them */
 extern int uart1_loopback_ok;         /* 1 = the receiver self-test at set-up passed (internal loopback) */
 extern void (*pad_callback)(int channel, unsigned value);

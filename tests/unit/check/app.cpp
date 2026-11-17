@@ -10,7 +10,8 @@
 //          included), and the voices that would fit in 90 % of the budget at that rate. A block over 90 % cuts the voices to fit 85 % (CAP):
 //          past 100 % the callback would take every cycle and the main loop, keys included, would stop.
 //   PANEL  the last key by name and bit with its press count (one press must count one: bounce), every encoder's
-//          position, the last pad and its raw reading. A held key lights its LED green; a pad lights green by
+//          position, the pad with the highest raw reading, and pad messages per second (the panel MCU sends
+//          every pad all the time, about 3,930 a second for the 15 pads). A held key lights its LED green; a pad lights green by
 //          pressure; A, B and C set VOL L, VOL R and MIC (0-10); VALUE cycles the VALUE LED red, green, blue.
 #include <enaga/app.hpp>
 
@@ -87,7 +88,13 @@ public:
         }
         uint32_t load = enaga::audio_load();
         if (load > load_window_) load_window_ = load;
-        if (ms - load_since_ >= 1000) { load_shown_ = load_window_; load_window_ = 0; load_since_ = ms; }
+        if (ms - load_since_ >= 1000) {
+            load_shown_ = load_window_;
+            load_window_ = 0;
+            load_since_ = ms;
+            pads_per_second_ = pad_messages_ - pad_messages_last_;
+            pad_messages_last_ = pad_messages_;
+        }
         float l = in_peak_[0], r = in_peak_[1];
         if (l > in_window_[0]) in_window_[0] = l;
         if (r > in_window_[1]) in_window_[1] = r;
@@ -138,8 +145,9 @@ public:
     }
 
     void on_pad(int pad, unsigned pressure) override {
-        last_pad_ = pad;
-        pad_value_ = pressure;
+        if (pad < 0 || pad >= 15) return;
+        pad_raw_[pad] = pressure;
+        pad_messages_++;
         if (page_ == 2) enaga::pad_led(pad, 0, pressure * ENAGA_LED_MAX / 16383u, 0);
     }
 
@@ -258,7 +266,11 @@ private:
         canvas.text(0, 44, (Line() << "A " << position_[0] << " B " << position_[1]).str());
         canvas.text(0, 56, (Line() << "C " << position_[2] << " D " << position_[3]).str());
         canvas.text(0, 68, (Line() << "VALUE " << position_[4]).str());
-        if (last_pad_ >= 0) canvas.text(0, 84, (Line() << "PAD " << last_pad_ << " RAW " << pad_value_).str());
+        int top = 0;
+        for (int pad = 1; pad < 15; pad++)
+            if (pad_raw_[pad] > pad_raw_[top]) top = pad;
+        canvas.text(0, 84, (Line() << "PAD " << top << " RAW " << pad_raw_[top]).str());
+        canvas.text(0, 96, (Line() << "PAD MSG/S " << pads_per_second_).str(), 10);
     }
 
     void leds_off() {
@@ -285,9 +297,10 @@ private:
     uint32_t load_window_ = 0, load_shown_ = 0, load_since_ = 0;
     float in_window_[2] = {0.0f, 0.0f};
     uint32_t in_shown_[2] = {0, 0}, in_since_ = 0;
-    int last_key_ = 0, last_pad_ = -1;
+    int last_key_ = 0;
     bool last_down_ = false;
-    uint32_t presses_[ENAGA_KEY_COUNT] = {}, events_ = 0, pad_value_ = 0;
+    uint32_t presses_[ENAGA_KEY_COUNT] = {}, events_ = 0;
+    uint32_t pad_raw_[15] = {}, pad_messages_ = 0, pad_messages_last_ = 0, pads_per_second_ = 0;
     int position_[5] = {};
 };
 

@@ -243,11 +243,11 @@ void audio_isr(void)
         } else {
             for (i = 0; i < WORDS; i++) in_block[i] = 0.0f;
         }
-        if (fn) {                             /* the watchdog may interrupt the app's callback (watchdog.c) */
+        if (fn) {                             /* the watchdog (watchdog.c) and UART1 may interrupt the app's callback */
             u32 saved[3];
             audio_callback_start = tsc_read();
             audio_in_callback = 1;
-            irq_nest_begin(saved, 1u << IRQ_WATCHDOG);
+            irq_nest_begin(saved, 1u << IRQ_WATCHDOG | 1u << IRQ_UART1);
             fn(callback_context, in_block, out_block, FRAMES);
             irq_nest_end(saved);
             audio_in_callback = 0;

@@ -20,7 +20,23 @@ TLV320AIC3106 data sheet (SLAS509).
   4 MiB the system image; the rest holds the original firmware's sounds and settings. Enaga does not write
   either chip, and does not read them yet. The original firmware and bootloader read them by EDMA (code reading,
   "Boot"); if Enaga does too, it must invalidate the destination range before the CPU reads it, since the DMA
-  writes DDR behind the caches.
+  writes DDR behind the caches. Both chips answer JEDEC ID `C2 20 18` (Macronix, 16 MiB; smpltrek session M1, 2026-11-16, measured).
+  Chip 0 reads status `0x0C` and configuration `0x0F`: status bits 2-3 set, block protect on Macronix parts
+  (inference), so writes to chip 0 are refused until they are cleared, which would be a deliberate, risky step.
+  Chip 1 reads status `0x00`, configuration `0x07`.
+- **Null and reserved reads (measured, M1).** Reads of `0x0`-`0x14` and `0x00400000` do not fault and do not
+  return 0: they return leftover data (most likely the previous load's 64-bit value, bytes chosen by address
+  bits 2:0; inference), with EFR, IERR and the event flags clear. A null dereference fails silently with
+  plausible garbage; Enaga cannot trap it.
+- **Misaligned access (measured, M1, cached DDR).** No exception: LDDW rounds the address down to a multiple of
+  8, LDW and STW to 4, so a misaligned 32-bit store overwrites the aligned word below. Packed formats (WAV
+  headers, card data) need byte copies or unaligned-safe helpers.
+- **EMIFA (measured, M1).** A store into the chip-select-0 window (`0x40000000` and up) with EMIFA not set up
+  does not hang the unit: the data is dropped and reads return junk. Nothing is attached there.
+- **USB0 (measured, M1).** The original firmware's bring-up works: CFGCHIP2 = `0x0972`, PSC1 module 1, CTRLR =
+  1, then CFGCHIP2 bits 15, 10, 9 cleared and bit 6 set; USB0PHYCLKGD (bit 17) comes up within 10 ms and
+  CFGCHIP2 then reads `0x00020972`. The vendor driver's reserved registers `0x01E0080C` and `0x01E0084C` read 0,
+  and writing 0 to `0x01E00808` and `0x01E00848` is harmless.
 
 ## Boot
 
@@ -31,8 +47,8 @@ from `0xC7020000`-`0xC70B0000` while loading, so an image must not load there; t
 from `0xC0000000`, which is where Enaga loads too. A system image that never takes over leaves the unit on,
 showing the logo, with the power key dead: remove the batteries or power to recover, then use BOOT MODE.
 
-**Cache state at entry (simulated, not yet seen on a unit).** From a static trace and simulation of BOOT
-1.0.17's own cache start-up (smpltrek): at the jump L2CFG = 0 (L2 all RAM, no L2 cache), L1PCFG = 4 (32 KiB
+**Cache state at entry (measured on a unit, smpltrek session M1, 2026-11-16; it matches the earlier static trace
+and simulation of BOOT 1.0.17's cache start-up).** At the jump L2CFG = 0 (L2 all RAM, no L2 cache), L1PCFG = 4 (32 KiB
 L1P cache), L1DCFG = 3 (16 KiB L1D cache, 16 KiB L1D RAM at `0x11F00000`), and MAR 17, 128, 192-195 and 199
 cacheable, MAR 196-198 (`0xC4000000`-`0xC6FFFFFF`) not. The bootloader does not write back or invalidate any
 cache before branching, and it uses neither L2 nor L1D as RAM (its code, data and stack are in DDR at
@@ -51,8 +67,8 @@ write back and invalidate all of L1D and invalidate L1P; `cache_setup` (`hal/cac
 L1D all cache and writes every MAR from 16 to 255 (0-15 are read-only): cacheable for DDR (192-199), not
 cacheable everywhere else. The log's second line shows both states: L2, L1P and L1D modes (4 = all cache,
 3 = 16 KiB, 0 = none) and the PC bits of MAR 192-199 in hex (bit n = MAR 192+n), as recorded at entry and
-after set-up. The simulated hand-over gives `CACHE 043 8F>444 FF`; the emulator's own hand-over gives
-`CACHE 443 00>444 FF`.
+after set-up. The unit's hand-over gives `CACHE 043 8F>444 FF`, and so does the emulator, which hands over
+the measured state.
 
 ## Installing and recovery
 
@@ -108,8 +124,9 @@ Lofi-12 XT and CyDrums print PTN, COPY, PAD, REC, Play, MIX, MUTE there, see smp
 
 F1 is func on all three products, and F4 is the key the SmplTrek bootloader tests for BOOT MODE. The names come from the original firmware's factory test page, which
 draws the panel and fills in each button whose bit is set, matched to the manual's layout; they are still
-to be confirmed key by key on a unit. The switches are not debounced in hardware, and how long they bounce is
-unmeasured. Enaga follows the original firmware (`hal/keys.c`; smpltrek claim HW-51): each key is sampled every
+to be confirmed key by key on a unit. The switches are not debounced in hardware. Bounce was measured on STEP 1
+only (smpltrek session M1: 20 presses sampled every 10 µs): presses gave one edge, releases up to 7 edges over
+175 µs, the longest settle time 784 µs, no glitches; a two-sample release filter at 6 ms is ample. Enaga follows the original firmware (`hal/keys.c`; smpltrek claim HW-51): each key is sampled every
 6 ms, a press is taken on the first closed sample and a release on the second consecutive open one, so a
 one-sample opening while a key is held is ignored. The original filters releases so only for bits 0-31; its
 STEP keys release on the first open sample, so a one-sample opening gives a release and a new press. Enaga
@@ -124,7 +141,12 @@ count per detent.
 ## Panel MCU (pads, LEDs, battery)
 
 A separate microcontroller scans the 15 pressure pads and the battery voltage and drives the LEDs. It talks
-to the DSP over **UART1** at 465,000 baud, 8N1 (186 MHz / 16 / 25).
+to the DSP over **UART1** at 465,000 baud, 8N1 (186 MHz / 16 / 25). The MCU sends continuously, touched or
+not: about 4,192 `Bn` messages a second, all 16 channels at about 262 each, every 3.69-3.97 ms (smpltrek session
+M1, measured). That is about 12,600 bytes a second, so the 16-byte receive FIFO fills in about 1.3 ms; M1's
+image, which polled, lost bytes to FIFO overruns. Enaga takes them by the receive interrupt (CPU interrupt 6 <-
+event 46) into a ring that the main loop parses, and the interrupt may nest in the app's audio callback;
+`uart1_overruns` counts LSR OE. Bytes during start-up, before the interrupt is on, may still be lost.
 
 | Direction | Bytes | Meaning |
 |---|---|---|
@@ -287,8 +309,9 @@ listen on headphones or the line output. Report each result with what the screen
    restart. Expected: the ENAGA splash with MCU, AUDIO and CARD, then Enaga's status page with `NO /ENAGA/APPS`.
    A unit stuck on the SONICWARE logo with the power key dead: remove power, then BOOT MODE and the official
    update ("Installing and recovery").
-2. **Cache state at entry** (simulated under "Boot"): the status page's second log line. Expected
-   `CACHE 043 8F>444 FF`; anything else before the `>` means the bootloader differs from the simulation. After
+2. **Cache state at entry** (measured by session M1, "Boot"): the status page's second log line. Expected
+   `CACHE 043 8F>444 FF`; anything else before the `>` means Enaga read the registers wrongly or the bootloader
+   differs from M1's. After
    the `>` it must read `444 FF`.
 3. **Audio engine with no app:** on the status page, AUDIO shows status 0 and a block count that keeps rising;
    LOAD shows the peak (per mille) and 0 overruns. Report both numbers after about a minute.
@@ -307,12 +330,14 @@ listen on headphones or the line output. Report each result with what the screen
    about 2,500 cycles per voice per block for each workload and fits about 177 voices; the unit's SAMPLE and
    GRAIN against SYNTH show what DDR access costs.
 9. **Keys and LEDs (PANEL page):** press every key once, slowly. Each must show its name (as printed on the
-   panel) and PRESSES going up by exactly one per press, which is the bounce check; quick double presses must
+   panel; F1-F8 for the 2 x 4 function block, "Keys") and PRESSES going up by exactly one per press, which is the bounce check; quick double presses must
    count two. A key with an LED lights it green while held. Report any key with the wrong name, a count that
    jumps, or the wrong or no LED.
 10. **Encoders and pads (PANEL page):** each encoder one detent at a time: its number changes by one per detent,
     with the sign clockwise positive. A, B and C set VOL L, VOL R and the microphone LED (0-10); VALUE cycles the
-    VALUE LED red, green, blue. Each pad shows its number and RAW reading and lights green by pressure; note
-    which pad lights for each (the "LED map" order) and the RAW range from resting to pressed hard.
+    VALUE LED red, green, blue. PAD MSG/S should read about 3,930 with no pad touched (M1's rate without the
+    battery channel); much less means bytes are lost. The PAD line shows the pad with the highest reading; each
+    pad lights green by pressure. Note which pad lights for each (the "LED map" order), the RAW reading of
+    untouched pads (any pad glowing at rest shows it), and the RAW range when pressed hard.
 
 Afterwards the official update restores the unit ("Installing and recovery").

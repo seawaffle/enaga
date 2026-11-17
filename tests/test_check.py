@@ -48,6 +48,14 @@ class Check(unittest.TestCase):
             self.assertLess(emu.word("audio_cycles_last"), 0.9 * 496_000)
             emu.run(200 * MS)
             self.assertEqual(emu.word("audio_overruns"), overruns)  # the cap holds
+            # The panel MCU sends about 4,200 pad messages a second all the time (smpltrek session M1); with
+            # the main loop slowed by the load, polling lost about one in nine. The receive interrupt keeps all.
+            parsed = emu.word("pad_messages")
+            for i in range(840):
+                emu.cpu.uart_receive(1, bytes([0xB0 | i % 16, i & 0x7F, 1]))
+                emu.run(372_000_000 // 4192)
+            emu.run(5 * MS)
+            self.assertEqual((emu.word("pad_messages") - parsed, emu.word("uart1_overruns")), (840, 0))
             self.press(emu, STEP1 + 4)                               # keys still work: 16 voices
             emu.run(20 * MS)
             self.assertLess(emu.word("audio_cycles_last"), 0.2 * 496_000)
