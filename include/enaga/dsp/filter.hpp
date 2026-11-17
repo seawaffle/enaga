@@ -1,7 +1,7 @@
 // Enaga DSP: filters. Provisional until 1.0.
 //
 // Svf is the topology-preserving (trapezoidal) state-variable filter: stable under fast modulation, with
-// low-pass, band-pass and high-pass at once. Coefficients cost one division, so compute them at control rate
+// low-pass, band-pass and high-pass at once. Coefficients cost a reciprocal, so compute them at control rate
 // (SvfCoefficients) and run many samples with them: Svf::process, a block function (include/enaga/dsp.h).
 // Biquad covers the cookbook shapes (shelves, peaks, notches, all-passes) for EQ; Fir runs a kernel the app
 // supplies.
@@ -80,7 +80,7 @@ struct BiquadCoefficients : enaga_biquad_coefficients {
         notch = ENAGA_BIQUAD_NOTCH, all_pass = ENAGA_BIQUAD_ALL_PASS, peak = ENAGA_BIQUAD_PEAK,
         low_shelf = ENAGA_BIQUAD_LOW_SHELF, high_shelf = ENAGA_BIQUAD_HIGH_SHELF
     };
-    // frequency in Hz; q > 0 (0.7071 Butterworth); gain_db for peak and the shelves. Two divisions: control rate.
+    // frequency in Hz; q > 0 (0.7071 Butterworth); gain_db for peak and the shelves. Control rate.
     static BiquadCoefficients make(Type type, float frequency, float q, float sample_rate, float gain_db = 0.0f) {
         BiquadCoefficients c;
         enaga_biquad_design(&c, type, frequency, q, gain_db, sample_rate);

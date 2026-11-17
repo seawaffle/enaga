@@ -78,10 +78,10 @@ void enaga_one_pole_process(enaga_one_pole *p, float a, const float *in, float *
 
 void enaga_biquad_design(enaga_biquad_coefficients *c, int type, float frequency, float q, float gain_db,
                          float rate) {
-    const float w = enaga_clamp(frequency / rate, 0.0001f, 0.49f);      /* turns per sample */
+    const float w = enaga_clamp(frequency * enaga_reciprocal(rate), 0.0001f, 0.49f);      /* turns per sample */
     /* 1 - cos w as 2 sin^2(w / 2): exact at low frequencies, where 1 - cos w would cancel. */
     const float h = enaga_sin_turns(0.5f * w), dip = 2.0f * h * h, cs = 1.0f - dip;
-    const float alpha = enaga_sin_turns(w) / (2.0f * q);
+    const float alpha = enaga_sin_turns(w) * enaga_reciprocal(2.0f * q);
     const float A = enaga_exp2(gain_db * 0.0830482024f);                 /* 10^(gain / 40) */
     const float root = 2.0f * enaga_exp2(gain_db * 0.0415241012f) * alpha; /* 2 sqrt(A) alpha */
     float b0, b1, b2, a0, a1, a2;
@@ -108,7 +108,7 @@ void enaga_biquad_design(enaga_biquad_coefficients *c, int type, float frequency
         break;
     case ENAGA_BIQUAD_PEAK:
         b0 = 1.0f + alpha * A; b1 = -2.0f * cs; b2 = 1.0f - alpha * A;
-        a0 = 1.0f + alpha / A; a1 = -2.0f * cs; a2 = 1.0f - alpha / A;
+        a0 = 1.0f + alpha * enaga_reciprocal(A); a1 = -2.0f * cs; a2 = 1.0f - alpha * enaga_reciprocal(A);
         break;
     case ENAGA_BIQUAD_LOW_SHELF:
         b0 = A * ((A + 1.0f) - (A - 1.0f) * cs + root);
@@ -127,7 +127,7 @@ void enaga_biquad_design(enaga_biquad_coefficients *c, int type, float frequency
         a2 = (A + 1.0f) - (A - 1.0f) * cs - root;
         break;
     }
-    const float inv = 1.0f / a0;
+    const float inv = enaga_reciprocal(a0);
     c->b0 = b0 * inv;
     c->b1 = b1 * inv;
     c->b2 = b2 * inv;

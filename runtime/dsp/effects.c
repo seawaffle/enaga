@@ -131,7 +131,7 @@ static const uint32_t kLengths[ENAGA_REVERB_LINES] = {1123, 1361, 1597, 1823, 20
 static const uint32_t kDiffuse[ENAGA_REVERB_DIFFUSERS] = {149, 211, 293, 397};
 
 uint32_t enaga_reverb_memory(float rate) {
-    const float scale = rate / 48000.0f;
+    const float scale = rate * (1.0f / 48000.0f);
     uint32_t total = 0;
     int i;
     for (i = 0; i < ENAGA_REVERB_LINES; i++) total += enaga_delay_size((uint32_t)((float)kLengths[i] * scale));
@@ -140,7 +140,7 @@ uint32_t enaga_reverb_memory(float rate) {
 }
 
 void enaga_reverb_init(enaga_reverb *r, float *memory, float rate) {
-    const float scale = rate / 48000.0f;
+    const float scale = rate * (1.0f / 48000.0f);
     int i;
     r->rate = rate;
     for (i = 0; i < ENAGA_REVERB_LINES; i++) {
@@ -161,7 +161,7 @@ void enaga_reverb_set(enaga_reverb *r, float decay_s, float damping) {
     int i;
     decay_s = enaga_clamp(decay_s, 0.2f, 30.0f);
     for (i = 0; i < ENAGA_REVERB_LINES; i++)       /* 10^(-3 length / (T60 rate)) = 2^(-9.966 length / (T60 rate)) */
-        r->gain[i] = enaga_exp2(-9.96578428f * (float)r->length[i] / (decay_s * r->rate));
+        r->gain[i] = enaga_exp2(-9.96578428f * (float)r->length[i] * enaga_reciprocal(decay_s * r->rate));
     r->damping = enaga_one_pole_coefficient(enaga_lerp(14000.0f, 1500.0f, enaga_clamp(damping, 0.0f, 1.0f)), r->rate);
 }
 

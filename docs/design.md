@@ -563,3 +563,18 @@ local array (the stores might alias the settings).
 Result, worst case: cl6x 27 % to 25 % (modulation 8.5 % to 6.4 %: block math 1.2 %, the scalar part 5 %); GCC
 alone 52 % to 55 %, since GCC's code for the buffer loops is poor (above) and the padding doubles its tan_pi work.
 A four-way interleave for GCC and -O3 did not help. 32 tests pass.
+
+### No float division in the library's C code; the emulator agent's GCC notes (2026-11-17)
+
+From smpltrek's emulator work: GCC 13.3 for tic6x divides floats by a reciprocal estimate (RCPSP, refined
+twice), not exactly, so its quotients can be a unit in the last place off the host's, and cl6x's exact
+`__c6xabi_divf`; the estimate's bits are not yet checked on hardware either. `-fno-reciprocal-math` would make
+GCC exact at a cost. The library's C code (built by either compiler) no longer divides: the biquad design, the
+one-pole coefficient and the reverb's gains use `enaga_reciprocal`, the effects' rate scale a constant
+reciprocal, so cl6x and GCC builds give the same coefficients by construction and the cl6x library calls no
+division helper (only `__c6xabi_fixfu`, an exact conversion). Apps' own C++ still divides the GCC way, the same in
+both builds. The same note: `_smpyh`, `_smpyhl` and `_smpylh` from GCC's `c6x_intrinsics.h` emit plain SMPY
+(wrong halves); Enaga uses none, and should write half selection in C, `(x >> 16) * (y >> 16)`. And the emulator
+gains about 30 instructions GCC can emit (MPYH and family, saturating arithmetic, the packed ADD2 / SUB2 / ADD4 /
+MAX2 / SWAP4) in smpltrek's working tree, not yet committed: rebuild the emulator and rerun the tests after that
+commit. 32 tests pass.

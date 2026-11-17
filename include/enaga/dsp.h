@@ -111,7 +111,7 @@ void enaga_svf_cascade(enaga_svf *s1, const enaga_svf_coefficients *c1, enaga_sv
 typedef struct { float y; } enaga_one_pole;
 /* a = 1 - exp(-2 pi cutoff / rate) */
 static inline float enaga_one_pole_coefficient(float cutoff, float rate) {
-    return 1.0f - enaga_exp(-2.0f * ENAGA_PI * cutoff / rate);
+    return 1.0f - enaga_exp(-2.0f * ENAGA_PI * cutoff * enaga_reciprocal(rate));
 }
 static inline float enaga_one_pole_step(enaga_one_pole *p, float x, float a) { return p->y += a * (x - p->y); }
 void enaga_one_pole_process(enaga_one_pole *p, float a, const float *in, float *out, int n);   /* out may be in */
@@ -128,7 +128,7 @@ enum {
 };
 
 /* frequency in Hz (clamped to 0.0001-0.49 of the rate); q > 0 (0.7071 is Butterworth; for the shelves, 0.7071 is
- * the steepest slope without overshoot); gain_db for PEAK and the shelves only. Two divisions: control rate. */
+ * the steepest slope without overshoot); gain_db for PEAK and the shelves only. Control rate. */
 void enaga_biquad_design(enaga_biquad_coefficients *c, int type, float frequency, float q, float gain_db,
                          float rate);
 static inline float enaga_biquad_step(enaga_biquad *s, const enaga_biquad_coefficients *c, float x) {
