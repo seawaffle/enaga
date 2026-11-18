@@ -68,7 +68,9 @@ enum enaga_event_type {
     /* Pads as notes, before the raw reading that caused them. Thresholds are provisional until measured on a unit
      * (docs/hardware.md "Panel MCU"): a press at 800, the original firmware's, a release below 600. */
     ENAGA_EVENT_PAD_PRESS = 4,              /* id: pad 0-14; value: velocity 1-127, from the first reading over 800 */
-    ENAGA_EVENT_PAD_RELEASE = 5             /* id: pad 0-14 */
+    ENAGA_EVENT_PAD_RELEASE = 5,            /* id: pad 0-14 */
+    ENAGA_EVENT_CARD = 6                    /* value: 1 a card was inserted and mounted, 0 the card was removed,
+                                             * or a negative enaga_file_error when an inserted card cannot be used */
 };
 
 typedef struct enaga_event {
@@ -93,6 +95,43 @@ typedef struct enaga_package_header {
     char name[ENAGA_NAME_BYTES];            /* NUL-padded display name */
 } enaga_package_header_t;
 
+/* Files (docs/design.md "Files"). Paths are absolute card paths in UTF-8 ("/SAMPLES/Kick 01.wav"); names
+ * compare without regard to case. An app reads anywhere and writes only in its own folder,
+ * /ENAGA/DATA/<package name>/, and the shared /SAMPLES/ and /RECORD/ (folders are created as needed).
+ * Every file call is for the main context: from audio() it returns ENAGA_FILE_WRONG_CONTEXT. */
+enum enaga_file_error {
+    ENAGA_FILE_OK = 0,
+    ENAGA_FILE_NO_CARD = -1,                /* no card, or it was removed (handles opened before are dead) */
+    ENAGA_FILE_NOT_FOUND = -2,
+    ENAGA_FILE_EXISTS = -3,
+    ENAGA_FILE_FULL = -4,                   /* the card is full: a write stored fewer bytes */
+    ENAGA_FILE_DENIED = -5,                 /* a write outside the app's areas, or a read-only file */
+    ENAGA_FILE_TOO_MANY = -6,               /* ENAGA_FILES_OPEN files already open, or the request queue is full */
+    ENAGA_FILE_CARD_ERROR = -7,             /* the card or its file system failed */
+    ENAGA_FILE_CANCELLED = -8,              /* the handle was closed before the request ran */
+    ENAGA_FILE_BAD_PATH = -9,               /* not absolute, ".." or "." in it, an empty part, too long */
+    ENAGA_FILE_BAD_HANDLE = -10,
+    ENAGA_FILE_TOO_BIG = -11,               /* the file is larger than the buffer given */
+    ENAGA_FILE_BUSY = -12,                  /* open elsewhere for writing, or the handle has requests pending */
+    ENAGA_FILE_WRONG_CONTEXT = -13
+};
+#define ENAGA_FILES_OPEN      8u            /* open files per app */
+#define ENAGA_FILE_PATH_MAX   255u          /* bytes, without the terminating NUL */
+enum enaga_file_mode {
+    ENAGA_FILE_READ = 1,
+    ENAGA_FILE_WRITE = 2                    /* created, or emptied if it exists */
+};
+#define ENAGA_FILE_FOLDER     1u            /* enaga_file_info flags */
+typedef struct enaga_file_info {
+    char name[256];                         /* UTF-8, no folder part */
+    uint32_t size;                          /* bytes (files of 4 GiB or more read as 0xFFFFFFFF) */
+    uint32_t flags;                         /* ENAGA_FILE_FOLDER */
+} enaga_file_info_t;
+/* Completion of an asynchronous request, in the main context: result is the byte count (reads, writes,
+ * loads), the number of entries (lists) or a negative enaga_file_error. Requests run in the order made. */
+typedef void (*enaga_file_done_t)(void *user, int32_t result);
+typedef void (*enaga_file_entry_t)(void *user, const enaga_file_info_t *entry);
+
 /* Services Enaga gives the app. Pointers stay valid until the app is unloaded. */
 typedef struct enaga_host {
     uint32_t abi_version;                   /* ENAGA_ABI_VERSION of the running firmware */
@@ -108,6 +147,28 @@ typedef struct enaga_host {
     uint32_t (*audio_load)(void);           /* last audio block's cost, per mille of its real-time budget */
     uint32_t (*audio_load_peak)(void);      /* highest since the app started */
     void (*led)(uint32_t led, uint32_t red, uint32_t green, uint32_t blue);   /* enaga_led; main context only */
+
+    /* Files. Each returns ENAGA_FILE_OK, a count, a handle (0 or more) or a negative enaga_file_error.
+     * Immediate: they finish before returning, stalling the main loop (never audio) meanwhile. */
+    int32_t (*file_open)(const char *path, uint32_t mode);       /* a handle; ENAGA_FILES_OPEN at most */
+    int32_t (*file_close)(int32_t file);                         /* pending requests end ENAGA_FILE_CANCELLED */
+    int32_t (*file_size)(int32_t file);
+    int32_t (*file_seek)(int32_t file, uint32_t position);       /* ENAGA_FILE_BUSY while requests are pending */
+    int32_t (*file_info)(const char *path, enaga_file_info_t *info);
+    int32_t (*file_remove)(const char *path);                    /* a file, or an empty folder */
+    int32_t (*file_make_folder)(const char *path);               /* parents too; ENAGA_FILE_OK if it exists */
+    /* Whole small files (settings, patches). file_save writes NAME.TMP, then replaces NAME with it, so a card
+     * pulled or power lost mid-save leaves the old file or the new one; file_read_all falls back to NAME.TMP
+     * when NAME is missing. */
+    int32_t (*file_read_all)(const char *path, void *buffer, uint32_t max);   /* bytes */
+    int32_t (*file_save)(const char *path, const void *data, uint32_t bytes);
+    /* Asynchronous: ENAGA_FILE_OK once queued, then `done` with the result. The buffer belongs to Enaga until
+     * then. Worked on in the main loop between the app's callbacks, a slice per pass. */
+    int32_t (*file_read)(int32_t file, void *buffer, uint32_t bytes, enaga_file_done_t done, void *user);
+    int32_t (*file_write)(int32_t file, const void *data, uint32_t bytes, enaga_file_done_t done, void *user);
+    int32_t (*file_load)(const char *path, void *buffer, uint32_t max, enaga_file_done_t done, void *user);
+    int32_t (*file_list)(const char *path, enaga_file_entry_t entry, enaga_file_done_t done, void *user);
+    const char *(*file_data_folder)(void);  /* the app's own folder, "/ENAGA/DATA/<package name>" */
 } enaga_host_t;
 
 /* What the app gives Enaga. Every callback receives `context`; any callback may be 0. */

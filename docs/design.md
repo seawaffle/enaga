@@ -224,7 +224,7 @@ WAV parsing (`enaga::wav`) sits on top: header, format, data offset.
 
 ### Order of work
 
-1. LFN and exFAT on; the request queue and its slice in the main loop; handles; blocking and asynchronous reads, writes
+1. (**Done** 2026-11-18, see the log.) LFN and exFAT on; the request queue and its slice in the main loop; handles; blocking and asynchronous reads, writes
    and listing; the app's data folder; safe saves; card removal. Tested on the emulator with FAT card images
    (the emulator already models the card), including a full card and a removal signalled on the card-detect
    pin (the emulator drives that pin; a card that stops answering mid-transfer is not modelled).
@@ -254,8 +254,8 @@ E2 has begun, driven by its exit app: pads as press / release with velocity, the
 the DSP library (`include/enaga/dsp`, tested on the host), and `examples/synth`, an eight-voice virtual analogue
 synthesizer (emulator-tested; on the unit: 8 % idle, 24 % with eight notes). The library's block functions, and apps' own `*.ti.c` files, are built with TI's
 cl6x when it is installed (GCC otherwise); the synth's worst case is 30 % of the audio budget that way and 65 % with
-GCC alone (every feature on: sync, ring, chorus, eight voices). Asynchronous file
-I/O and sample streaming, the rest of E2, are not started.
+GCC alone (every feature on: sync, ring, chorus, eight voices). The file service's first step is in (the
+"Files" section); patch saving in the synth, card-speed measurement and streaming follow.
 
 ## Open items
 
@@ -800,3 +800,29 @@ Image 9ebb7e07 (the EDMA fix above), CHECK app and synth; every step of docs/har
 
 Also confirmed on the unit: GPIO enabled by Enaga, the interrupt stack gap and the idling main loop (keys,
 encoders and pads all right with it).
+
+### The file service, step 1 (2026-11-18)
+
+As designed in "Files": `firmware/kernel/files.c`, the app's side in `abi.h` (14 host functions, error codes,
+`ENAGA_EVENT_CARD`) and `<enaga/files.hpp>` (free functions, a `File` that closes itself, callbacks as member
+functions, `App::on_card`).
+
+- FatFs: long names with UTF-8 paths (`FF_LFN_UNICODE 2`), exFAT, `FF_FS_LOCK 12` (a file open for writing cannot
+  be opened again or replaced). `firmware/hal/ff_unicode.c` replaces FatFs's ffunicode.c: code page 437 from
+  Python's codec, upper-casing for ASCII, Latin-1, Greek and Cyrillic. exFAT's 64-bit division brought libgcc's
+  unwinder into the link through its unwind tables; their personality routines are stubbed (`abi_stubs.c`).
+  The firmware grew from 60 KiB to 95 KiB.
+- The queue runs in the main loop after `update` (crash-screen stage 8), 2 ms a pass, 8 KiB per FatFs call; the
+  loop does not idle while requests remain. A 1 MiB load spans about 40 passes on the emulator.
+- When the app stops, its handles are closed after `stop()` (which may still save) and its requests dropped
+  without callbacks. When it is dropped (possibly from an interrupt, possibly mid-FatFs-call), the next pass
+  discards everything and remounts.
+- `tools/card.py` (with `tools/cardtool.c`) builds FAT and exFAT images and reads files back through Enaga's own
+  FatFs; the firmware starts apps from both.
+- `tests/test_files.py` runs `tests/apps/files` four ways: a FAT card with a removal and reinsertion on the
+  card-detect pin; exFAT; a nearly full card (writes report FULL, removing the partial file frees room); an app
+  dropped with a load pending (no callback afterwards, card intact). About 60 checks a run: safe saves replacing
+  a file without leaving .TMP, the .TMP fallback, the write areas and refused paths, eight open files and a
+  ninth refused, case-insensitive names, a close cancelling queued reads, calls from audio() refused.
+- Not covered on the emulator: a card that stops answering mid-transfer (the emulator only drives the
+  card-detect pin), and the SD driver's real speed. 40 tests pass; the unit dry run passes 141/141.

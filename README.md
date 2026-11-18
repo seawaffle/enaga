@@ -67,6 +67,12 @@ ENAGA_APP(Beep)
   include `<enaga/dsp.h>` and work on the library's state. Everything else builds with GCC (`-O2
   -funroll-loops`). The synth's worst case takes 30% of the audio budget with cl6x and 65% with GCC alone
   (emulator figures).
+- `<enaga/files.hpp>` reads and writes the SD card (FAT or exFAT, long names; paths like `/SAMPLES/Kick 01.wav`).
+  Small files at once: `files::save(path, data, bytes)` (safe against a pulled card: the old file or the new one
+  survives) and `files::read_all`. Large ones in the background, with a callback in the main context when done:
+  `files::load`, `files::list`, and `files::File` reads and writes. An app reads anywhere and writes in its own
+  folder (`files::data_folder()`, `/ENAGA/DATA/<package name>`), `/SAMPLES` and `/RECORD`. `on_card(bool)` says
+  when the card is removed or inserted. Not from `audio()`.
 - `enaga::fatal(reason)` stops the app; Enaga shows the reason and keeps running. Enaga's watchdog stops an
   app the same way when a main-loop call (including `init` and `stop`) has not returned after 1 s, or `audio`
   after 100 ms.
@@ -116,7 +122,7 @@ project. Point `ENAGA_EMULATOR` at its emulator directory (the one containing `c
 
 ```sh
 export ENAGA_EMULATOR=/path/to/emulator
-python3 -B -m unittest discover -s tests -v                           # 35 tests, about 2 minutes
+python3 -B -m unittest discover -s tests -v                           # 40 tests, about 3 minutes
 python3 -B tools/emulate.py examples/tone --key 32@300000000           # press STEP 1; writes build/emulate/
 ```
 
@@ -148,8 +154,8 @@ only `g++`. `tools/emulate.py` writes the last screen to
 | `loader/` | The package loader (freestanding C, used by the firmware and the tests) |
 | `firmware/` | Enaga itself: `hal/` drivers, `kernel/` (interrupts, audio engine, app host, exceptions, watchdog, main loop), `start.s`, `link.ld`, `build.py` |
 | `examples/` | `synth` (the virtual analogue synthesizer); `tone` (STEP 1-8 play 750 Hz x step); `cxxcheck` (exercises the C++ runtime) |
-| `tests/` | `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board; `test_check.py` and `unit/check`: the CHECK app for sessions on a unit; `test_synth.py`: the synth example; `test_dsp.py` and `dsp/`: the DSP library on the host |
-| `tools/` | `build_app.py`, `emulate.py`, `panel.py` (apps live in the emulator's web panel), `unit_card.py` and `unit_dry_run.py` (files for a session on a unit, and the session walked on the emulator), `sysimage.py` (the update-file format), `paths.py`, toolchain build scripts |
+| `tests/` | `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board; `test_check.py` and `unit/check`: the CHECK app for sessions on a unit; `test_synth.py`: the synth example; `test_files.py` and `apps/files`: the file service; `test_dsp.py` and `dsp/`: the DSP library on the host |
+| `tools/` | `build_app.py`, `emulate.py`, `panel.py` (apps live in the emulator's web panel), `card.py` (FAT and exFAT card images through Enaga's own FatFs), `unit_card.py` and `unit_dry_run.py` (files for a session on a unit, and the session walked on the emulator), `sysimage.py` (the update-file format), `paths.py`, toolchain build scripts |
 | `docs/` | `design.md` (decisions, architecture, plan, log), `hardware.md` (the hardware notes) |
 
 ## Licence

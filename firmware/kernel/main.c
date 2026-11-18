@@ -157,7 +157,7 @@ static void poll_power(u32 ms)
 
 void kernel_loop(void)
 {
-    int busy;
+    int busy, filing;
     irq_global_enable();
     if (!app_current) leds_off();                /* start-up with no app, or an app was just dropped */
     for (;;) {
@@ -168,6 +168,8 @@ void kernel_loop(void)
         poll_inputs(ms);
         kernel_stage = 2;
         if (app_current && app_current->update) app_current->update(app_current->context, ms);
+        kernel_stage = 8;
+        filing = files_service(ms);                 /* the card-detect pin, then queued file work (files.c) */
         kernel_stage = 3;
         poll_power(ms);
         kernel_stage = 4;
@@ -184,8 +186,9 @@ void kernel_loop(void)
         /* Sleep until the next interrupt: the audio block (every 1.33 ms), UART1 (each byte from the panel MCU,
          * about 12,600 a second on the unit), the timer (10 ms). So a pass still runs at least 750 times a second,
          * more often than the original firmware polls the encoders (each 1 ms tick). Work an interrupt leaves
-         * after this pass's polls waits at most for the next one; nothing is lost (the UART ring holds 80 ms). */
-        __asm__ volatile("idle" ::: "memory");
+         * after this pass's polls waits at most for the next one; nothing is lost (the UART ring holds 80 ms).
+         * Not while file requests are queued: they continue on the next pass at once. */
+        if (!filing) __asm__ volatile("idle" ::: "memory");
     }
 }
 
@@ -226,6 +229,7 @@ void main(void)
     audio_init();
     display_dma = audio_status == 0 || audio_status <= -3;   /* -1/-2: EDMA never powered */
     splash("CARD");
+    files_init();
     apps_mount();
     last_keys = keys_reset(timer_ms());       /* keys held through start-up do not become events */
     uart1_irq_start();                        /* the MCU's bytes by interrupt from here (start-up may have lost some) */

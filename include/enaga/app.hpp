@@ -69,6 +69,9 @@ public:
     virtual void on_pad(int pad, unsigned pressure) { (void)pad; (void)pressure; }   // every raw reading, 0-16383
     virtual void on_pad_press(int pad, int velocity) { (void)pad; (void)velocity; }   // velocity 1-127
     virtual void on_pad_release(int pad) { (void)pad; }
+    // The card: true when one was inserted and mounted, false when it was removed (or an inserted one cannot be
+    // used). Open files from before a removal are dead: close them (<enaga/files.hpp>).
+    virtual void on_card(bool usable) { (void)usable; }
     // Audio context: see enaga_app_t::audio. Interleaved stereo, `frames` frames.
     virtual void audio(const float *in, float *out, uint32_t frames) {
         (void)in;
@@ -91,6 +94,7 @@ inline void event(void *app, const enaga_event_t *e) {
     else if (e->type == ENAGA_EVENT_PAD) a->on_pad(e->id, unsigned(e->value));
     else if (e->type == ENAGA_EVENT_PAD_PRESS) a->on_pad_press(e->id, e->value);
     else if (e->type == ENAGA_EVENT_PAD_RELEASE) a->on_pad_release(e->id);
+    else if (e->type == ENAGA_EVENT_CARD) a->on_card(e->value > 0);
 }
 inline void audio(void *app, const float *in, float *out, uint32_t frames) {
     static_cast<App *>(app)->audio(in, out, frames);

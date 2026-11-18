@@ -53,11 +53,35 @@ extern enaga_host_t app_host;                 /* the table every app receives */
 extern char app_status[32];
 extern char app_name[ENAGA_NAME_BYTES];
 void apps_mount(void);                        /* mounts the card; app_status says what happened */
+void apps_card_status(void);                  /* app_status from the card's state after files mounted it or not */
 int  apps_load_first(void);                   /* the first /ENAGA/APPS/<dir>/APP.ENA; 0 = running */
 void apps_unload(void);
 void apps_event(const enaga_event_t *event);
 void apps_drop(const char *reason);           /* forget a failed app; returns */
 void apps_fatal(const char *reason);          /* never returns */
+
+/* The file service (files.c; the app's view in abi.h). */
+void files_init(void);
+int  files_mount(void);                        /* FR_OK or the FatFs error */
+int  files_mounted(void);
+int  files_service(u32 ms);                    /* each main-loop pass; non-zero while work remains */
+void files_app_stopped(void);                  /* main context, after the app's stop() */
+extern volatile int files_reset_pending;      /* set when an app is dropped: the next pass resets and remounts */
+extern u32 files_requests_done;
+int32_t files_open(const char *path, uint32_t mode);
+int32_t files_close(int32_t file);
+int32_t files_size(int32_t file);
+int32_t files_seek(int32_t file, uint32_t position);
+int32_t files_info(const char *path, enaga_file_info_t *info);
+int32_t files_remove(const char *path);
+int32_t files_make_folder(const char *path);
+int32_t files_read_all(const char *path, void *buffer, uint32_t max);
+int32_t files_save(const char *path, const void *data, uint32_t bytes);
+int32_t files_read(int32_t file, void *buffer, uint32_t bytes, enaga_file_done_t done, void *user);
+int32_t files_write(int32_t file, const void *data, uint32_t bytes, enaga_file_done_t done, void *user);
+int32_t files_load(const char *path, void *buffer, uint32_t max, enaga_file_done_t done, void *user);
+int32_t files_list(const char *path, enaga_file_entry_t entry, enaga_file_done_t done, void *user);
+const char *files_data_folder(void);
 extern char crash_reason[48];
 
 /* leds.c: panel LEDs by enaga_led, cached per address so only changes are sent */

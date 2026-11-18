@@ -15,8 +15,6 @@ volatile int app_busy;
 char app_status[32];
 char app_name[ENAGA_NAME_BYTES];
 char crash_reason[48];
-static FATFS fs;
-static int mounted;
 
 static void copy_text(char *dst, unsigned size, const char *src)
 {
@@ -46,6 +44,8 @@ enaga_host_t app_host = {                     /* heap filled in per app by load_
     ENAGA_ABI_VERSION, sizeof(enaga_host_t), 0, 0,
     host_log, host_ms, host_fatal, ENAGA_SAMPLE_RATE, AUDIO_FRAMES, host_text, host_audio_load, host_audio_load_peak,
     host_led,
+    files_open, files_close, files_size, files_seek, files_info, files_remove, files_make_folder,
+    files_read_all, files_save, files_read, files_write, files_load, files_list, files_data_folder,
 };
 
 static void cache_sync(uint32_t address, uint32_t bytes)   /* the loader calls this just before the app's entry */
@@ -55,14 +55,22 @@ static void cache_sync(uint32_t address, uint32_t bytes)   /* the loader calls t
     app_busy = 1;
 }
 
+static int mount_result;
+
+void apps_card_status(void)                   /* the app's own status stays while it runs */
+{
+    if (app_current) return;
+    if (files_mounted()) set_status("CARD OK");
+    else if (!sd_present()) set_status("NO CARD");
+    else if (mount_result == FR_NO_FILESYSTEM) set_status("CARD NOT FAT");
+    else set_status("CARD ERROR");
+}
+
 void apps_mount(void)
 {
-    FRESULT r = f_mount(&fs, "", 1);
-    mounted = r == FR_OK;
-    if (mounted) set_status("CARD OK");
-    else if (r == FR_NOT_READY && !sd_present()) set_status("NO CARD");
-    else if (r == FR_NO_FILESYSTEM) set_status("CARD NOT FAT");
-    else set_status("CARD ERROR");
+    mount_result = files_mount();
+    if (mount_result == FR_NOT_READY && !sd_present()) set_status("NO CARD");
+    else apps_card_status();
 }
 
 static const char *load_error(int status)
@@ -124,7 +132,7 @@ int apps_load_first(void)
     DIR dir;
     FILINFO info;
     char path[48];
-    if (!mounted) return -1;
+    if (!files_mounted()) return -1;
     if (f_opendir(&dir, APPS_DIR) != FR_OK) { set_status("NO /ENAGA/APPS"); return -1; }
     for (;;) {
         unsigned n = 0, i;
@@ -146,10 +154,13 @@ void apps_unload(void)
     audio_set_callback(0, 0);
     app_current = 0;
     if (a && a->stop) {
+        app_current = a;                      /* stop() may still use the file service */
         app_busy = 1;
         a->stop(a->context);
         app_busy = 0;
+        app_current = 0;
     }
+    files_app_stopped();
     leds_off();
 }
 
@@ -168,6 +179,7 @@ void apps_drop(const char *reason)           /* the app failed: forget it withou
     audio_silence_now();                      /* also clears the callback */
     app_current = 0;
     app_busy = 0;
+    files_reset_pending = 1;                  /* the main loop drops its files and remounts (files.c) */
     if (gie) irq_global_enable();
     copy_text(crash_reason, sizeof crash_reason, reason);
     set_status("APP STOPPED");
