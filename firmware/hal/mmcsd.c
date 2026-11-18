@@ -159,6 +159,15 @@ void sd_power_cycle(void)
     card_ready = 0;
 }
 
+static int write_fail(int code, u32 st)   /* a write that failed: the controller's command and data logic reset,
+                                              * so it is not left in the middle of a transfer */
+{
+    u32 ctl = REG32(MMC + MMCCTL);
+    REG32(MMC + MMCCTL) = ctl | 3;
+    REG32(MMC + MMCCTL) = ctl & ~3u;
+    return io_fail(code, st);
+}
+
 static int fail(int code)             /* sd_init failures are shown on the status page: step and MMCST0 bits */
 {
     sd_error = code;
@@ -206,7 +215,7 @@ int sd_init(void)
     return 0;
 }
 
-int sd_write_mode;
+int sd_write_mode = 1;
 
 static int fifo_empty(u32 timeout_ms)          /* MMCST1 FIFOEMP */
 {
@@ -263,27 +272,27 @@ int sd_write(const u8 *buffer, u32 sector, u32 count)
              * (MMCST1 FIFOEMP; DXRDY may be left over from the command's DCLR). */
             for (i = 0; i < 16; i++) REG32(MMC + MMCDXR) = *in++;
             st = command(24, high_capacity ? sector : sector * 512, RSP_48 | CMD_WDATX | CMD_DTRW | CMD_DCLR);
-            if (!ok(st)) return io_fail(-2, st);
+            if (!ok(st)) return write_fail(-2, st);
             for (i = 16; i < 512 / 4; i += 16) {
                 u32 k;
-                if (!fifo_empty(500)) return io_fail(-3, REG32(MMC + MMCST1));
+                if (!fifo_empty(500)) return write_fail(-3, REG32(MMC + MMCST1));
                 for (k = 0; k < 16; k++) REG32(MMC + MMCDXR) = *in++;
             }
         } else {                                     /* the command, then 64 bytes at each DXRDY */
             st = command(24, high_capacity ? sector : sector * 512, RSP_48 | CMD_WDATX | CMD_DTRW | CMD_DCLR);
-            if (!ok(st)) return io_fail(-2, st);
+            if (!ok(st)) return write_fail(-2, st);
             for (i = 0; i < 512 / 4; i += 16) {
                 u32 k;
-                if (!data_ok(st = wait_status(ST0_DXRDY, 500), ST0_DXRDY)) return io_fail(-3, st);
+                if (!data_ok(st = wait_status(ST0_DXRDY, 500), ST0_DXRDY)) return write_fail(-3, st);
                 for (k = 0; k < 16; k++) REG32(MMC + MMCDXR) = *in++;
             }
         }
-        if (!data_ok(st = wait_status(ST0_DATDNE, 500), ST0_DATDNE)) return io_fail(-4, st);
+        if (!data_ok(st = wait_status(ST0_DATDNE, 500), ST0_DATDNE)) return write_fail(-4, st);
         programming = timer_ticks();                 /* CMD13 until the card is back in tran (state 4) */
         for (;;) {
-            if (!ok(st = command(13, rca << 16, RSP_48))) return io_fail(-5, st);
+            if (!ok(st = command(13, rca << 16, RSP_48))) return write_fail(-5, st);
             if ((response() & 0x1E00) == 0x800) break;
-            if (timer_ticks() - programming > 1000u * TICKS_PER_MS) return io_fail(-6, response());
+            if (timer_ticks() - programming > 1000u * TICKS_PER_MS) return write_fail(-6, response());
         }
         if (timer_ticks() - begin > sd_write_slowest) sd_write_slowest = timer_ticks() - begin;
         sd_writes++;

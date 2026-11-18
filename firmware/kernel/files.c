@@ -313,29 +313,72 @@ static void card_watch(u32 ms)
 
 /* The write probe (unit session 2): which SD write sequence a real card takes, without risking the file system.
  * When /ENAGA/SDTEST.BIN (at least 1 KiB, made on a computer) is on the card, each boot writes a pattern into its
- * first sector the driver's way 0 and into its second the way 1 (hal.h sd_write_mode), reads each back and logs
- * "SDT <mode> OK <ms>" or "SDT <mode> BAD <first wrong word> <its value>", plus "SDT <mode> SHIFT <words>" when
- * the sector holds the pattern moved along. Only the file's own data is overwritten, never the FAT or a folder. */
+ * first sector by sequence 1 (hal.h sd_write_mode: the FIFO filled before the command) and into its second by
+ * sequence 0, reads each back, and logs one line each (the status page is 21 characters wide):
+ *   "T1 OK 3MS"            the sector reads back as written, in 3 ms
+ *   "T1 BAD 5 1234ABCD"    the first wrong word and what it holds; then "T1 SH -16" if the pattern is shifted
+ *   "T1 ERR-2 0010 R-2 P0" sd_write's code and MMCST0's low half; then the card revived by sd_init alone (R, its
+ *                          code) or, if that failed, after the GP4[1] power cycle (P, sd_init's code then)
+ * Only the file's own data is overwritten, never the FAT or a folder. First found on a unit: sequence 0's first
+ * CMD24 got no response and the card answered nothing more. */
 static u32 probe_out[128], probe_back[128];
+
+static void probe_line(char *line, int n) { line[n] = 0; log_line(line); }
+static int put_text(char *line, int n, const char *t) { while (*t) line[n++] = *t++; return n; }
+static int put_hex(char *line, int n, u32 v, int digits)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    while (digits--) line[n++] = hex[v >> (4 * digits) & 15];
+    return n;
+}
 
 static void probe_mode(int mode, u32 sector)
 {
-    int i, bad = -1, shift = 0, w, r;
+    char line[40] = "T0 ";
+    int i, bad = -1, shift = 0, w, n = 3, revived, normal = sd_write_mode;
     u32 start;
+    line[1] = (char)('0' + mode);
     for (i = 0; i < 128; i++) probe_out[i] = (u32)(mode + 1) << 28 | (u32)i << 16 | (~(u32)i & 0xFFFF);
     for (i = 0; i < 128; i++) probe_back[i] = 0;
     sd_write_mode = mode;
     start = tsc_read();
     w = sd_write((const u8 *)probe_out, sector, 1);
-    r = sd_read((u8 *)probe_back, sector, 1);
-    sd_write_mode = 0;
-    if (w || r) {
-        log_codes(mode ? "SDT 1 ERR " : "SDT 0 ERR ", 3, w, r, w ? sd_io_status : 0);
+    sd_write_mode = normal;
+    if (w) {
+        n = put_text(line, n, "ERR");
+        n = put_dec(line, n, w);
+        line[n++] = ' ';
+        n = put_hex(line, n, sd_io_status, 4);
+        revived = sd_init();
+        n = put_text(line, n, " R");
+        n = put_dec(line, n, revived);
+        if (revived) {
+            sd_power_cycle();
+            n = put_text(line, n, " P");
+            n = put_dec(line, n, sd_init());
+        }
+        probe_line(line, n);
+        return;
+    }
+    if (sd_read((u8 *)probe_back, sector, 1)) {
+        n = put_text(line, n, "READ ERR");
+        n = put_dec(line, n, sd_io_error);
+        probe_line(line, n);
         return;
     }
     for (i = 0; i < 128 && bad < 0; i++) if (probe_back[i] != probe_out[i]) bad = i;
-    if (bad < 0) { log_codes(mode ? "SDT 1 OK " : "SDT 0 OK ", 1, (int)((tsc_read() - start) / TICKS_PER_MS), 0, 0); return; }
-    log_codes(mode ? "SDT 1 BAD " : "SDT 0 BAD ", 3, bad, 0, probe_back[bad]);
+    if (bad < 0) {
+        n = put_text(line, n, "OK ");
+        n = put_dec(line, n, (int)((tsc_read() - start) / TICKS_PER_MS));
+        n = put_text(line, n, "MS");
+        probe_line(line, n);
+        return;
+    }
+    n = put_text(line, n, "BAD ");
+    n = put_dec(line, n, bad);
+    line[n++] = ' ';
+    n = put_hex(line, n, probe_back[bad], 8);
+    probe_line(line, n);
     for (w = 1; w < 64 && !shift; w++) {          /* the pattern moved later by w words? */
         for (i = w; i < 128 && probe_back[i] == probe_out[i - w]; i++) {}
         if (i == 128) shift = w;
@@ -344,7 +387,11 @@ static void probe_mode(int mode, u32 sector)
         for (i = 0; i + w < 128 && probe_back[i] == probe_out[i + w]; i++) {}
         if (i + w == 128) shift = -w;
     }
-    if (shift) log_codes(mode ? "SDT 1 SHIFT " : "SDT 0 SHIFT ", 1, shift, 0, 0);
+    if (shift) {
+        n = put_text(line, 3, "SH ");
+        n = put_dec(line, n, shift);
+        probe_line(line, n);
+    }
 }
 
 void files_write_probe(void)
@@ -361,8 +408,9 @@ void files_write_probe(void)
         sector[k] = (u32)f.sect;
     }
     f_close(&f);
-    probe_mode(0, sector[0]);
-    probe_mode(1, sector[1]);
+    probe_mode(1, sector[0]);
+    probe_mode(0, sector[1]);
+    mounted = f_mount(&fs, "", 1) == FR_OK;      /* FatFs starts afresh after the driver's re-initialisations */
 }
 
 void files_init(void)

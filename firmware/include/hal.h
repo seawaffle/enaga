@@ -87,8 +87,8 @@ void sd_power_cycle(void);           /* GP4[1] high 250 ms, then low (a guess at
 extern void (*sd_wait_hook)(void);   /* called while the driver waits on the card (the kernel feeds its watchdog) */
 extern int sd_io_error;              /* the last sd_read / sd_write failure: its return code ... */
 extern u32 sd_io_status;             /* ... MMCST0 bits, or for -6 the card status (still programming after 1 s) */
-extern int sd_write_mode;            /* 0: command, then data at DXRDY; 1: first 64 bytes before the command
-                                       * (unit session 2: which one a real card takes is being measured) */
+extern int sd_write_mode;            /* 1 (default): first 64 bytes in the FIFO before the command; 0: the command,
+                                       * then data at DXRDY (on a unit its first CMD24 got no response, session 2) */
 extern u32 sd_write_slowest;
 extern u32 sd_reads, sd_writes;      /* sectors moved without error since start-up */
 extern u32 sd_io_command;            /* the command index in flight at the last sd_read / sd_write failure */         /* the longest one-sector write so far, in time-stamp ticks */

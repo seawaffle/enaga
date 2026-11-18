@@ -924,3 +924,16 @@ explain why switching off does not clear it); not touched without the owner.
   `SD CYCLED OK 0` or `SD CYCLED MOUNT <FRESULT>`. This covers start-up, the remount after an app is dropped, and
   a card put back in. Not exercised on the emulator (its card always answers).
 
+Fourth try, the probe on a freshly formatted card: `SD R7 W0`, `SDT 0 ERR -2 -2` and `SDT 1 ERR -2 -2`, last
+failure `E-2 C17 0010`. Sequence 0's first CMD24 got no response, and after it the card answered nothing (the
+read-back's CMD17 timed out too). So it is the first write command, not an accumulation of writes, that stops the
+card. Sequence 1 ran second, on a card already silent, so its result says nothing.
+
+- The probe now runs sequence 1 first, and after a failed write tries to revive the card: `sd_init` alone, then,
+  if that fails, the GP4[1] power cycle and `sd_init` again. One line per sequence, at most 21 characters (the
+  status page's width; the old lines ran off it): `T1 OK 3MS`, `T1 BAD 5 1234ABCD` (+ `T1 SH -16`), `T1 ERR-2
+  0010 R-2 P0`. FatFs is remounted afterwards.
+- A failed write resets the controller's command and data logic, so it is not left mid-transfer.
+- Sequence 1 is now the default for every write (sequence 0 is known to stop the card); all 44 tests pass with
+  it, the synth's patches and the CHECK card test included.
+
