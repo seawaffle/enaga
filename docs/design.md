@@ -188,16 +188,14 @@ I/O and sample streaming, the rest of E2, are not started.
 - The SDK should give apps unaligned-safe load/store helpers for packed formats (misaligned LDW/STW/LDDW round
   the address down without a fault) and say that a null read returns garbage rather than trapping (smpltrek
   session M1; docs/hardware.md "Processor and memory"). A debug-build null check is worth considering.
-- **Pad velocity does not work on the unit** (session 1): velocity is the first reading over the 800 threshold,
-  which with readings every 3.8 ms and a rising press is nearly always just over 800, and full scale is 12,000
-  while a hard press reads about 3,400. Needs the peak over the first readings of a press, scaled to the measured
-  range; best chosen from recorded press curves.
+- Pad velocity (session 1 found none): now the higher of the first two reports over 800, 127 at 3,300 (light
+  press about 1,500, hard about 3,400 on the unit). To check by playing on a unit; recorded press curves would
+  show whether two reports catch the peak of a hard, fast hit.
 - Pad crosstalk (session 1): pressing a pad raises some other pad's reading slightly (0 -> 4, 1 -> 5, 4 -> 2; 2 and 3
   none), never to a press in the synth. Size not measured.
 - Pad events: Enaga passes every MCU message on, about 3,930 raw pad events a second at rest, and press / release
-  with velocity at provisional thresholds (press 800, release under 600, velocity 127 from 12,000). To set from
-  readings on a unit: the release threshold, the velocity scale, whether one reading after the threshold gives a
-  usable velocity (a pad is read every 3.8 ms), per-pad calibration.
+  with velocity (press 800, release under 600, velocity as above). Still open: the release threshold, per-pad
+  calibration.
 - Synth on the unit: measured 8 % idle, 10 % one note, 24 % eight notes (INIT), 25 % SUPERSAW two notes (eight
   voices), no dropouts; the worst case (30 % on the emulator) not yet measured there. Saving patches waits for the file API; edits last until the app stops.
 - DSP library: the SVF runs at 21 cycles a sample under cl6x (its recurrence), twice a biquad's 10; a faster
@@ -718,3 +716,13 @@ Image 9ebb7e07 (the EDMA fix above), CHECK app and synth; every step of docs/har
 
 Also confirmed on the unit: GPIO enabled by Enaga, the interrupt stack gap and the idling main loop (keys,
 encoders and pads all right with it).
+
+### Pad velocity from two reports (2026-11-18)
+
+Session 1 found no velocity response: velocity was the first report over the 800 threshold, and a pad's reading
+rises over several 3.8 ms reports, so that report was nearly always just over 800 (velocity 1-10); full scale was
+also 12,000 where a hard press reads about 3,400. Now the press is sent at the pad's next report, with velocity
+from the higher of the two, 1 + 126 (peak - 800) / 2,500, 127 from 3,300: at most 3.8 ms later. A tap released by
+that next report still gives its press, then its release. Tests send each press as two reports, as the MCU's
+stream does. 36 tests, dry run 141/141. The synth's VELO (VOICE page, 50 % by default) sets how much velocity
+changes its volume.
