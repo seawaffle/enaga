@@ -34,6 +34,10 @@
 #define EDMA_S1_IPR   (EDMA + 0x2268)
 #define EDMA_S1_ICR   (EDMA + 0x2270)
 #define EDMA_S1_IEVAL (EDMA + 0x2278)
+#define EDMA_IECR      (EDMA + 0x1058)     /* global: interrupt enable clear, channels 0-31 and (H) 32-63 */
+#define EDMA_IECRH     (EDMA + 0x105C)
+#define EDMA_ICR       (EDMA + 0x1070)
+#define EDMA_ICRH      (EDMA + 0x1074)
 #define PARAM(n)      (EDMA + 0x4000 + 0x20 * (n))
 
 #define GBLCTL   (MCASP0 + 0x44)
@@ -126,6 +130,12 @@ static void edma_setup(void)
     const u32 first = WORDS - 1;                           /* the original one-word-short first transfer */
     REG32(EDMA_EMCR) = 0xFFFFFFFFu; REG32(EDMA_EMCRH) = 0xFFFFFFFFu;   /* the board set-up's clears */
     REG32(EDMA_QEMCR) = 0xFFFFFFFFu; REG32(EDMA_CCERRCLR) = 0xFFFFFFFFu;
+    /* The bootloader copies Enaga by EDMA and leaves its completion state behind. Any channel left both
+     * enabled (IER) and pending (IPR) makes the IEVAL at the end of audio_isr raise the interrupt again at
+     * once, forever: on the first unit run that was 658,000 interrupts a second and a starved main loop
+     * (2026-11-18). Only audio's own completion interrupt may be enabled; nothing earlier may be pending. */
+    REG32(EDMA_IECR) = 0xFFFFFFFFu; REG32(EDMA_IECRH) = 0xFFFFFFFFu;
+    REG32(EDMA_ICR) = 0xFFFFFFFFu; REG32(EDMA_ICRH) = 0xFFFFFFFFu;
     REG32(EDMA_DMAQNUM0) = 0;                                          /* channels 0-7 on queue 0 */
     param_set(64, rx_opt, MCASP0_DATA, (u32)rx_c, WORDS, 4u << 16, 0x4000 + 0x20 * 65);
     param_set(0, rx_opt, MCASP0_DATA, (u32)rx_c, first, 4u << 16, 0x4000 + 0x20 * 65);

@@ -674,3 +674,14 @@ a second. Not seen on the emulator. The watchdog's crash screen now shows where 
 tripped (the interrupted code), the loop's stage (1 inputs, 2 update, 3 power key, 4 display DMA poll, 5 draw,
 6 present, 7 idle), passes, interrupts taken on CPU interrupts 4 (timer), 6 (UART1), 8 (audio), audio blocks.
 Two diagnostic images in `build/unit-diag/`: A as built, B without the main loop's IDLE.
+
+Diagnostic image A's crash screen (2026-11-18): PC `C00082DC` (the branch after the main loop's IDLE, stage 7: the
+loop was parked as designed), 88 passes, 103 timer ticks, 12,715 UART1 interrupts, **658,339 audio interrupts**
+for 761 audio blocks (the right count for the second). An interrupt storm on the EDMA's shadow-region-1
+interrupt: `audio_isr` clears only channels 0 and 1 and then writes IEVAL, which raises the interrupt again while
+any other channel is pending and enabled. Enaga never reset IER, and the bootloader, which copies Enaga by EDMA,
+evidently leaves such a completion behind; the emulator starts the EDMA clean, so it never showed. Reproduced on
+the emulator by simulating that hand-over (one finished transfer on channel 20, pending and enabled): 2.46 million
+interrupts for 1,382 blocks. Fix: audio's EDMA set-up clears every interrupt enable (IECR, IECRH) and every
+pending completion (ICR, ICRH) before enabling its own; then one interrupt per block. Regression test in test_e1
+(fails without the fix). The idle was not involved; image B was not needed. 36 tests, dry run 141/141.

@@ -300,6 +300,14 @@ event) and CPU interrupt 8 for event 8 (EDMA3 CC0 region 1 completion). Exceptio
 with TSR.GEE and enter through the NMI vector; the EFR and IERR bit values follow TI's SYS/BIOS c64p
 exception module.
 
+## EDMA state at hand-over
+
+The bootloader copies the system image by EDMA and leaves EDMA3 CC0 powered with completion state behind: on the
+first Enaga run (2026-11-18) a channel was left pending with its interrupt enabled in a way that made every IEVAL
+re-raise shadow region 1's interrupt (measured indirectly: 658,339 interrupts in a second). Which channel and
+region are not known. A firmware should clear IER and IPR (IECR/IECRH, ICR/ICRH) before enabling its own EDMA
+interrupts.
+
 ## Power and clocks
 
 Peripherals are powered through the two power and sleep controllers (PSC0 at `0x01C10000`, PSC1 at

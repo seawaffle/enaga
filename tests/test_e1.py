@@ -177,6 +177,27 @@ class E1(unittest.TestCase):
             disassembly = (emu.firmware["elf"].parent / "enaga.dis").read_text()
             self.assertIn("sploop", disassembly)   # the loader's own CRC loop is a SPLOOP too
 
+    def test_edma_state_left_by_the_bootloader_does_not_storm(self):
+        # The bootloader copies Enaga by EDMA. A completion it leaves pending and enabled used to re-raise the
+        # audio interrupt from every IEVAL: 658,000 interrupts a second on the first unit run (2026-11-18).
+        # Simulated here: EDMA powered, one finished transfer on channel 20, pending and enabled in region 1.
+        edma, psc0, ch = 0x01C00000, 0x01C10000, 20
+        with Emulation() as emu:
+            put = lambda address, value: emu.cpu.write(address, struct.pack("<I", value))
+            put(psc0 + 0xA00, 3); put(psc0 + 0x120, 1)
+            self.assertIsNone(emu.run(10_000)["error"])
+            param = edma + 0x4000 + 0x20 * ch
+            for offset, value in ((0, 1 << 20 | ch << 12), (4, 0xC0380000), (8, 1 << 16 | 4), (12, 0xC0380100),
+                                  (16, 0), (20, 0xFFFF), (24, 0), (28, 1)):
+                put(param + offset, value)
+            put(edma + 0x348, 1 << ch); put(edma + 0x1060, 1 << ch); put(edma + 0x1010, 1 << ch)  # DRAE1, IESR, ESR
+            self.assertIsNone(emu.run(BOOT)["error"])
+            interrupts = struct.unpack("<16I", emu.cpu.read(emu.names["irq_count"], 64))[8]
+            self.assertGreater(emu.word("audio_blocks"), 300)
+            self.assertLessEqual(interrupts, emu.word("audio_blocks") + 2)    # one interrupt per block
+            self.assertGreater(emu.word("kernel_passes"), 300)
+            self.assertEqual(emu.word("kernel_crashed"), 0)
+
     def test_interrupts_leave_a_just_released_frame_alone(self):
         # GCC releases pick()'s frame before its last reads of the array in it (tests/apps/stack). Before the
         # interrupt entry skipped 16 KiB below SP, this run gave 6 wrong results in 2 million calls.
