@@ -105,3 +105,51 @@ void load(const Patch &patch, int16_t *values) {
 }
 
 }  // namespace synth
+
+namespace synth {
+namespace {
+constexpr uint32_t kHeader = 26;
+void put16(uint8_t *p, int v) { p[0] = uint8_t(v); p[1] = uint8_t(v >> 8); }
+int get16(const uint8_t *p) { return int16_t(uint16_t(p[0] | p[1] << 8)); }
+int16_t clamped(int param, int v) {
+    const ParamInfo &p = info(param);
+    return int16_t(v < p.min ? p.min : v > p.max ? p.max : v);
+}
+}  // namespace
+
+uint32_t encode(const Saved &saved, uint8_t *out) {
+    out[0] = 'E'; out[1] = 'S'; out[2] = 'Y'; out[3] = 'N';
+    out[4] = 1;
+    out[5] = uint8_t(saved.sets);
+    put16(out + 6, param_count);
+    put16(out + 8, saved.entry);
+    bool ended = false;
+    for (int i = 0; i < name_size; i++) {
+        ended = ended || !saved.name[i] || i == name_size - 1;
+        out[10 + i] = ended ? 0 : uint8_t(saved.name[i]);
+    }
+    uint8_t *p = out + kHeader;
+    for (int s = 0; s < saved.sets; s++)
+        for (int i = 0; i < param_count; i++, p += 2) put16(p, (s ? saved.base : saved.values)[i]);
+    return uint32_t(p - out);
+}
+
+bool decode(const uint8_t *data, int32_t bytes, char *name, int16_t *entry, int16_t *values, int16_t *base) {
+    if (bytes < int32_t(kHeader) || data[0] != 'E' || data[1] != 'S' || data[2] != 'Y' || data[3] != 'N' ||
+        data[4] != 1 || data[5] < 1 || data[5] > 2)
+        return false;
+    int sets = data[5], count = get16(data + 6);
+    if (count < 0 || bytes < int32_t(kHeader + 2 * sets * uint32_t(count))) return false;
+    *entry = int16_t(get16(data + 8));
+    for (int i = 0; i < name_size; i++) name[i] = char(data[10 + i]);
+    name[name_size - 1] = 0;
+    for (int s = 0; s < 2; s++) {
+        int16_t *out = s ? base : values;
+        if (!out) continue;
+        const uint8_t *in = data + kHeader + (s < sets ? s : 0) * 2 * count;   // no base: the values
+        for (int i = 0; i < param_count; i++) out[i] = i < count ? clamped(i, get16(in + 2 * i)) : info(i).init;
+    }
+    return true;
+}
+
+}  // namespace synth

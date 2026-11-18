@@ -79,8 +79,8 @@ ENAGA_APP(Beep)
 
 See `examples/tone` for a minimal app and `examples/synth` for a whole instrument: an eight-voice virtual
 analogue synthesizer with hard sync and a ring modulator, a filter, three envelopes, two LFOs that can fade in,
-a modulation matrix, unison, chorus, delay and reverb, played from the pads and STEP keys and edited page by
-page.
+a modulation matrix, unison, chorus, delay and reverb, played from the pads and STEP keys, edited page by
+page, with sixteen user patch slots and the last sound kept on the card.
 
 ## Building
 
@@ -122,7 +122,7 @@ project. Point `ENAGA_EMULATOR` at its emulator directory (the one containing `c
 
 ```sh
 export ENAGA_EMULATOR=/path/to/emulator
-python3 -B -m unittest discover -s tests -v                           # 40 tests, about 3 minutes
+python3 -B -m unittest discover -s tests -v                           # 41 tests, about 3 minutes
 python3 -B tools/emulate.py examples/tone --key 32@300000000           # press STEP 1; writes build/emulate/
 ```
 

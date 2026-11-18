@@ -6,7 +6,9 @@ whether the DSP library is built by TI's cl6x or by GCC.
 """
 import struct
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from test_e1 import BLOCK_CYCLES, BOOT, HERE, MS, STEP1, build_app, paths, samples
@@ -14,9 +16,12 @@ from emulate import WORK, Emulation
 
 sys.path.insert(0, str(HERE.parent / "tools"))
 from unit_dry_run import ENCODER_PINS, turn  # noqa: E402
+import card  # noqa: E402
 
 SYNTH = HERE.parent / "examples" / "synth"
 F1, F2, F3, OK, PUSH_B, SELECT_LEFT, SELECT_RIGHT, CLR = 19, 26, 20, 23, 0, 8, 9, 30
+FACTORY = 12                                     # patch_count: the PATCH list's first user slot, U1
+DATA = "/ENAGA/DATA/SYNTH"
 PARAMS = 86                                      # param_count in examples/synth/params.hpp
 CUTOFF, MIX_OSC1, MIX_OSC2, MIX_SUB, MIX_NOISE, OSC1_WAVE = 13, 8, 9, 10, 11, 0
 OSC2_WAVE, OSC2_SEMI, OSC2_FINE = 4, 6, 7
@@ -32,8 +37,17 @@ def hz(note):
 @unittest.skipUnless(build_app.tools_present(), "tic6x GCC not built (tools/build_tic6x_*.sh)")
 @unittest.skipUnless(paths.emulator_present(), "ENAGA_EMULATOR not set to the SmplTrek emulator directory")
 class Synth(unittest.TestCase):
-    def start(self):
+    def start(self, card_files=None):
+        """The synth booted; with card_files ({path: bytes}), on a card made by tools/card.py (long names) holding
+        them and the synth."""
         emu = Emulation(SYNTH, "SYNTH")
+        if card_files is not None:
+            with tempfile.TemporaryDirectory() as d:
+                image = Path(d) / "card.img"
+                package = (WORK / "emulate" / "SYNTH.ENA").read_bytes()
+                card.make(image, 16, "fat", {"/ENAGA/APPS/SYNTH/APP.ENA": package, **card_files})
+                emu.cpu.sd_load(image.read_bytes())
+        emu.cpu.gpio_input(3, 0, True)           # POWER up (active low)
         for pins in ENCODER_PINS:                # at rest both encoder pins are high
             for bank, pin in pins:
                 emu.cpu.gpio_input(bank, pin, True)
@@ -141,6 +155,68 @@ class Synth(unittest.TestCase):
             frame, _ = emu.cpu.oled_frame()
             self.assertTrue(any(frame))
             self.assertEqual(emu.report()["app_status"], "APP RUNNING")
+
+    def patch_page(self, emu):
+        emu.key(F1, True)
+        self.press(emu, F2)
+        emu.key(F1, False)
+        emu.run(15 * MS)
+
+    def card_files(self, emu):
+        """Every file in the synth's data folder: {name: bytes}."""
+        with tempfile.TemporaryDirectory() as d:
+            image = Path(d) / "card.img"
+            image.write_bytes(emu.cpu.sd_read())
+            return {name: card.get(image, f"{DATA}/{name}") for name, _ in card.listdir(image, DATA) or []}
+
+    @staticmethod
+    def patch_file(name, values, entry=-1, base=None):
+        sets = [values] + ([base] if base else [])
+        return (b"ESYN" + struct.pack("<BBHh", 1, len(sets), len(values), entry) + name.encode().ljust(16, b"\0") +
+                b"".join(struct.pack(f"<{len(v)}h", *v) for v in sets))
+
+    def test_user_patches_and_the_last_sound(self):
+        # U2 holds a patch from an older synth: ten parameters (OSC 1, OSC 2, two of the mixer); the rest INIT.
+        old = [3, 64, 0, 0, 1, 64, -12, 5, 90, 20]
+        with self.start({f"{DATA}/USER 02.SYN": self.patch_file("OLD ONE", old)}) as emu:
+            init = self.values(emu)
+            self.press(emu, F3)                   # FILTER: cutoff 127 -> 124
+            turn(emu, 1, -3)
+            self.patch_page(emu)
+            emu.key(F1, True)                     # F1 + OK on a factory patch saves nothing
+            self.press(emu, OK)
+            emu.key(F1, False)
+            turn(emu, 4, FACTORY)                 # U1, empty: OK leaves the sound as it is
+            self.press(emu, OK)
+            self.assertEqual(self.values(emu)[CUTOFF], 124)
+            emu.key(F1, True)                     # F1 + OK: saved in U1
+            self.press(emu, OK)
+            emu.key(F1, False)
+            turn(emu, 4, 1)                       # U2, the older file
+            self.press(emu, OK)
+            self.assertEqual(self.values(emu), old + init[len(old):])
+            turn(emu, 4, -FACTORY)                # BRASS, then U1 again
+            self.press(emu, OK)
+            self.assertEqual(self.values(emu)[CUTOFF], 50)
+            turn(emu, 4, FACTORY - 1)
+            self.press(emu, OK)
+            self.assertEqual(self.values(emu), init[:CUTOFF] + [124] + init[CUTOFF + 1:])
+            self.press(emu, F3)                   # an edit after loading U1: 124 -> 120
+            turn(emu, 1, -4)
+            emu.cpu.gpio_input(3, 0, False)       # switched off: POWER held a second saves the sound
+            emu.run(1200 * MS)
+            files = self.card_files(emu)
+        self.assertEqual(sorted(files), ["LAST.SYN", "USER 01.SYN", "USER 02.SYN"])
+        edited = init[:CUTOFF] + [124] + init[CUTOFF + 1:]
+        self.assertEqual(files["USER 01.SYN"], self.patch_file("INIT", edited))
+        now = edited[:CUTOFF] + [120] + edited[CUTOFF + 1:]
+        self.assertEqual(files["LAST.SYN"], self.patch_file("INIT", now, FACTORY, edited))
+        # The next start: the sound as it was switched off, U1 shown loaded, and pushing B goes back to U1's cutoff.
+        with self.start({f"{DATA}/{name}": data for name, data in files.items()}) as emu:
+            self.assertEqual(self.values(emu), now)
+            self.press(emu, F3)
+            self.press(emu, PUSH_B)
+            self.assertEqual(self.values(emu)[CUTOFF], 124)
 
     def test_mono_returns_to_the_held_note(self):
         with self.start() as emu:

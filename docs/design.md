@@ -228,7 +228,7 @@ WAV parsing (`enaga::wav`) sits on top: header, format, data offset.
    and listing; the app's data folder; safe saves; card removal. Tested on the emulator with FAT card images
    (the emulator already models the card), including a full card and a removal signalled on the card-detect
    pin (the emulator drives that pin; a card that stops answering mid-transfer is not modelled).
-2. The synth saves and loads patches (E2's exit app gets storage).
+2. (**Done** 2026-11-18, see the log.) The synth saves and loads patches (E2's exit app gets storage).
 3. The card-speed page in the CHECK app; the next unit session measures it.
 4. Streams and WAV, sized by those measurements.
 
@@ -255,7 +255,7 @@ the DSP library (`include/enaga/dsp`, tested on the host), and `examples/synth`,
 synthesizer (emulator-tested; on the unit: 8 % idle, 24 % with eight notes). The library's block functions, and apps' own `*.ti.c` files, are built with TI's
 cl6x when it is installed (GCC otherwise); the synth's worst case is 30 % of the audio budget that way and 65 % with
 GCC alone (every feature on: sync, ring, chorus, eight voices). The file service's first step is in (the
-"Files" section); patch saving in the synth, card-speed measurement and streaming follow.
+"Files" section), and the synth saves patches with it; card-speed measurement and streaming follow.
 
 ## Open items
 
@@ -826,3 +826,22 @@ functions, `App::on_card`).
   ninth refused, case-insensitive names, a close cancelling queued reads, calls from audio() refused.
 - Not covered on the emulator: a card that stops answering mid-transfer (the emulator only drives the
   card-detect pin), and the SD driver's real speed. 40 tests pass; the unit dry run passes 141/141.
+
+### Synth patches on the card, file service step 2 (2026-11-18)
+
+The synth's PATCH page (F1 + F2) lists the twelve factory patches, then sixteen user slots, U1-U16. OK loads the
+chosen entry; F1 + OK saves the sound into a user slot (on a factory patch it says USER SLOTS ONLY), under the
+name of the patch it was edited from, so U3 shows "U3 BRASS". The sound when the app stops, switching off
+included, goes to LAST.SYN with the patch it came from, and the next start restores both (knob pushes still go
+back to that patch's values). Loading a patch now also silences held notes, since the voice mode may change.
+
+- Files in `/ENAGA/DATA/SYNTH/`: "USER 01.SYN" to "USER 16.SYN" and LAST.SYN, written with `files::save` and read
+  with `files::read_all` (the blocking calls: a few hundred bytes each). The format is in `patches.hpp`: a
+  26-byte header (magic, version, value sets, parameter count, list entry, name) and int16 values by parameter
+  number. Parameters keep their numbers, so an older file with fewer loads with INIT for the rest; values are
+  clamped to their ranges. The slots are scanned at start and on each card event.
+- `test_synth.py` saves into U1, loads an older ten-parameter file from U2, BRASS and U1 again, switches off by
+  the power key and checks the card's files byte for byte, then boots from that card and finds the sound and
+  its patch restored. The card is made by `tools/card.py`, since the names are long. 41 tests pass.
+- Not done: naming a patch on the unit (there is no text entry yet; E4's UI toolkit), a confirmation before
+  saving over a full slot, deleting a slot.
