@@ -947,3 +947,20 @@ P-2`): GP4[1] is not the card's power, and a failed write still leaves the card 
   problem (the stock writes by EDMA). Lines `W1 OK 3MS` ... `W3 ERR-4 0210 S 21` (MMCST1 at the failure).
 - The write's DATDNE wait is 2 s (the SD limit for programming is 250-500 ms).
 
+Sixth try, the clock ladder: `W1 ERR-4 0210 S 26` at 1.5 MHz, so not a matter of feeding the FIFO fast enough.
+MMCST1 0x26 is FIFOEMP | DXEMP | CLKSTP without BUSY: the controller had stopped the card's clock with its FIFO
+empty, which it does during a write when it still wants data. So it never got all 512 bytes, though 128 words
+were written to MMCDXR. The likeliest loss is the 64 bytes put in the FIFO before the command, if the command's
+DCLR empties the FIFO on the chip (the emulator only sets DXRDY for it); and if the controller holds a write
+command until the FIFO has data, sequence 0's unanswered CMD24 is explained too.
+
+- Write sequences 2 (FIFO first, command without DCLR) and 3 (command with DCLR, then the first 64 bytes at once)
+  join 0 and 1 (`sd_write_mode`).
+- The probe writes sequences 1, 2 and 3 into SDTEST.BIN's first three sectors. While it waits for DATDNE, a
+  controller stalled wanting data (CLKSTP | FIFOEMP, not BUSY, for 20 ms) gets 64 bytes of filler, up to 8 times
+  (`sd_write_topup`), which should also complete the transfer rather than leave the card stuck; the read-back
+  then shows what the card received. Lines: `W1 OK T0 3MS`, `W1 BAD SH-16 T1`, `W1 ERR-4 S26 T8`. The filler
+  path does not run on the emulator (its controller never stalls).
+- Test runs met the emulator core being rebuilt mid-edit (`C++ core build failed`); after it settled, 44 tests
+  pass; dry run 141/141.
+

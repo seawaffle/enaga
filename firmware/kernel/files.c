@@ -313,16 +313,16 @@ static void card_watch(u32 ms)
 
 /* The write probe (unit session 2): how a real card takes Enaga's writes, without risking the file system. When
  * /ENAGA/SDTEST.BIN (at least 2 KiB, made on a computer) is on the card, each boot writes a pattern into its first
- * three sectors, one at each bus clock of a ladder, reading each back, and stops at the first failure (on a unit a
- * failed write leaves the card silent until it is taken out). One line each, at most 21 characters:
- *   "W1 OK 3MS"            1.5 MHz (W2: 5.8 MHz, W3: 23 MHz): the sector reads back as written, in 3 ms
- *   "W2 BAD 5 1234ABCD"    the first wrong word and what it holds; then "W2 SH -16" if the pattern is shifted
- *   "W3 ERR-4 0210 S 21"   sd_write's code, MMCST0's low half and MMCST1 at the failure
- * Writes use sd_write_mode 1 (the FIFO filled before the command; mode 0's first CMD24 got no response). Only the
- * file's own data is overwritten, never the FAT or a folder. */
+ * three sectors by write sequences 1, 2 and 3 (mmcsd.c sd_write), with filler for a controller still wanting data
+ * (sd_write_topup), reads each back, and stops after a write that fails (on a unit that leaves the card silent until
+ * it is taken out). One line each, at most 21 characters (the status page's width):
+ *   "W1 OK T0 3MS"     sequence 1: the sector reads back as written, no filler, in 3 ms
+ *   "W2 BAD SH-16 T1"  written, but the pattern is moved 16 words earlier (the first 16 lost), after one filler
+ *   "W2 BAD 5 T1"      written, wrong from word 5, not a simple shift
+ *   "W3 ERR-4 S26 T8"  sd_write's code, MMCST1 at the failure, fillers given
+ * Only the file's own data is overwritten, never the FAT or a folder. */
 static u32 probe_out[128], probe_back[128];
 
-static void probe_line(char *line, int n) { line[n] = 0; log_line(line); }
 static int put_text(char *line, int n, const char *t) { while (*t) line[n++] = *t++; return n; }
 static int put_hex(char *line, int n, u32 v, int digits)
 {
@@ -331,69 +331,67 @@ static int put_hex(char *line, int n, u32 v, int digits)
     return n;
 }
 
-static int probe_step(int step, u32 sector)       /* 1 if the sector reads back as written */
+static int probe_step(int mode, u32 sector)       /* 0 if the card may now be silent */
 {
     char line[40] = "W0 ";
-    int i, bad = -1, shift = 0, w, n = 3;
+    int i, bad = -1, shift = 0, w, n = 3, normal = sd_write_mode;
     u32 start;
-    line[1] = (char)('0' + step);
-    for (i = 0; i < 128; i++) probe_out[i] = (u32)step << 28 | (u32)i << 16 | (~(u32)i & 0xFFFF);
+    line[1] = (char)('0' + mode);
+    for (i = 0; i < 128; i++) probe_out[i] = (u32)mode << 28 | (u32)i << 16 | (~(u32)i & 0xFFFF);
     for (i = 0; i < 128; i++) probe_back[i] = 0;
+    sd_write_mode = mode;
+    sd_write_topup = 1;
+    sd_write_topups = 0;
     start = tsc_read();
     w = sd_write((const u8 *)probe_out, sector, 1);
+    sd_write_mode = normal;
+    sd_write_topup = 0;
     if (w) {
         n = put_text(line, n, "ERR");
         n = put_dec(line, n, w);
-        line[n++] = ' ';
-        n = put_hex(line, n, sd_io_status, 4);
-        n = put_text(line, n, " S ");
+        n = put_text(line, n, " S");
         n = put_hex(line, n, sd_io_status1, 2);
-        probe_line(line, n);
-        return 0;
-    }
-    if (sd_read((u8 *)probe_back, sector, 1)) {
+    } else if (sd_read((u8 *)probe_back, sector, 1)) {
         n = put_text(line, n, "READ ERR");
         n = put_dec(line, n, sd_io_error);
-        probe_line(line, n);
-        return 0;
+        w = 1;
+    } else {
+        for (i = 0; i < 128 && bad < 0; i++) if (probe_back[i] != probe_out[i]) bad = i;
+        if (bad < 0) {
+            n = put_text(line, n, "OK");
+        } else {
+            for (w = 1; w < 64 && !shift; w++) {          /* the pattern moved later by w words? */
+                for (i = w; i < 128 && probe_back[i] == probe_out[i - w]; i++) {}
+                if (i == 128) shift = w;
+            }
+            for (w = 1; w < 64 && !shift; w++) {          /* ... or earlier (the first words lost)? */
+                for (i = 0; i + w < 128 && probe_back[i] == probe_out[i + w]; i++) {}
+                if (i + w == 128) shift = -w;
+            }
+            n = put_text(line, n, shift ? "BAD SH" : "BAD ");
+            n = put_dec(line, n, shift ? shift : bad);
+        }
+        w = 0;
     }
-    for (i = 0; i < 128 && bad < 0; i++) if (probe_back[i] != probe_out[i]) bad = i;
-    if (bad < 0) {
-        n = put_text(line, n, "OK ");
+    n = put_text(line, n, " T");
+    n = put_dec(line, n, (int)sd_write_topups);
+    if (!w && bad < 0) {
+        line[n++] = ' ';
         n = put_dec(line, n, (int)((tsc_read() - start) / TICKS_PER_MS));
         n = put_text(line, n, "MS");
-        probe_line(line, n);
-        return 1;
     }
-    n = put_text(line, n, "BAD ");
-    n = put_dec(line, n, bad);
-    line[n++] = ' ';
-    n = put_hex(line, n, probe_back[bad], 8);
-    probe_line(line, n);
-    for (w = 1; w < 64 && !shift; w++) {          /* the pattern moved later by w words? */
-        for (i = w; i < 128 && probe_back[i] == probe_out[i - w]; i++) {}
-        if (i == 128) shift = w;
-    }
-    for (w = 1; w < 64 && !shift; w++) {          /* ... or earlier? */
-        for (i = 0; i + w < 128 && probe_back[i] == probe_out[i + w]; i++) {}
-        if (i + w == 128) shift = -w;
-    }
-    if (shift) {
-        n = put_text(line, 3, "SH ");
-        n = put_dec(line, n, shift);
-        probe_line(line, n);
-    }
-    return 0;
+    line[n] = 0;
+    log_line(line);
+    return !w;
 }
 
 void files_write_probe(void)
 {
-    static const u32 clkrt[3] = { 61, 15, 3 };   /* 1.5, 5.8 and 23 MHz */
     static FIL f;
     u32 sector[3];
     UINT got;
     u8 byte;
-    int k, ok = 1;
+    int k;
     if (!mounted || f_open(&f, "/ENAGA/SDTEST.BIN", FA_READ) != FR_OK) return;
     if (f_size(&f) < 2048) { f_close(&f); log_line("SDT FILE UNDER 2 KIB"); return; }
     for (k = 0; k < 3; k++) {                     /* the sectors holding bytes 0, 512 and 1024 */
@@ -401,11 +399,8 @@ void files_write_probe(void)
         sector[k] = (u32)f.sect;
     }
     f_close(&f);
-    for (k = 0; k < 3 && ok; k++) {
-        sd_data_clock(clkrt[k]);
-        ok = probe_step(k + 1, sector[k]);
-    }
-    sd_data_clock(3);
+    for (k = 0; k < 3; k++)
+        if (!probe_step(k + 1, sector[k])) break;
 }
 
 void files_init(void)
