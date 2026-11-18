@@ -5,6 +5,7 @@
 
 install/SmplTrek.bin            the Enaga update; alone on the card for the install and the first start-up
 app/ENAGA/APPS/CHECK/APP.ENA    the CHECK app (tests/unit/check); copy the ENAGA folder to the card afterwards
+synth/ENAGA/APPS/SYNTH/APP.ENA  the synth (examples/synth), for the last step: replaces the card's ENAGA folder
 
 Prints each file's size and SHA-256 so a copy on the card can be compared.
 """
@@ -31,9 +32,11 @@ def main():
         return 2
     firmware = firmware_build.build()
     package = build_app.build(paths.ROOT / "tests" / "unit" / "check", paths.BUILD / "apps" / "check", "CHECK")["package"]
+    synth = build_app.build(paths.ROOT / "examples" / "synth", paths.BUILD / "apps" / "synth", "SYNTH")["package"]
     shutil.rmtree(OUT, ignore_errors=True)
     files = {OUT / "install" / "SmplTrek.bin": firmware["image_path"].read_bytes(),
-             OUT / "app" / "ENAGA" / "APPS" / "CHECK" / "APP.ENA": package}
+             OUT / "app" / "ENAGA" / "APPS" / "CHECK" / "APP.ENA": package,
+             OUT / "synth" / "ENAGA" / "APPS" / "SYNTH" / "APP.ENA": synth}
     for path, data in files.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)

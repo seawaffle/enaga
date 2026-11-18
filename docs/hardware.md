@@ -352,4 +352,12 @@ listen on headphones or the line output. Report each result with what the screen
     pad lights green by pressure. Note which pad lights for each (the "LED map" order), the RAW reading of
     untouched pads (any pad glowing at rest shows it), and the RAW range when pressed hard.
 
+11. **Synth (optional, if time allows):** switch off, replace the card's `ENAGA` folder with `synth/ENAGA`, switch
+    on. Expected: the synth's OSC 1 page with INIT at the top left. Pads play notes (lower row white keys, upper
+    row black), STEP 1-16 chromatic notes; F2-F8 change pages; F1 + F2 opens PATCH, where VALUE chooses a patch and
+    OK loads it. Report the voices and load at the top right (V and percent of the audio budget; the emulator
+    gives at most 30 % with every feature on) for: one note; eight notes with INIT; SUPERSAW holding a chord;
+    and any crackle or dropout. Note how the pads feel: whether soft hits
+    sound and hard hits are loud (velocity thresholds are provisional, "Pads").
+
 Afterwards the official update restores the unit ("Installing and recovery").
