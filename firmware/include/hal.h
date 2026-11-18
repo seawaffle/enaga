@@ -88,7 +88,9 @@ extern int sd_io_error;              /* the last sd_read / sd_write failure: its
 extern u32 sd_io_status;             /* ... MMCST0 bits, or for -6 the card status (still programming after 1 s) */
 extern int sd_write_mode;            /* 0: command, then data at DXRDY; 1: first 64 bytes before the command
                                        * (unit session 2: which one a real card takes is being measured) */
-extern u32 sd_write_slowest;         /* the longest one-sector write so far, in time-stamp ticks */
+extern u32 sd_write_slowest;
+extern u32 sd_reads, sd_writes;      /* sectors moved without error since start-up */
+extern u32 sd_io_command;            /* the command index in flight at the last sd_read / sd_write failure */         /* the longest one-sector write so far, in time-stamp ticks */
 /* Graphics: Enaga and apps draw on a row-major canvas, one byte (0-15) per pixel; gfx_present converts it
  * to the panel's 4-bpp order (gfx.c) and sends it. */
 #define CANVAS_W 128

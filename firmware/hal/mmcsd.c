@@ -63,8 +63,11 @@ int sd_error;
 u32 sd_error_status;
 void (*sd_wait_hook)(void);
 int sd_io_error;
+u32 sd_io_command;
 u32 sd_io_status;
 u32 sd_write_slowest;
+u32 sd_reads, sd_writes;                   /* sectors moved without error since start-up */
+u32 sd_last_command;                       /* the index of the last command sent */
 
 int sd_present(void) { return !(gpio_read_bank16(4) & 1); }
 
@@ -87,6 +90,7 @@ static u32 wait_status(u32 want, u32 timeout_ms)
 static u32 command(u32 index, u32 arg, u32 flags)
 {
     status = 0;
+    sd_last_command = index;
     (void)REG32(MMC + MMCST0);                 /* drop what the previous transaction left behind */
     REG32(MMC + MMCARGHL) = arg;
     REG32(MMC + MMCCMD) = (index & 0x3F) | flags;
@@ -128,6 +132,7 @@ static void controller_init(void)
 
 static int io_fail(int code, u32 st)  /* sd_read / sd_write failures, for the kernel's log */
 {
+    sd_io_command = sd_last_command;
     sd_io_error = code;
     sd_io_status = st;
     return code;
@@ -216,6 +221,7 @@ int sd_read(u8 *buffer, u32 sector, u32 count)
             for (k = 0; k < 16; k++) *out++ = REG32(MMC + MMCDRR);
         }
         if (!data_ok(st = wait_status(ST0_DATDNE, 500), ST0_DATDNE)) return io_fail(-4, st);
+        sd_reads++;
         sector++;
     }
     return 0;
@@ -259,6 +265,7 @@ int sd_write(const u8 *buffer, u32 sector, u32 count)
             if (timer_ticks() - programming > 1000u * TICKS_PER_MS) return io_fail(-6, response());
         }
         if (timer_ticks() - begin > sd_write_slowest) sd_write_slowest = timer_ticks() - begin;
+        sd_writes++;
         sector++;
     }
     return 0;

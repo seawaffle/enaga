@@ -907,3 +907,15 @@ faults there once DCLR has raised DXRDY). Neither is confirmed, so the next buil
 - A failed mount logs `MOUNT <FRESULT> <sd_init code> <MMCST0>`, and every file failure reported as CARD
   ERROR logs `FS ERR <FRESULT>` (with `SD ERR` for a disk error). 44 tests; dry run 141/141.
 
+Third try: STEP 1 failed with `FS ERR 1` (disk error) and `SD ERR -2 0 00000010`: a read or write command got no
+response at all (MMCST0 TOUTRS). The remount after CHECK stopped failed the same way (`MOUNT 3 -2 00000010`:
+sd_init's ACMD41 step, after CMD8 had answered). So partway through the writes the card stops answering
+commands and stays that way across switching the unit off (the boots after the second try), until it is taken
+out (a PC then reads it, and Enaga mounts it again). The stock firmware runs the card at the same 23.25 MHz with
+the same open-drain command line, but writes by EDMA with multi-block CMD25 and CMD12; Enaga writes one sector
+per CMD24 from the CPU. GP4[1], which the stock drives low, is of unknown purpose (a card power switch would
+explain why switching off does not clear it); not touched without the owner.
+
+- The status page gains an SD line: sectors read and written since start-up (`sd_reads`, `sd_writes`), and on a
+  failure its code, the command in flight (`sd_io_command`) and MMCST0's low byte. The log shows five lines.
+

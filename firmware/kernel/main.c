@@ -115,8 +115,18 @@ static void status_page(u32 ms)
     gfx_text(0, 57, "LOAD", 10);
     gfx_dec(36, 57, (int)(audio_cycles_peak / (AUDIO_BUDGET_CYCLES / 1000u)), 15);
     gfx_dec(78, 57, (int)audio_overruns, 15);
-    first = log_count > 6 ? log_count - 6 : 0;
-    for (i = first; i < log_count; i++) gfx_text(0, 70 + 9 * (int)(i - first), log_lines[i % LOG_LINES], 8);
+    /* The SD card: sectors read and written since start-up, and the last failure (code, command, MMCST0 low byte):
+     * "SD R1234 W56 E-2 C24 10". */
+    gfx_text(0, 66, "SD", 10);
+    gfx_text(18, 66, "R", 8); gfx_dec(24, 66, (int)sd_reads, 15);
+    gfx_text(66, 66, "W", 8); gfx_dec(72, 66, (int)sd_writes, 15);
+    if (sd_io_error) {
+        gfx_text(0, 75, "E", 8); gfx_dec(6, 75, sd_io_error, 15);
+        gfx_text(30, 75, "C", 8); gfx_dec(36, 75, (int)sd_io_command, 15);
+        gfx_hex(60, 75, sd_io_status, 4, 15);
+    }
+    first = log_count > 5 ? log_count - 5 : 0;
+    for (i = first; i < log_count; i++) gfx_text(0, 84 + 9 * (int)(i - first), log_lines[i % LOG_LINES], 8);
 }
 
 static void shutdown(void)
