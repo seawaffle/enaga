@@ -120,6 +120,18 @@ python3 -B -m unittest discover -s tests -v                           # 35 tests
 python3 -B tools/emulate.py examples/tone --key 32@300000000           # press STEP 1; writes build/emulate/
 ```
 
+To play an app live, with the display, every control and the sound in a browser, run it in the emulator's web
+panel:
+
+```sh
+python3 -B tools/panel.py examples/synth              # then open http://127.0.0.1:8766, press Enable audio
+python3 -B tools/panel.py examples/tone -- --port 8770 # options after -- go to the panel (stock_ui.py --help)
+```
+
+It builds the firmware and the apps, puts them on a fresh card image (`build/panel/card.img`) and starts the panel
+on Enaga's update file; Ctrl-C stops it. The emulator runs the synth at about 0.8x real time on a current PC, so
+heavy patches break up.
+
 Without `ENAGA_EMULATOR` the emulator tests are skipped; `tests/test_dsp.py` (the DSP library on the host) needs
 only `g++`. `tools/emulate.py` writes the last screen to
 `build/emulate/frame.png`, the captured output to `build/emulate/audio.wav`, and a JSON report.
@@ -137,7 +149,7 @@ only `g++`. `tools/emulate.py` writes the last screen to
 | `firmware/` | Enaga itself: `hal/` drivers, `kernel/` (interrupts, audio engine, app host, exceptions, watchdog, main loop), `start.s`, `link.ld`, `build.py` |
 | `examples/` | `synth` (the virtual analogue synthesizer); `tone` (STEP 1-8 play 750 Hz x step); `cxxcheck` (exercises the C++ runtime) |
 | `tests/` | `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board; `test_check.py` and `unit/check`: the CHECK app for sessions on a unit; `test_synth.py`: the synth example; `test_dsp.py` and `dsp/`: the DSP library on the host |
-| `tools/` | `build_app.py`, `emulate.py`, `unit_card.py` and `unit_dry_run.py` (files for a session on a unit, and the session walked on the emulator), `sysimage.py` (the update-file format), `paths.py`, toolchain build scripts |
+| `tools/` | `build_app.py`, `emulate.py`, `panel.py` (apps live in the emulator's web panel), `unit_card.py` and `unit_dry_run.py` (files for a session on a unit, and the session walked on the emulator), `sysimage.py` (the update-file format), `paths.py`, toolchain build scripts |
 | `docs/` | `design.md` (decisions, architecture, plan, log), `hardware.md` (the hardware notes) |
 
 ## Licence

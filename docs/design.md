@@ -656,3 +656,10 @@ UART ring holds 80 ms. Measured in the panel (`stock_ui.py`, compiled blocks), s
 keys, pads, display DMA among them) and the unit dry run (141/141) pass; in the panel with the MCU stream off
 (audio the only regular wake), 27 fast detents on a knob (2 ms a phase) all counted. On the unit it also lowers
 power draw. `update` is no longer called flat out: background work in it gets at least 750 calls a second.
+
+### tools/panel.py (2026-11-17)
+
+`tools/panel.py [app_dir ...] [-- panel options]` builds the firmware and apps (examples/synth by default), writes
+them to a fresh 64 MiB card image and starts the smpltrek emulator's web panel (`stock_ui.py`) on Enaga's update
+file, so apps can be played live with the display, controls and sound. Panel options go after `--` (some take
+paths, so they can't be told from app directories otherwise). Tried with the synth and the tone app.
