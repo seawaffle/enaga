@@ -53,8 +53,42 @@ u32 files_requests_done;
 
 /* ---- helpers ---------------------------------------------------------------------------------------------- */
 
+/* The SD driver's failures and slow writes, in the log (the status page shows it): "SD ERR -6 00000E00" (the
+ * driver's code and MMCST0 bits, or the card status for -6) and "SD SLOW 120 MS" for each new slowest one-sector
+ * write over 50 ms. */
+static u32 slow_logged;
+
+static void log_hex_line(const char *prefix, int code, u32 word)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    char line[32];
+    int n = 0, i;
+    while (*prefix) line[n++] = *prefix++;
+    line[n++] = code < 0 ? '-' : ' ';
+    line[n++] = (char)('0' + (code < 0 ? -code : code) % 10);
+    line[n++] = ' ';
+    for (i = 28; i >= 0; i -= 4) line[n++] = hex[word >> i & 15];
+    line[n] = 0;
+    log_line(line);
+}
+
+static void log_slow_writes(void)
+{
+    u32 ms = sd_write_slowest / TICKS_PER_MS;
+    char line[24] = "SD SLOW ";
+    int n = 8, k = 0;
+    char digits[10];
+    if (ms < 50 || ms <= slow_logged) return;
+    slow_logged = ms;
+    do { digits[k++] = (char)('0' + ms % 10); ms /= 10; } while (ms);
+    while (k) line[n++] = digits[--k];
+    line[n++] = ' '; line[n++] = 'M'; line[n++] = 'S'; line[n] = 0;
+    log_line(line);
+}
+
 static int32_t map(FRESULT r)
 {
+    if (r == FR_DISK_ERR && sd_present()) log_hex_line("SD ERR ", sd_io_error, sd_io_status);
     switch (r) {
     case FR_OK: return ENAGA_FILE_OK;
     case FR_NO_FILE: case FR_NO_PATH: return ENAGA_FILE_NOT_FOUND;
@@ -249,7 +283,14 @@ static void card_watch(u32 ms)
     if (present) card_inserted(); else card_removed();
 }
 
-void files_init(void) { card_seen = sd_present(); }
+void files_init(void)
+{
+    card_seen = sd_present();
+    /* The driver's waits are bounded (500 ms a step, 1 s for a sector to program), but a FatFs call can span many
+     * of them on a slow card: the watchdog is fed while the driver waits, so a slow card makes a slow pass, and a
+     * failing one an error, rather than the app being dropped as not responding. */
+    sd_wait_hook = watchdog_feed;
+}
 
 /* ---- the app stopping ------------------------------------------------------------------------------------- */
 
@@ -571,5 +612,6 @@ int files_service(u32 ms)
         if (r->cancelled) finish(ENAGA_FILE_CANCELLED);
         else step(r);
     }
+    log_slow_writes();
     return queue_count != 0;
 }

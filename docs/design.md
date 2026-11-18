@@ -872,3 +872,22 @@ meaningless for the unit). Step 11 of docs/hardware.md's checklist.
   and a read into one (`unaligned`; it fails with -7 without the fix).
 - Not in the unit dry run: its staged card is 4 MiB, too small for the test file. 42 tests pass; the dry run
   passes 141/141.
+
+### Unit session 2: the card test stopped CHECK (2026-11-18)
+
+STEP 1 on CHECK's CARD page dropped the app as APP NOT RESPONDING (the main-loop watchdog, 1 s), before any
+result: the first time Enaga wrote to a real card. The SD driver writes one sector per command and waits for each to
+program (CMD13 until tran, up to 1 s), and a FatFs call writes up to 16 sectors, so a card slow to program, or
+one never reported back in tran, holds the main loop past the watchdog; the watchdog blames the app, though the
+time is Enaga's. On the emulator a sector programs at once.
+
+- The driver now calls `sd_wait_hook` while it waits, and the file service sets it to `watchdog_feed`: every
+  wait stays bounded by the driver's own time-outs, so a slow card gives a slow pass and a failing one an error.
+- The driver keeps its last read / write failure (`sd_io_error`, and MMCST0 or, for -6, the card status) and the
+  slowest one-sector write; the file service logs `SD ERR <code> <word>` on a disk error and `SD SLOW <n> MS` for
+  each new slowest write over 50 ms.
+- CHECK stops itself (`fatal`) when the card test fails, so the status page shows those lines.
+  `test_check.py` covers that path with a card too small for the test file. 43 tests; dry run 141/141.
+- Which it was (slow programming or a status the driver misreads) is for the rerun to show. If writes are slow,
+  multi-block writes (CMD25), which cards are built for, are the next step for the driver.
+

@@ -102,5 +102,24 @@ class Check(unittest.TestCase):
             self.assertEqual(card.listdir(image, "/RECORD"), [])           # the test file removed
 
 
+    def test_card_page_failure_stops_on_the_status_page(self):
+        with Emulation(HERE / "unit" / "check", "CHECK") as emu:                # its 4 MiB card: no room for 4 MiB
+            self.assertIsNone(emu.run(BOOT)["error"])
+            for _ in range(3):
+                self.press(emu, F4, hold_ms=1100)
+            self.press(emu, STEP1)
+            for _ in range(50):
+                self.assertIsNone(emu.run(100 * MS)["error"])
+                if emu.report()["crash_reason"]:
+                    break
+            report = emu.report()
+            self.assertEqual((report["app_status"], report["crash_reason"]), ("APP STOPPED", "CARD TEST FAILED"))
+            self.assertIn("CARD CARD FULL", report["log"])
+            with tempfile.TemporaryDirectory() as d:
+                image = Path(d) / "card.img"
+                image.write_bytes(emu.cpu.sd_read())
+                self.assertIsNone(card.get(image, "/RECORD/CHECK.BIN"))       # removed before stopping
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -61,6 +61,10 @@ static u32 status;                 /* MMCST0 bits seen since the command was iss
 static u32 last_st;                /* what the last command's wait returned, for the error report */
 int sd_error;
 u32 sd_error_status;
+void (*sd_wait_hook)(void);
+int sd_io_error;
+u32 sd_io_status;
+u32 sd_write_slowest;
 
 int sd_present(void) { return !(gpio_read_bank16(4) & 1); }
 
@@ -68,6 +72,7 @@ static u32 wait_status(u32 want, u32 timeout_ms)
 {
     u32 st, start = timer_ticks();
     for (;;) {
+        if (sd_wait_hook) sd_wait_hook();
         status |= REG32(MMC + MMCST0);
         if (status & (want | ST0_ERRORS)) {
             st = status;
@@ -119,6 +124,13 @@ static void controller_init(void)
     REG32(MMC + MMCCTL) = 0;                         /* out of reset, 1-bit bus */
     REG32(MMC + MMCCLK) = 0x100 | 232;               /* clock on */
     REG32(MMC + MMCIM) = 0;                          /* polled: no interrupts (the original firmware uses 0x7D) */
+}
+
+static int io_fail(int code, u32 st)  /* sd_read / sd_write failures, for the kernel's log */
+{
+    sd_io_error = code;
+    sd_io_status = st;
+    return code;
 }
 
 static int fail(int code)             /* sd_init failures are shown on the status page: step and MMCST0 bits */
@@ -185,13 +197,13 @@ int sd_read(u8 *buffer, u32 sector, u32 count)
         REG32(MMC + MMCBLEN) = 512;
         REG32(MMC + MMCNBLK) = 1;
         st = command(17, high_capacity ? sector : sector * 512, RSP_48 | CMD_WDATX | CMD_DCLR);
-        if (!ok(st)) return -2;
+        if (!ok(st)) return io_fail(-2, st);
         for (i = 0; i < 512 / 4; i += 16) {          /* 64-byte FIFO fills */
             u32 k;
-            if (!data_ok(wait_status(ST0_DRRDY, 500), ST0_DRRDY)) return -3;
+            if (!data_ok(st = wait_status(ST0_DRRDY, 500), ST0_DRRDY)) return io_fail(-3, st);
             for (k = 0; k < 16; k++) *out++ = REG32(MMC + MMCDRR);
         }
-        if (!data_ok(wait_status(ST0_DATDNE, 500), ST0_DATDNE)) return -4;
+        if (!data_ok(st = wait_status(ST0_DATDNE, 500), ST0_DATDNE)) return io_fail(-4, st);
         sector++;
     }
     return 0;
@@ -202,24 +214,25 @@ int sd_write(const u8 *buffer, u32 sector, u32 count)
     const u32 *in = (const u32 *)buffer;
     if (!card_ready || ((u32)buffer & 3)) return -1;
     while (count--) {
-        u32 i, st, start;
+        u32 i, st, programming, begin = timer_ticks();
         fifo_setup(1);
         REG32(MMC + MMCBLEN) = 512;
         REG32(MMC + MMCNBLK) = 1;
         st = command(24, high_capacity ? sector : sector * 512, RSP_48 | CMD_WDATX | CMD_DTRW | CMD_DCLR);
-        if (!ok(st)) return -2;
+        if (!ok(st)) return io_fail(-2, st);
         for (i = 0; i < 512 / 4; i += 16) {
             u32 k;
-            if (!data_ok(wait_status(ST0_DXRDY, 500), ST0_DXRDY)) return -3;
+            if (!data_ok(st = wait_status(ST0_DXRDY, 500), ST0_DXRDY)) return io_fail(-3, st);
             for (k = 0; k < 16; k++) REG32(MMC + MMCDXR) = *in++;
         }
-        if (!data_ok(wait_status(ST0_DATDNE, 500), ST0_DATDNE)) return -4;
-        start = timer_ticks();                       /* CMD13 until the card is back in tran (state 4) */
+        if (!data_ok(st = wait_status(ST0_DATDNE, 500), ST0_DATDNE)) return io_fail(-4, st);
+        programming = timer_ticks();                 /* CMD13 until the card is back in tran (state 4) */
         for (;;) {
-            if (!ok(command(13, rca << 16, RSP_48))) return -5;
+            if (!ok(st = command(13, rca << 16, RSP_48))) return io_fail(-5, st);
             if ((response() & 0x1E00) == 0x800) break;
-            if (timer_ticks() - start > 1000u * TICKS_PER_MS) return -6;      /* still programming after 1 s */
+            if (timer_ticks() - programming > 1000u * TICKS_PER_MS) return io_fail(-6, response());
         }
+        if (timer_ticks() - begin > sd_write_slowest) sd_write_slowest = timer_ticks() - begin;
         sector++;
     }
     return 0;

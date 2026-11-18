@@ -375,8 +375,10 @@ listen on headphones or the line output. Report each result with what the screen
 11. **Card speed (CARD page, the fourth):** STEP 1, then wait for DONE (a few seconds; the card needs 4 MiB free).
     Report WRITE, READ, SCATTER (KiB/s and READS/S) and STREAMS, the card's make, size and format (FAT32 or
     exFAT), and run it twice. These are the rates an app gets through Enaga's file service, and they size
-    streaming (design.md "Files"). FAILED with a reason: report it; the test file `/RECORD/CHECK.BIN` is removed
-    either way.
+    streaming (design.md "Files"). A failure stops CHECK with CARD TEST FAILED on Enaga's status page: report
+    its log lines (`CARD <reason>`, and from Enaga `SD ERR <code> <word>` with the SD driver's details). Lines
+    `SD SLOW <n> MS` (the slowest one-sector write, when over 50 ms) are worth a photo either way. The test file
+    `/RECORD/CHECK.BIN` is removed in both cases.
 12. **Synth (optional, if time allows):** switch off, replace the card's `ENAGA` folder with `synth/ENAGA`, switch
     on. Expected: the synth's OSC 1 page with INIT at the top left. Pads play notes (lower row white keys, upper
     row black), STEP 1-16 chromatic notes; F2-F8 change pages; F1 + F2 opens PATCH, where VALUE chooses a patch and

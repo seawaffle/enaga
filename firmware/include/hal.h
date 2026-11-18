@@ -83,6 +83,10 @@ extern u32 sd_error_status;           /* ... and the MMCST0 bits the failing com
 int  sd_present(void);                /* card detect, GP4[0] low */
 int  sd_read(u8 *buffer, u32 sector, u32 count);     /* 512-byte sectors; 0 = ok */
 int  sd_write(const u8 *buffer, u32 sector, u32 count);
+extern void (*sd_wait_hook)(void);   /* called while the driver waits on the card (the kernel feeds its watchdog) */
+extern int sd_io_error;              /* the last sd_read / sd_write failure: its return code ... */
+extern u32 sd_io_status;             /* ... MMCST0 bits, or for -6 the card status (still programming after 1 s) */
+extern u32 sd_write_slowest;         /* the longest one-sector write so far, in time-stamp ticks */
 /* Graphics: Enaga and apps draw on a row-major canvas, one byte (0-15) per pixel; gfx_present converts it
  * to the panel's 4-bpp order (gfx.c) and sends it. */
 #define CANVAS_W 128

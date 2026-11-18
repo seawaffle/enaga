@@ -18,6 +18,7 @@
 //          file back the same way; SCATTER, 256 reads of 4 KiB at random places in it, one after another (seek,
 //          read). KiB/s for each, SCATTER's reads a second, and how many 48 kHz 16-bit stereo streams (187.5
 //          KiB/s each) READ's rate would feed. The file is removed afterwards; the results also go to the log.
+//          A failure stops the app, so that Enaga's status page shows the log with the SD driver's details.
 #include <enaga/app.hpp>
 #include <enaga/files.hpp>
 
@@ -352,6 +353,8 @@ private:
         card_file_.close();                   // cancels whatever is still queued
         enaga::files::remove(kCardPath);
         enaga::log((Line() << "CARD " << enaga::files::error_name(error)).str());
+        // To Enaga's status page on purpose: it shows the log, where Enaga notes the SD driver's error details.
+        enaga::fatal("CARD TEST FAILED");
     }
     static uint32_t kibs(uint32_t bytes, uint32_t ms) { return (bytes / 1024u) * 1000u / (ms ? ms : 1); }
 
