@@ -35,7 +35,8 @@ ENAGA_APP(Beep)
 ```
 
 - `init`, `update(ms)`, `draw(canvas)`, `stop`, `on_key`, `on_encoder`, `on_pad_press(pad, velocity)`,
-  `on_pad_release`, `on_pad` (every raw pressure reading) run in Enaga's main loop.
+  `on_pad_release`, `on_pad` (every raw pressure reading) run in Enaga's main loop, which sleeps between
+  interrupts: a pass, so `update`, runs at least 750 times a second (after every audio block), not flat out.
   `audio` runs in the audio interrupt every 64 frames (1.33 ms at 48 kHz) and must not block, allocate,
   draw or touch files.
 - The canvas is 128 x 128 pixels, one byte per pixel, grey 0 (black) to 15.
@@ -115,7 +116,7 @@ project. Point `ENAGA_EMULATOR` at its emulator directory (the one containing `c
 
 ```sh
 export ENAGA_EMULATOR=/path/to/emulator
-python3 -B -m unittest discover -s tests -v                           # 35 tests, about 5 minutes
+python3 -B -m unittest discover -s tests -v                           # 35 tests, about 2 minutes
 python3 -B tools/emulate.py examples/tone --key 32@300000000           # press STEP 1; writes build/emulate/
 ```
 

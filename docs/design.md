@@ -644,3 +644,15 @@ written; the build makes any GCC frame over 16 KiB, a VLA or alloca an error (th
 2,824 bytes). After: 0 wrong, regression test in test_e1. The C interrupt handler was already entered through an
 assembly stub saving the registers GCC needs (their other note: GCC ignores `__attribute__((interrupt))`). 35
 tests pass; the unit dry run passes 141/141.
+
+### The main loop sleeps between interrupts (2026-11-17)
+
+From the emulator agent: the emulator ran Enaga slowly mainly because `kernel_loop` never slept. Each pass now
+ends with IDLE; the audio block (every 1.33 ms), UART1 (each panel MCU byte, about 12,600 a second on the unit)
+and the timer (10 ms) wake it, so a pass still runs at least 750 times a second, faster than the original
+firmware's 1 ms encoder poll. Work an interrupt leaves after a pass's polls waits at most one audio block; the
+UART ring holds 80 ms. Measured in the panel (`stock_ui.py`, compiled blocks), synth with four notes held:
+0.27x real time before, 0.81x after. The whole test suite went from 265 s to 109 s. Checked: 35 tests (watchdog,
+keys, pads, display DMA among them) and the unit dry run (141/141) pass; in the panel with the MCU stream off
+(audio the only regular wake), 27 fast detents on a knob (2 ms a phase) all counted. On the unit it also lowers
+power draw. `update` is no longer called flat out: background work in it gets at least 750 calls a second.

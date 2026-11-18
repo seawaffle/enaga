@@ -172,6 +172,11 @@ void kernel_loop(void)
             else status_page(ms);
             if (display_dma) gfx_present_dma(); else gfx_present();
         }
+        /* Sleep until the next interrupt: the audio block (every 1.33 ms), UART1 (each byte from the panel MCU,
+         * about 12,600 a second on the unit), the timer (10 ms). So a pass still runs at least 750 times a second,
+         * more often than the original firmware polls the encoders (each 1 ms tick). Work an interrupt leaves
+         * after this pass's polls waits at most for the next one; nothing is lost (the UART ring holds 80 ms). */
+        __asm__ volatile("idle" ::: "memory");
     }
 }
 
