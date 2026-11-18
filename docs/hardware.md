@@ -159,8 +159,8 @@ event 46) into a ring that the main loop parses, and the interrupt may nest in t
 LED addresses are a = 0-2, b = 0-5, c = 0-7 (144 addresses), written here as n = 48a + 8b + c; levels 0-10 are
 usable (from 11 a neighbouring LED lights too). The original firmware treats a pad reading of 800 or more as a
 press. Enaga does the same and gives apps press and release events besides the raw readings: a press at 800, a
-release below 600, velocity 1-127 from the first reading over 800 (127 from 12,000). The release threshold and
-the velocity scale are provisional until untouched and hard-pressed readings are measured (checklist step 10).
+release below 600, velocity 1-127 from the higher of the first two readings over 800 (127 from 3,300; "Pad readings"). The velocity scale is set
+from session 1's readings; the release threshold is still provisional.
 
 The 15 pads sit in two staggered rows, 7 above (TRK 1-7) and 8 below (TRK 8-10, GLOBAL 1-3, USB AUDIO, EXT SRC),
 and their channels run left to right alternating lower and upper row: even channels 0-14 are the lower row,

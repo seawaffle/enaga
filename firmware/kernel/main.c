@@ -10,7 +10,7 @@
  * flight delays the next draw), and the power key held one second switches the unit off. With no app
  * (none found, or one that failed) Enaga shows its own status page. Each pass feeds the watchdog (watchdog.c).
  *
- * Pads are delivered raw and as press / release with velocity (provisional thresholds, on_pad). Not yet: F1 at
+ * Pads are delivered raw and as press / release with velocity (on_pad). Not yet: F1 at
  * power-on / F1 + POWER and the Enaga menu. Keys are debounced in keys.c. */
 
 extern char __bss_start[], __bss_end[];
@@ -52,25 +52,42 @@ static void poll_for(u32 ms)                  /* a pause in the MCU start messag
     while (timer_ms() - start < ms) uart1_poll();
 }
 
-/* Pad thresholds, provisional until readings are measured on a unit: a press at the original firmware's 800, a
- * release below 600, and velocity from the first reading over the threshold, 127 at PAD_FULL or more. */
+/* Pads. A press starts at the original firmware's 800 and ends below 600. A pad's reading rises over several of
+ * the MCU's reports (each pad every 3.8 ms), so the first report over 800 says little about how hard it was hit
+ * (on the unit it was nearly always just over 800: session 1, docs/hardware.md "Pad readings"). The press is
+ * therefore sent at the next report, with velocity from the higher of the two, 127 at PAD_FULL or more: at most
+ * one report (3.8 ms) later. A pad released before that still gives its press, then the release. Measured on the
+ * unit: a light press reads about 1,500, a hard one about 3,400. */
 #define PAD_PRESS    800u
 #define PAD_RELEASE  600u
-#define PAD_FULL     12000u
-static u8 pad_down[15];
+#define PAD_FULL     3300u
+enum { PAD_UP, PAD_RISING, PAD_DOWN };
+static u8 pad_state[15];
+static u16 pad_peak[15];
+
+static void pad_press(int channel, enaga_event_t *e)
+{
+    unsigned peak = pad_peak[channel] < PAD_FULL ? pad_peak[channel] : PAD_FULL;
+    pad_state[channel] = PAD_DOWN;
+    e->type = ENAGA_EVENT_PAD_PRESS;
+    e->value = 1 + (int)(126u * (peak - PAD_PRESS) / (PAD_FULL - PAD_PRESS));
+    apps_event(e);
+}
 
 static void on_pad(int channel, unsigned value)
 {
     enaga_event_t e;
     if (channel >= 15) return;                /* channel 15 is the battery */
     e.id = (u16)channel; e.ms = timer_ms();
-    if (!pad_down[channel] && value >= PAD_PRESS) {
-        pad_down[channel] = 1;
-        e.type = ENAGA_EVENT_PAD_PRESS;
-        e.value = 1 + (int)(126u * ((value < PAD_FULL ? value : PAD_FULL) - PAD_PRESS) / (PAD_FULL - PAD_PRESS));
-        apps_event(&e);
-    } else if (pad_down[channel] && value < PAD_RELEASE) {
-        pad_down[channel] = 0;
+    if (pad_state[channel] == PAD_UP && value >= PAD_PRESS) {
+        pad_state[channel] = PAD_RISING;
+        pad_peak[channel] = (u16)value;
+    } else if (pad_state[channel] == PAD_RISING) {
+        if (value > pad_peak[channel]) pad_peak[channel] = (u16)value;
+        pad_press(channel, &e);
+    }
+    if (pad_state[channel] == PAD_DOWN && value < PAD_RELEASE) {
+        pad_state[channel] = PAD_UP;
         e.type = ENAGA_EVENT_PAD_RELEASE; e.value = 0;
         apps_event(&e);
     }

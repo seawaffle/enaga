@@ -80,8 +80,9 @@ class Synth(unittest.TestCase):
         emu.run(15 * MS)
 
     def pad(self, emu, pad, reading):
-        emu.cpu.uart_receive(1, bytes([0xB0 | pad, reading & 0x7F, reading >> 7]))
-        emu.run(4 * MS)
+        for _ in range(2):                        # the MCU reports each pad every 3.8 ms; a press needs two reports
+            emu.cpu.uart_receive(1, bytes([0xB0 | pad, reading & 0x7F, reading >> 7]))
+            emu.run(4 * MS)
 
     def pitch(self, emu, ms=200):
         """The left channel's frequency from rising zero crossings over the last `ms`."""
