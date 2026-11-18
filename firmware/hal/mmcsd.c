@@ -138,6 +138,27 @@ static int io_fail(int code, u32 st)  /* sd_read / sd_write failures, for the ke
     return code;
 }
 
+/* GP4[1], which the stock firmware drives low and never changes, of unknown purpose: tried as the card's power
+ * switch (unit session 2: a card that stops answering stays so across switching the unit off, until taken out).
+ * The controller is held in reset with its clock off meanwhile, so the bus does not feed the card. */
+static void pause_ms(u32 ms)
+{
+    u32 start = timer_ticks();
+    while (timer_ticks() - start < ms * TICKS_PER_MS)
+        if (sd_wait_hook) sd_wait_hook();
+}
+
+void sd_power_cycle(void)
+{
+    REG32(MMC + MMCCTL) = 3;
+    REG32(MMC + MMCCLK) = 0;
+    gpio_set(4, 1);
+    pause_ms(250);
+    gpio_clr(4, 1);
+    pause_ms(50);
+    card_ready = 0;
+}
+
 static int fail(int code)             /* sd_init failures are shown on the status page: step and MMCST0 bits */
 {
     sd_error = code;

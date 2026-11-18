@@ -246,11 +246,16 @@ static u32 size32(FSIZE_t size) { return size > 0xFFFFFFFFu ? 0xFFFFFFFFu : (u32
 int files_mount(void)                         /* FR_OK or the FatFs error */
 {
     FRESULT r = f_mount(&fs, "", 1);
-    mounted = r == FR_OK;
     if (r != FR_OK && sd_present()) {
         log_codes("MOUNT ", 3, (int)r, sd_error, sd_error_status);
         if (r == FR_DISK_ERR) log_codes("SD ERR ", 3, sd_io_error, 0, sd_io_status);
+        if (r == FR_NOT_READY || r == FR_DISK_ERR) {   /* the card not answering: GP4[1] cycled, then once more */
+            sd_power_cycle();
+            r = f_mount(&fs, "", 1);
+            log_codes(r == FR_OK ? "SD CYCLED OK " : "SD CYCLED MOUNT ", 1, (int)r, 0, 0);
+        }
     }
+    mounted = r == FR_OK;
     return r;
 }
 

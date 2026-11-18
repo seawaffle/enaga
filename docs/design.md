@@ -918,4 +918,9 @@ explain why switching off does not clear it); not touched without the owner.
 
 - The status page gains an SD line: sectors read and written since start-up (`sd_reads`, `sd_writes`), and on a
   failure its code, the command in flight (`sd_io_command`) and MMCST0's low byte. The log shows five lines.
+- With the owner's agreement, GP4[1] is tried as the card's power switch: when a mount fails because the card
+  does not answer (FR_NOT_READY or a disk error), `sd_power_cycle` holds the controller in reset with its clock
+  off, drives GP4[1] high for 250 ms and low again, waits 50 ms, and the mount is tried once more; the log says
+  `SD CYCLED OK 0` or `SD CYCLED MOUNT <FRESULT>`. This covers start-up, the remount after an app is dropped, and
+  a card put back in. Not exercised on the emulator (its card always answers).
 

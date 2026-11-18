@@ -83,6 +83,7 @@ extern u32 sd_error_status;           /* ... and the MMCST0 bits the failing com
 int  sd_present(void);                /* card detect, GP4[0] low */
 int  sd_read(u8 *buffer, u32 sector, u32 count);     /* 512-byte sectors; 0 = ok */
 int  sd_write(const u8 *buffer, u32 sector, u32 count);
+void sd_power_cycle(void);           /* GP4[1] high 250 ms, then low (a guess at the card's power switch) */
 extern void (*sd_wait_hook)(void);   /* called while the driver waits on the card (the kernel feeds its watchdog) */
 extern int sd_io_error;              /* the last sd_read / sd_write failure: its return code ... */
 extern u32 sd_io_status;             /* ... MMCST0 bits, or for -6 the card status (still programming after 1 s) */
