@@ -937,3 +937,13 @@ card. Sequence 1 ran second, on a card already silent, so its result says nothin
 - Sequence 1 is now the default for every write (sequence 0 is known to stop the card); all 44 tests pass with
   it, the synth's patches and the CHECK card test included.
 
+Fifth try: `T1 ERR-4 0210`: sequence 1's CMD24 was answered and all 512 bytes left the FIFO (each FIFOEMP wait
+succeeded), but DATDNE (the card's CRC status and programming) did not come within 500 ms (0x0010 is the driver's
+own time-out flag, 0x0200 DXRDY). Neither `sd_init` alone nor the GP4[1] cycle revived the card afterwards (`R-2
+P-2`): GP4[1] is not the card's power, and a failed write still leaves the card silent until it is taken out.
+
+- The probe is now a bus-clock ladder: one sector each at 1.5, 5.8 and 23 MHz (CLKRT 61, 15, 3), read back,
+  stopping at the first failure, so one boot (one stuck card) answers whether the CPU keeping the FIFO fed is the
+  problem (the stock writes by EDMA). Lines `W1 OK 3MS` ... `W3 ERR-4 0210 S 21` (MMCST1 at the failure).
+- The write's DATDNE wait is 2 s (the SD limit for programming is 250-500 ms).
+

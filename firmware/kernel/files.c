@@ -311,16 +311,15 @@ static void card_watch(u32 ms)
     if (present) card_inserted(); else card_removed();
 }
 
-/* The write probe (unit session 2): which SD write sequence a real card takes, without risking the file system.
- * When /ENAGA/SDTEST.BIN (at least 1 KiB, made on a computer) is on the card, each boot writes a pattern into its
- * first sector by sequence 1 (hal.h sd_write_mode: the FIFO filled before the command) and into its second by
- * sequence 0, reads each back, and logs one line each (the status page is 21 characters wide):
- *   "T1 OK 3MS"            the sector reads back as written, in 3 ms
- *   "T1 BAD 5 1234ABCD"    the first wrong word and what it holds; then "T1 SH -16" if the pattern is shifted
- *   "T1 ERR-2 0010 R-2 P0" sd_write's code and MMCST0's low half; then the card revived by sd_init alone (R, its
- *                          code) or, if that failed, after the GP4[1] power cycle (P, sd_init's code then)
- * Only the file's own data is overwritten, never the FAT or a folder. First found on a unit: sequence 0's first
- * CMD24 got no response and the card answered nothing more. */
+/* The write probe (unit session 2): how a real card takes Enaga's writes, without risking the file system. When
+ * /ENAGA/SDTEST.BIN (at least 2 KiB, made on a computer) is on the card, each boot writes a pattern into its first
+ * three sectors, one at each bus clock of a ladder, reading each back, and stops at the first failure (on a unit a
+ * failed write leaves the card silent until it is taken out). One line each, at most 21 characters:
+ *   "W1 OK 3MS"            1.5 MHz (W2: 5.8 MHz, W3: 23 MHz): the sector reads back as written, in 3 ms
+ *   "W2 BAD 5 1234ABCD"    the first wrong word and what it holds; then "W2 SH -16" if the pattern is shifted
+ *   "W3 ERR-4 0210 S 21"   sd_write's code, MMCST0's low half and MMCST1 at the failure
+ * Writes use sd_write_mode 1 (the FIFO filled before the command; mode 0's first CMD24 got no response). Only the
+ * file's own data is overwritten, never the FAT or a folder. */
 static u32 probe_out[128], probe_back[128];
 
 static void probe_line(char *line, int n) { line[n] = 0; log_line(line); }
@@ -332,39 +331,31 @@ static int put_hex(char *line, int n, u32 v, int digits)
     return n;
 }
 
-static void probe_mode(int mode, u32 sector)
+static int probe_step(int step, u32 sector)       /* 1 if the sector reads back as written */
 {
-    char line[40] = "T0 ";
-    int i, bad = -1, shift = 0, w, n = 3, revived, normal = sd_write_mode;
+    char line[40] = "W0 ";
+    int i, bad = -1, shift = 0, w, n = 3;
     u32 start;
-    line[1] = (char)('0' + mode);
-    for (i = 0; i < 128; i++) probe_out[i] = (u32)(mode + 1) << 28 | (u32)i << 16 | (~(u32)i & 0xFFFF);
+    line[1] = (char)('0' + step);
+    for (i = 0; i < 128; i++) probe_out[i] = (u32)step << 28 | (u32)i << 16 | (~(u32)i & 0xFFFF);
     for (i = 0; i < 128; i++) probe_back[i] = 0;
-    sd_write_mode = mode;
     start = tsc_read();
     w = sd_write((const u8 *)probe_out, sector, 1);
-    sd_write_mode = normal;
     if (w) {
         n = put_text(line, n, "ERR");
         n = put_dec(line, n, w);
         line[n++] = ' ';
         n = put_hex(line, n, sd_io_status, 4);
-        revived = sd_init();
-        n = put_text(line, n, " R");
-        n = put_dec(line, n, revived);
-        if (revived) {
-            sd_power_cycle();
-            n = put_text(line, n, " P");
-            n = put_dec(line, n, sd_init());
-        }
+        n = put_text(line, n, " S ");
+        n = put_hex(line, n, sd_io_status1, 2);
         probe_line(line, n);
-        return;
+        return 0;
     }
     if (sd_read((u8 *)probe_back, sector, 1)) {
         n = put_text(line, n, "READ ERR");
         n = put_dec(line, n, sd_io_error);
         probe_line(line, n);
-        return;
+        return 0;
     }
     for (i = 0; i < 128 && bad < 0; i++) if (probe_back[i] != probe_out[i]) bad = i;
     if (bad < 0) {
@@ -372,7 +363,7 @@ static void probe_mode(int mode, u32 sector)
         n = put_dec(line, n, (int)((tsc_read() - start) / TICKS_PER_MS));
         n = put_text(line, n, "MS");
         probe_line(line, n);
-        return;
+        return 1;
     }
     n = put_text(line, n, "BAD ");
     n = put_dec(line, n, bad);
@@ -392,25 +383,29 @@ static void probe_mode(int mode, u32 sector)
         n = put_dec(line, n, shift);
         probe_line(line, n);
     }
+    return 0;
 }
 
 void files_write_probe(void)
 {
+    static const u32 clkrt[3] = { 61, 15, 3 };   /* 1.5, 5.8 and 23 MHz */
     static FIL f;
-    u32 sector[2];
+    u32 sector[3];
     UINT got;
     u8 byte;
-    int k;
+    int k, ok = 1;
     if (!mounted || f_open(&f, "/ENAGA/SDTEST.BIN", FA_READ) != FR_OK) return;
-    if (f_size(&f) < 1024) { f_close(&f); log_line("SDT FILE UNDER 1 KIB"); return; }
-    for (k = 0; k < 2; k++) {                     /* the sectors holding bytes 0 and 512 */
+    if (f_size(&f) < 2048) { f_close(&f); log_line("SDT FILE UNDER 2 KIB"); return; }
+    for (k = 0; k < 3; k++) {                     /* the sectors holding bytes 0, 512 and 1024 */
         if (f_lseek(&f, 512u * (u32)k) != FR_OK || f_read(&f, &byte, 1, &got) != FR_OK || !got) { f_close(&f); return; }
         sector[k] = (u32)f.sect;
     }
     f_close(&f);
-    probe_mode(1, sector[0]);
-    probe_mode(0, sector[1]);
-    mounted = f_mount(&fs, "", 1) == FR_OK;      /* FatFs starts afresh after the driver's re-initialisations */
+    for (k = 0; k < 3 && ok; k++) {
+        sd_data_clock(clkrt[k]);
+        ok = probe_step(k + 1, sector[k]);
+    }
+    sd_data_clock(3);
 }
 
 void files_init(void)

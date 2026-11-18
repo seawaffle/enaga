@@ -64,6 +64,7 @@ u32 sd_error_status;
 void (*sd_wait_hook)(void);
 int sd_io_error;
 u32 sd_io_command;
+u32 sd_io_status1;
 u32 sd_io_status;
 u32 sd_write_slowest;
 u32 sd_reads, sd_writes;                   /* sectors moved without error since start-up */
@@ -163,6 +164,7 @@ static int write_fail(int code, u32 st)   /* a write that failed: the controller
                                               * so it is not left in the middle of a transfer */
 {
     u32 ctl = REG32(MMC + MMCCTL);
+    sd_io_status1 = REG32(MMC + MMCST1);
     REG32(MMC + MMCCTL) = ctl | 3;
     REG32(MMC + MMCCTL) = ctl & ~3u;
     return io_fail(code, st);
@@ -227,6 +229,8 @@ static int fifo_empty(u32 timeout_ms)          /* MMCST1 FIFOEMP */
     return 1;
 }
 
+void sd_data_clock(u32 clkrt) { REG32(MMC + MMCCLK) = 0x100 | clkrt; }
+
 static void fifo_setup(int write)
 {
     REG32(MMC + MMCFIFOCTL) = 1;                     /* reset */
@@ -287,7 +291,9 @@ int sd_write(const u8 *buffer, u32 sector, u32 count)
                 for (k = 0; k < 16; k++) REG32(MMC + MMCDXR) = *in++;
             }
         }
-        if (!data_ok(st = wait_status(ST0_DATDNE, 500), ST0_DATDNE)) return write_fail(-4, st);
+        /* DATDNE waits for the card's CRC status and its programming (busy); the SD limit for that is 250 ms (SDSC)
+         * to 500 ms (SDHC/SDXC), and 2 s leaves room (unit session 2: 500 ms ran out on the first write). */
+        if (!data_ok(st = wait_status(ST0_DATDNE, 2000), ST0_DATDNE)) return write_fail(-4, st);
         programming = timer_ticks();                 /* CMD13 until the card is back in tran (state 4) */
         for (;;) {
             if (!ok(st = command(13, rca << 16, RSP_48))) return write_fail(-5, st);

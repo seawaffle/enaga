@@ -91,7 +91,9 @@ extern int sd_write_mode;            /* 1 (default): first 64 bytes in the FIFO 
                                        * then data at DXRDY (on a unit its first CMD24 got no response, session 2) */
 extern u32 sd_write_slowest;
 extern u32 sd_reads, sd_writes;      /* sectors moved without error since start-up */
-extern u32 sd_io_command;            /* the command index in flight at the last sd_read / sd_write failure */         /* the longest one-sector write so far, in time-stamp ticks */
+extern u32 sd_io_command;
+extern u32 sd_io_status1;            /* MMCST1 when a write failed (BUSY 1, CLKSTP 2, DXEMP 4, FIFOEMP 0x20, FIFOFUL 0x40) */
+void sd_data_clock(u32 clkrt);       /* the bus clock after initialisation: 186 MHz / (2 (clkrt + 1)); 3 = 23 MHz */            /* the command index in flight at the last sd_read / sd_write failure */         /* the longest one-sector write so far, in time-stamp ticks */
 /* Graphics: Enaga and apps draw on a row-major canvas, one byte (0-15) per pixel; gfx_present converts it
  * to the panel's 4-bpp order (gfx.c) and sends it. */
 #define CANVAS_W 128
