@@ -14,6 +14,7 @@
 #define INTMUX2  (INTC + 0x108)
 
 volatile int irq_active;
+volatile u32 irq_count[16];
 static u32 enabled;
 
 void irq_init(void)
@@ -32,6 +33,7 @@ void irq_enable(u32 mask)
 void enaga_irq(unsigned number)
 {
     irq_active++;
+    irq_count[number & 15]++;
     if (number == IRQ_WATCHDOG) watchdog_isr();
     else if (number == IRQ_UART1) uart1_isr();
     else if (number == IRQ_AUDIO) audio_isr();

@@ -16,6 +16,8 @@
 #define WATCHDOG_AUDIO_MS 100u
 
 volatile u32 watchdog_ticks;
+u32 watchdog_irp;
+int watchdog_tripped;
 static volatile u32 fed;
 
 void watchdog_feed(void) { fed = tsc_read(); }
@@ -34,6 +36,8 @@ void watchdog_isr(void)
         apps_fatal("APP HUNG IN AUDIO");
     if (now - fed > WATCHDOG_MAIN_MS * TICKS_PER_MS) {
         if (app_current || app_busy) apps_fatal("APP NOT RESPONDING");
+        watchdog_irp = irp_read();
+        watchdog_tripped = 1;
         kernel_crash("WATCHDOG");
     }
 }

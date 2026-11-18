@@ -417,6 +417,14 @@ exception_resume:
 	b .S2 nrp
 	nop 5
 
+; u32 irp_read(void): the IRP register (the return address of the interrupt being handled).
+	.global irp_read
+irp_read:
+	mvc .S2 irp, b0
+	b .S2 b3
+	mv .L1X b0, a4
+	nop 4
+
 ; void exceptions_enable(void): TSR.GEE, so internal and software exceptions are taken (external ones, XEN,
 ; stay off: no event is routed to EXCEP).
 	.global exceptions_enable

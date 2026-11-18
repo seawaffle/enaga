@@ -44,12 +44,22 @@ void kernel_crash(const char *reason)
     gfx_clear(0);
     gfx_text(0, 0, "ENAGA CRASH", 15);
     gfx_text(0, 12, reason, 15);
-    line(30, "PC   ", exception_record[0], 12);
-    line(40, "EFR  ", exception_record[1], 12);
-    line(50, "IERR ", exception_record[2], 12);
-    line(60, "NTSR ", exception_record[3], 12);
-    line(70, "SP   ", exception_record[4], 12);
-    line(80, "B3   ", exception_record[5], 12);
+    if (watchdog_tripped) {                   /* where the main loop was; see kernel.h */
+        line(30, "PC   ", watchdog_irp, 12);
+        line(40, "STAGE", kernel_stage, 12);
+        line(50, "PASS ", kernel_passes, 12);
+        line(60, "IRQ4 ", irq_count[4], 12);
+        line(70, "IRQ6 ", irq_count[6], 12);
+        line(80, "IRQ8 ", irq_count[8], 12);
+        line(90, "BLKS ", audio_blocks, 12);
+    } else {
+        line(30, "PC   ", exception_record[0], 12);
+        line(40, "EFR  ", exception_record[1], 12);
+        line(50, "IERR ", exception_record[2], 12);
+        line(60, "NTSR ", exception_record[3], 12);
+        line(70, "SP   ", exception_record[4], 12);
+        line(80, "B3   ", exception_record[5], 12);
+    }
     gfx_text(0, 100, "HOLD POWER TO SWITCH", 8);
     gfx_text(0, 109, "OFF", 8);
     gfx_present();

@@ -81,6 +81,12 @@ void exceptions_enable(void);
 void exception_resume(void (*fn)(void), u32 sp);
 void enaga_exception(void);
 void kernel_crash(const char *reason);         /* never returns */
+/* For the watchdog's crash screen: the main loop's step (main.c), its passes, interrupts taken per CPU interrupt,
+ * and IRP when the watchdog tripped (where the interrupted code was). */
+extern volatile u32 kernel_stage, kernel_passes, irq_count[16];
+extern u32 watchdog_irp;
+extern int watchdog_tripped;
+u32 irp_read(void);                            /* start.s: the IRP register */
 
 /* watchdog.c: the 10 ms tick checks the audio callback and the main loop are still progressing */
 extern volatile u32 watchdog_ticks;

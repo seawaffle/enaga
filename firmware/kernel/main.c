@@ -18,6 +18,7 @@ static u64 last_keys;
 static int encoder_last[5];
 static u32 a0_last_ms, a0_sent;
 static int power_seen_up, power_was_down;
+volatile u32 kernel_stage, kernel_passes;
 static u32 power_down_since, last_draw;
 static int display_dma;                      /* frames by EDMA once the audio engine has powered it */
 
@@ -161,17 +162,25 @@ void kernel_loop(void)
     if (!app_current) leds_off();                /* start-up with no app, or an app was just dropped */
     for (;;) {
         u32 ms = timer_ms();
+        kernel_passes++;
+        kernel_stage = 1;
         watchdog_feed();
         poll_inputs(ms);
+        kernel_stage = 2;
         if (app_current && app_current->update) app_current->update(app_current->context, ms);
+        kernel_stage = 3;
         poll_power(ms);
+        kernel_stage = 4;
         busy = display_dma ? oled_dma_poll() : 0;   /* also releases the chip select after a frame */
         if (ms - last_draw >= 50 && !busy) {        /* a frame still in flight delays the next draw */
             last_draw = ms;
+            kernel_stage = 5;
             if (app_current && app_current->draw) app_current->draw(app_current->context, canvas);
             else status_page(ms);
+            kernel_stage = 6;
             if (display_dma) gfx_present_dma(); else gfx_present();
         }
+        kernel_stage = 7;
         /* Sleep until the next interrupt: the audio block (every 1.33 ms), UART1 (each byte from the panel MCU,
          * about 12,600 a second on the unit), the timer (10 ms). So a pass still runs at least 750 times a second,
          * more often than the original firmware polls the encoders (each 1 ms tick). Work an interrupt leaves
