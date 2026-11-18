@@ -891,3 +891,19 @@ time is Enaga's. On the emulator a sector programs at once.
 - Which it was (slow programming or a status the driver misreads) is for the rerun to show. If writes are slow,
   multi-block writes (CMD25), which cards are built for, are the next step for the driver.
 
+Second try (same day): CHECK stopped with CARD TEST FAILED, `CARD CARD ERROR` and no `SD ERR` line, so FatFs
+failed with something other than a disk error (an inconsistent FAT gives FR_INT_ERR); after it every boot showed
+CARD ERROR, while a PC still reads the card. The write path had never run on hardware, and how it orders the
+data and the command is in doubt: TI's CPU write sequence, as read here, fills the FIFO before the command; the
+driver sends the command first, and the emulator models the latter (a write to the FIFO before the command
+faults there once DCLR has raised DXRDY). Neither is confirmed, so the next build measures instead of guessing:
+
+- `sd_write_mode` chooses the sequence (0, the old one, stays the default; 1 fills the first 64 bytes before
+  the command, then waits for MMCST1 FIFOEMP before each further 64).
+- With `/ENAGA/SDTEST.BIN` on the card (`tools/unit_card.py` stages 4 KiB of zeros), each boot writes a pattern
+  into the file's first sector by sequence 0 and its second by sequence 1, reads both back, and logs `SDT <mode>
+  OK <ms>`, or `BAD <word> <value>` and `SHIFT <words>`. Only that file's data is written, never the FAT or a
+  folder. `test_files.py` checks it on the emulator (both OK, the patterns in place, the rest untouched).
+- A failed mount logs `MOUNT <FRESULT> <sd_init code> <MMCST0>`, and every file failure reported as CARD
+  ERROR logs `FS ERR <FRESULT>` (with `SD ERR` for a disk error). 44 tests; dry run 141/141.
+

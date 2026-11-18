@@ -53,21 +53,36 @@ u32 files_requests_done;
 
 /* ---- helpers ---------------------------------------------------------------------------------------------- */
 
-/* The SD driver's failures and slow writes, in the log (the status page shows it): "SD ERR -6 00000E00" (the
- * driver's code and MMCST0 bits, or the card status for -6) and "SD SLOW 120 MS" for each new slowest one-sector
- * write over 50 ms. */
+/* Card failures in the log (the status page shows it): "FS ERR 2" (FatFs's FRESULT for a failure reported as
+ * CARD ERROR), "SD ERR -6 0 00000E00" (the driver's code and MMCST0 bits, or for -6 the card status), "MOUNT 3 -2
+ * 00000000" (a failed mount: FRESULT, sd_init's code and MMCST0 bits) and "SD SLOW 120 MS" for each new slowest
+ * one-sector write over 50 ms. */
 static u32 slow_logged;
 
-static void log_hex_line(const char *prefix, int code, u32 word)
+static int put_dec(char *line, int n, int value)
+{
+    char digits[12];
+    int k = 0;
+    u32 v = value < 0 ? (u32)-value : (u32)value;
+    if (value < 0) line[n++] = '-';
+    do { digits[k++] = (char)('0' + v % 10); v /= 10; } while (v);
+    while (k) line[n++] = digits[--k];
+    return n;
+}
+
+/* "<prefix><a>", then " <b>" if count >= 2, then " <word in hex>" if count >= 3. */
+static void log_codes(const char *prefix, int count, int a, int b, u32 word)
 {
     static const char hex[] = "0123456789ABCDEF";
-    char line[32];
+    char line[40];
     int n = 0, i;
     while (*prefix) line[n++] = *prefix++;
-    line[n++] = code < 0 ? '-' : ' ';
-    line[n++] = (char)('0' + (code < 0 ? -code : code) % 10);
-    line[n++] = ' ';
-    for (i = 28; i >= 0; i -= 4) line[n++] = hex[word >> i & 15];
+    n = put_dec(line, n, a);
+    if (count >= 2) { line[n++] = ' '; n = put_dec(line, n, b); }
+    if (count >= 3) {
+        line[n++] = ' ';
+        for (i = 28; i >= 0; i -= 4) line[n++] = hex[word >> i & 15];
+    }
     line[n] = 0;
     log_line(line);
 }
@@ -88,7 +103,11 @@ static void log_slow_writes(void)
 
 static int32_t map(FRESULT r)
 {
-    if (r == FR_DISK_ERR && sd_present()) log_hex_line("SD ERR ", sd_io_error, sd_io_status);
+    if (r != FR_OK && r != FR_NO_FILE && r != FR_NO_PATH && r != FR_EXIST && r != FR_DENIED && r != FR_LOCKED &&
+        r != FR_INVALID_NAME && r != FR_TOO_MANY_OPEN_FILES && r != FR_INVALID_OBJECT && sd_present()) {
+        log_codes("FS ERR ", 1, (int)r, 0, 0);
+        if (r == FR_DISK_ERR) log_codes("SD ERR ", 3, sd_io_error, 0, sd_io_status);
+    }
     switch (r) {
     case FR_OK: return ENAGA_FILE_OK;
     case FR_NO_FILE: case FR_NO_PATH: return ENAGA_FILE_NOT_FOUND;
@@ -228,6 +247,10 @@ int files_mount(void)                         /* FR_OK or the FatFs error */
 {
     FRESULT r = f_mount(&fs, "", 1);
     mounted = r == FR_OK;
+    if (r != FR_OK && sd_present()) {
+        log_codes("MOUNT ", 3, (int)r, sd_error, sd_error_status);
+        if (r == FR_DISK_ERR) log_codes("SD ERR ", 3, sd_io_error, 0, sd_io_status);
+    }
     return r;
 }
 
@@ -281,6 +304,60 @@ static void card_watch(u32 ms)
     card_changing = 0;
     card_seen = present;
     if (present) card_inserted(); else card_removed();
+}
+
+/* The write probe (unit session 2): which SD write sequence a real card takes, without risking the file system.
+ * When /ENAGA/SDTEST.BIN (at least 1 KiB, made on a computer) is on the card, each boot writes a pattern into its
+ * first sector the driver's way 0 and into its second the way 1 (hal.h sd_write_mode), reads each back and logs
+ * "SDT <mode> OK <ms>" or "SDT <mode> BAD <first wrong word> <its value>", plus "SDT <mode> SHIFT <words>" when
+ * the sector holds the pattern moved along. Only the file's own data is overwritten, never the FAT or a folder. */
+static u32 probe_out[128], probe_back[128];
+
+static void probe_mode(int mode, u32 sector)
+{
+    int i, bad = -1, shift = 0, w, r;
+    u32 start;
+    for (i = 0; i < 128; i++) probe_out[i] = (u32)(mode + 1) << 28 | (u32)i << 16 | (~(u32)i & 0xFFFF);
+    for (i = 0; i < 128; i++) probe_back[i] = 0;
+    sd_write_mode = mode;
+    start = tsc_read();
+    w = sd_write((const u8 *)probe_out, sector, 1);
+    r = sd_read((u8 *)probe_back, sector, 1);
+    sd_write_mode = 0;
+    if (w || r) {
+        log_codes(mode ? "SDT 1 ERR " : "SDT 0 ERR ", 3, w, r, w ? sd_io_status : 0);
+        return;
+    }
+    for (i = 0; i < 128 && bad < 0; i++) if (probe_back[i] != probe_out[i]) bad = i;
+    if (bad < 0) { log_codes(mode ? "SDT 1 OK " : "SDT 0 OK ", 1, (int)((tsc_read() - start) / TICKS_PER_MS), 0, 0); return; }
+    log_codes(mode ? "SDT 1 BAD " : "SDT 0 BAD ", 3, bad, 0, probe_back[bad]);
+    for (w = 1; w < 64 && !shift; w++) {          /* the pattern moved later by w words? */
+        for (i = w; i < 128 && probe_back[i] == probe_out[i - w]; i++) {}
+        if (i == 128) shift = w;
+    }
+    for (w = 1; w < 64 && !shift; w++) {          /* ... or earlier? */
+        for (i = 0; i + w < 128 && probe_back[i] == probe_out[i + w]; i++) {}
+        if (i + w == 128) shift = -w;
+    }
+    if (shift) log_codes(mode ? "SDT 1 SHIFT " : "SDT 0 SHIFT ", 1, shift, 0, 0);
+}
+
+void files_write_probe(void)
+{
+    static FIL f;
+    u32 sector[2];
+    UINT got;
+    u8 byte;
+    int k;
+    if (!mounted || f_open(&f, "/ENAGA/SDTEST.BIN", FA_READ) != FR_OK) return;
+    if (f_size(&f) < 1024) { f_close(&f); log_line("SDT FILE UNDER 1 KIB"); return; }
+    for (k = 0; k < 2; k++) {                     /* the sectors holding bytes 0 and 512 */
+        if (f_lseek(&f, 512u * (u32)k) != FR_OK || f_read(&f, &byte, 1, &got) != FR_OK || !got) { f_close(&f); return; }
+        sector[k] = (u32)f.sect;
+    }
+    f_close(&f);
+    probe_mode(0, sector[0]);
+    probe_mode(1, sector[1]);
 }
 
 void files_init(void)

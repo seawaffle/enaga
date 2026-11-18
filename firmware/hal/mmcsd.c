@@ -180,6 +180,18 @@ int sd_init(void)
     return 0;
 }
 
+int sd_write_mode;
+
+static int fifo_empty(u32 timeout_ms)          /* MMCST1 FIFOEMP */
+{
+    u32 start = timer_ticks();
+    while (!(REG32(MMC + MMCST1) & 0x20)) {
+        if (sd_wait_hook) sd_wait_hook();
+        if (timer_ticks() - start > timeout_ms * TICKS_PER_MS) return 0;
+    }
+    return 1;
+}
+
 static void fifo_setup(int write)
 {
     REG32(MMC + MMCFIFOCTL) = 1;                     /* reset */
@@ -218,12 +230,26 @@ int sd_write(const u8 *buffer, u32 sector, u32 count)
         fifo_setup(1);
         REG32(MMC + MMCBLEN) = 512;
         REG32(MMC + MMCNBLK) = 1;
-        st = command(24, high_capacity ? sector : sector * 512, RSP_48 | CMD_WDATX | CMD_DTRW | CMD_DCLR);
-        if (!ok(st)) return io_fail(-2, st);
-        for (i = 0; i < 512 / 4; i += 16) {
-            u32 k;
-            if (!data_ok(st = wait_status(ST0_DXRDY, 500), ST0_DXRDY)) return io_fail(-3, st);
-            for (k = 0; k < 16; k++) REG32(MMC + MMCDXR) = *in++;
+        if (sd_write_mode == 1) {
+            /* TI's CPU write sequence as read from SPRUH79 (MMC/SD "single-block write operation using CPU"): the
+             * first 64 bytes in the FIFO before the command, then each further 64 once the FIFO has emptied
+             * (MMCST1 FIFOEMP; DXRDY may be left over from the command's DCLR). */
+            for (i = 0; i < 16; i++) REG32(MMC + MMCDXR) = *in++;
+            st = command(24, high_capacity ? sector : sector * 512, RSP_48 | CMD_WDATX | CMD_DTRW | CMD_DCLR);
+            if (!ok(st)) return io_fail(-2, st);
+            for (i = 16; i < 512 / 4; i += 16) {
+                u32 k;
+                if (!fifo_empty(500)) return io_fail(-3, REG32(MMC + MMCST1));
+                for (k = 0; k < 16; k++) REG32(MMC + MMCDXR) = *in++;
+            }
+        } else {                                     /* the command, then 64 bytes at each DXRDY */
+            st = command(24, high_capacity ? sector : sector * 512, RSP_48 | CMD_WDATX | CMD_DTRW | CMD_DCLR);
+            if (!ok(st)) return io_fail(-2, st);
+            for (i = 0; i < 512 / 4; i += 16) {
+                u32 k;
+                if (!data_ok(st = wait_status(ST0_DXRDY, 500), ST0_DXRDY)) return io_fail(-3, st);
+                for (k = 0; k < 16; k++) REG32(MMC + MMCDXR) = *in++;
+            }
         }
         if (!data_ok(st = wait_status(ST0_DATDNE, 500), ST0_DATDNE)) return io_fail(-4, st);
         programming = timer_ticks();                 /* CMD13 until the card is back in tran (state 4) */

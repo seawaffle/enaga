@@ -3,6 +3,7 @@ this reads it, and the files the app wrote, back from the card image (tools/card
 
     ENAGA_EMULATOR=/path/to/emulator python3 -B -m unittest tests.test_files
 """
+import struct
 import sys
 import tempfile
 import unittest
@@ -125,6 +126,28 @@ class Files(unittest.TestCase):
         self.assertEqual(results["full_remove"], 0)
         self.assertIsNone(out)
         self.assertEqual(patch, b"second")
+
+
+    def test_write_probe(self):
+        # /ENAGA/SDTEST.BIN: both SD write sequences into the file's first two sectors, read back; the rest of the
+        # card untouched (the file still reads, with the patterns in it).
+        from emulate import Emulation
+        with tempfile.TemporaryDirectory() as d:
+            image = Path(d) / "card.img"
+            card.make(image, 64, "fat", {"/ENAGA/SDTEST.BIN": bytes(4096), "/SAMPLES/BIG.RAW": BIG})
+            with Emulation() as emu:
+                emu.cpu.sd_load(image.read_bytes())
+                self.assertIsNone(emu.run(1000 * MS)["error"])
+                log = emu.report()["log"]
+                image.write_bytes(emu.cpu.sd_read())
+            self.assertEqual([line.split()[:3] for line in log if line.startswith("SDT")],
+                             [["SDT", "0", "OK"], ["SDT", "1", "OK"]], log)
+            data = card.get(image, "/ENAGA/SDTEST.BIN")
+            for mode in range(2):
+                words = struct.unpack("<128I", data[512 * mode:512 * mode + 512])
+                self.assertEqual(words, tuple((mode + 1) << 28 | i << 16 | (~i & 0xFFFF) for i in range(128)))
+            self.assertEqual(data[1024:], bytes(3072))
+            self.assertEqual(card.get(image, "/SAMPLES/BIG.RAW"), BIG)
 
 
 if __name__ == "__main__":

@@ -65,6 +65,7 @@ void files_init(void);
 int  files_mount(void);                        /* FR_OK or the FatFs error */
 int  files_mounted(void);
 int  files_service(u32 ms);                    /* each main-loop pass; non-zero while work remains */
+void files_write_probe(void);                /* /ENAGA/SDTEST.BIN: the SD write sequences (files.c) */
 void files_app_stopped(void);                  /* main context, after the app's stop() */
 extern volatile int files_reset_pending;      /* set when an app is dropped: the next pass resets and remounts */
 extern u32 files_requests_done;
