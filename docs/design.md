@@ -163,14 +163,14 @@ Proposal, grouped by service. Names are illustrative until each service exists.
 
 ## Status
 
-E0 is complete. E1 has its kernel, audio engine, display DMA and exception handling, all tested on the
-emulator; nothing has run on a unit yet. The watchdog, key debouncing and the start-up cache configuration are in
-place (emulator-tested). Remaining for E1: the first session on the unit, prepared (docs/hardware.md "Checks on
-a unit", the CHECK app in `tests/unit/check`, `tools/unit_card.py`) and not yet run.
+E0 and E1 are complete. E1's kernel, audio engine, display DMA, exception handling, watchdog, key debouncing
+and cache configuration ran on a unit in the first session (2026-11-18, results below and in docs/hardware.md);
+its exit measurement, audio headroom with caches on, is taken: Enaga's own share is about 3 % of the audio
+budget, a computed voice costs about 1,870 cycles a block and one reading samples from DDR about 2,600-2,700.
 
-E2 has begun ahead of that session, driven by its exit app: pads as press / release with velocity, the start of
+E2 has begun, driven by its exit app: pads as press / release with velocity, the start of
 the DSP library (`include/enaga/dsp`, tested on the host), and `examples/synth`, an eight-voice virtual analogue
-synthesizer (emulator-tested). The library's block functions, and apps' own `*.ti.c` files, are built with TI's
+synthesizer (emulator-tested; on the unit: 8 % idle, 24 % with eight notes). The library's block functions, and apps' own `*.ti.c` files, are built with TI's
 cl6x when it is installed (GCC otherwise); the synth's worst case is 30 % of the audio budget that way and 65 % with
 GCC alone (every feature on: sync, ring, chorus, eight voices). Asynchronous file
 I/O and sample streaming, the rest of E2, are not started.
@@ -188,12 +188,18 @@ I/O and sample streaming, the rest of E2, are not started.
 - The SDK should give apps unaligned-safe load/store helpers for packed formats (misaligned LDW/STW/LDDW round
   the address down without a fault) and say that a null read returns garbage rather than trapping (smpltrek
   session M1; docs/hardware.md "Processor and memory"). A debug-build null check is worth considering.
+- **Pad velocity does not work on the unit** (session 1): velocity is the first reading over the 800 threshold,
+  which with readings every 3.8 ms and a rising press is nearly always just over 800, and full scale is 12,000
+  while a hard press reads about 3,400. Needs the peak over the first readings of a press, scaled to the measured
+  range; best chosen from recorded press curves.
+- Pad crosstalk (session 1): pressing a pad raises some other pad's reading slightly (0 -> 4, 1 -> 5, 4 -> 2; 2 and 3
+  none), never to a press in the synth. Size not measured.
 - Pad events: Enaga passes every MCU message on, about 3,930 raw pad events a second at rest, and press / release
   with velocity at provisional thresholds (press 800, release under 600, velocity 127 from 12,000). To set from
   readings on a unit: the release threshold, the velocity scale, whether one reading after the threshold gives a
   usable velocity (a pad is read every 3.8 ms), per-pad calibration.
-- Synth on the unit: its CPU load with real caches (worst case on the emulator 30 % with cl6x, 65 % GCC only),
-  the pad keyboard's feel. Saving patches waits for the file API; edits last until the app stops.
+- Synth on the unit: measured 8 % idle, 10 % one note, 24 % eight notes (INIT), 25 % SUPERSAW two notes (eight
+  voices), no dropouts; the worst case (30 % on the emulator) not yet measured there. Saving patches waits for the file API; edits last until the app stops.
 - DSP library: the SVF runs at 21 cycles a sample under cl6x (its recurrence), twice a biquad's 10; a faster
   form is worth trying. The synth's modulation is 6.4 % of the budget with cl6x, most of it the scalar part
   (matrix 1.5 %, LFOs 1.1 %, envelopes 0.7 %); GCC compiles the math-buffer loops poorly (about 80 cycles an
@@ -685,3 +691,30 @@ the emulator by simulating that hand-over (one finished transfer on channel 20, 
 interrupts for 1,382 blocks. Fix: audio's EDMA set-up clears every interrupt enable (IECR, IECRH) and every
 pending completion (ICR, ICRH) before enabling its own; then one interrupt per block. Regression test in test_e1
 (fails without the fix). The idle was not involved; image B was not needed. 36 tests, dry run 141/141.
+
+### First unit session: results (2026-11-18)
+
+Image 9ebb7e07 (the EDMA fix above), CHECK app and synth; every step of docs/hardware.md "Checks on a unit" passed:
+
+1. Install and start: status page with `NO /ENAGA/APPS`, stays up. 2. `CACHE 043 8F>444 FF`, as M1 measured.
+3. Audio with no app: status 0, about 46,000 blocks in a minute (750 a second), peak load 3.8 %, 0 overruns.
+4. Power: off after a one-second hold, nothing on a short press. 5. The CHECK app starts.
+6. Channels: left and right as expected. 7. Input: IN L and IN R follow their jacks.
+8. Load with caches (LOAD page; idle 2.5-3.5 %):
+
+| Workload | 16 voices | 64 | 128 | CAP | Cycles a voice (large counts) | Fit at 90 % |
+|---|---|---|---|---|---|---|
+| SYNTH | 8.7 % | 26.9 % | 50.3 % | 228 voices, 85.9 % | 1,868 | 230 |
+| SAMPLE | 12.1 % | 36.2 % | 69.0 % | 163 voices, 85.3 % | 2,592 | 170 |
+| GRAIN | 11.5 % | 37.2 % | 70.2 % | 160 voices, 87.0 % | 2,690 | 166 |
+
+   The emulator (no caches) gave about 2,500 cycles a voice for each: computation runs about 25 % faster on the
+   unit, and reading samples from DDR costs about 40 % more than computing. Per-voice figures fall with the count
+   because Enaga's own share, about 13,000 cycles a block (3 %), is spread wider.
+9. Keys and LEDs: every name, count and LED right. 10. Encoders one count a detent; pads: MCU messages at the
+   expected rate, at rest RAW 1-2, pressed about 1,500 (light) to 3,400 (hard); crosstalk as in Open items.
+11. Synth: starts; load 8 % idle, 10 % one note, 24 % eight notes, 25 % SUPERSAW two notes (eight voices); no
+   extra notes, no crackle or dropouts; no velocity response (Open items).
+
+Also confirmed on the unit: GPIO enabled by Enaga, the interrupt stack gap and the idling main loop (keys,
+encoders and pads all right with it).

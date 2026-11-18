@@ -248,6 +248,19 @@ nibble:
 No address commands are sent: the panel's write position wraps after each full frame, so every frame must
 be sent whole. Enaga sends frames by EDMA (events 18 and 19, SPI1 receive and transmit).
 
+## Pad readings (measured, Enaga session 1, 2026-11-18)
+
+At rest every pad reads 1-2; a light press about 1,500 and a hard one about 3,400 (of the 14-bit range). Pressing a
+pad raises some other pads' readings slightly (pad 0 -> 4, 1 -> 5, 4 -> 2; 2 and 3 none): not neighbours on the
+panel, so probably in the sensing or the MCU's inputs. Readings rise over several 3.8 ms reports, so the first
+report over a threshold says little about how hard the pad was hit.
+
+## Audio load with caches (measured, Enaga session 1)
+
+With Enaga's cache set-up, a computed voice (the LOAD page's SYNTH) costs about 1,870 cycles a 64-frame block, a
+voice reading samples from DDR (SAMPLE, GRAIN) about 2,600-2,700; Enaga's own share with no app is about 3 % of
+the block. Details in docs/design.md, "First unit session: results".
+
 ## Audio
 
 - **Codec:** TI TLV320AIC3106 on **I2C0** (address `0x18`, 100 kHz), configured by 40 register writes
