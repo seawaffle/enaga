@@ -663,3 +663,14 @@ power draw. `update` is no longer called flat out: background work in it gets at
 them to a fresh 64 MiB card image and starts the smpltrek emulator's web panel (`stock_ui.py`) on Enaga's update
 file, so apps can be played live with the display, controls and sound. Panel options go after `--` (some take
 paths, so they can't be told from app directories otherwise). Tried with the synth and the tone app.
+
+### First start on a unit: a watchdog crash (2026-11-18)
+
+The first Enaga run on a unit (unit-session-synth build, d62587f2...): the install worked; the splash went by
+quickly, the status page showed `NO /ENAGA/APPS` for under a second, then the kernel crash screen with WATCHDOG
+(its six lines all zero, as they are for any watchdog crash: they are filled only by CPU exceptions). So
+interrupts were still taken (the watchdog runs in the timer interrupt) while the main loop stopped feeding it for
+a second. Not seen on the emulator. The watchdog's crash screen now shows where the main loop was: IRP when it
+tripped (the interrupted code), the loop's stage (1 inputs, 2 update, 3 power key, 4 display DMA poll, 5 draw,
+6 present, 7 idle), passes, interrupts taken on CPU interrupts 4 (timer), 6 (UART1), 8 (audio), audio blocks.
+Two diagnostic images in `build/unit-diag/`: A as built, B without the main loop's IDLE.
