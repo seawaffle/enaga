@@ -152,8 +152,8 @@ Proposal, grouped by service. Names are illustrative until each service exists.
 
 ## Files (E2 design, 2026-11-18)
 
-**Proposal**, to settle before code: what E2's file service looks like to an app, and how Enaga runs it. The
-choices marked **open** are the owner's.
+What E2's file service looks like to an app, and how Enaga runs it. The owner decided the write area, blocking
+calls and exFAT on 2026-11-18 (marked **decided**); the rest is the proposal they accepted.
 
 ### What exists
 
@@ -187,7 +187,7 @@ C functions in the host table, wrapped by C++ classes (`enaga::File`, `enaga::Fo
 - **Blocking calls for small files:** `read_file(path, buffer, max)` and `write_file(path, data, bytes)`, which
   stall the main loop (not audio) until done and feed the watchdog. Meant for settings and patches, a few KiB:
   milliseconds. They are what `init()` and `stop()` use, since a request still pending when `stop()` returns is
-  cancelled. (**open**, see the questions.)
+  cancelled. (**decided:** both blocking and asynchronous calls.)
 - **Safe saves:** `write_file` writes `name.TMP`, syncs, then renames over `name`, so a card pulled or power
   lost mid-save leaves the old file or the new one, never half of each.
 - **Errors** as small negative codes: no card, not found, exists, full, denied (outside the app's area),
@@ -198,14 +198,14 @@ C functions in the host table, wrapped by C++ classes (`enaga::File`, `enaga::Fo
 **Proposal:** an app reads anywhere on the card and writes only in its own folder, `/ENAGA/DATA/<NAME>/`
 (created on first use; `<NAME>` is the package name, so it survives reinstalling the app), plus the shared
 user folders `/SAMPLES/` and `/RECORD/`. Paths are absolute card paths; Enaga refuses a write elsewhere and
-`..` anywhere. (**open**)
+`..` anywhere. (**decided**)
 
 ### Names and card formats
 
 Long file names: FatFs's LFN support on (`FF_USE_LFN`; a few KiB of code and a 512-byte name buffer), ASCII
 and Latin-1 shown as is. Cards: FAT12/16/32 as now. Cards over 32 GB come formatted exFAT; FatFs supports it
-(`FF_FS_EXFAT`), and the format's specification has been public since 2019. (**open**: whether to support
-exFAT from the start.) No real-time clock is known on the board, so files get a fixed date.
+(`FF_FS_EXFAT`), and the format's specification has been public since 2019. (**decided:** exFAT from the
+start.) No real-time clock is known on the board, so files get a fixed date.
 
 ### Card removal
 
@@ -224,7 +224,7 @@ WAV parsing (`enaga::wav`) sits on top: header, format, data offset.
 
 ### Order of work
 
-1. LFN on; the request queue and its slice in the main loop; handles; blocking and asynchronous reads, writes
+1. LFN and exFAT on; the request queue and its slice in the main loop; handles; blocking and asynchronous reads, writes
    and listing; the app's data folder; safe saves; card removal. Tested on the emulator with FAT card images
    (the emulator already models the card), including a full card and a removal signalled on the card-detect
    pin (the emulator drives that pin; a card that stops answering mid-transfer is not modelled).
