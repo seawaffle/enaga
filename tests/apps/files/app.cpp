@@ -138,6 +138,14 @@ private:
         check("bad_trailing_slash", files::save("/SAMPLES/", "x", 1));
         check("bad_empty_part", files::read_all("/SAMPLES//BIG.RAW", back, sizeof back));
 
+        {                                     // buffers off word alignment: whole sectors bounce in the driver
+            for (uint32_t i = 0; i < sizeof odd_; i++) odd_[i] = pattern(i);
+            int32_t saved = files::save("/RECORD/odd.bin", odd_ + 1, 2048);
+            got = files::read_all("/RECORD/odd.bin", big_ + 3, 4096);
+            bool same = got == 2048;
+            for (uint32_t i = 0; same && i < 2048; i++) same = big_[3 + i] == pattern(i + 1);
+            check("unaligned", saved < 0 ? saved : same ? 1 : got);
+        }
         check("save_shared", files::save("/SAMPLES/new folder/s.raw", "abcd", 4));
         check("read_shared", files::read_all("/SAMPLES/new folder/s.raw", back, sizeof back));
         check("tmp_fallback", files::read_all("/SAMPLES/ONLYTMP.BIN", back, sizeof back));
@@ -236,6 +244,7 @@ private:
     }
 
     uint8_t *big_ = nullptr;
+    uint8_t odd_[4096] = {};
     char results_[4096] = {};
     uint32_t used_ = 0;
     int phase_ = 0, writes_ = 0, cancels_ = 0;

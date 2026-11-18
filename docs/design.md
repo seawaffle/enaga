@@ -229,7 +229,7 @@ WAV parsing (`enaga::wav`) sits on top: header, format, data offset.
    (the emulator already models the card), including a full card and a removal signalled on the card-detect
    pin (the emulator drives that pin; a card that stops answering mid-transfer is not modelled).
 2. (**Done** 2026-11-18, see the log.) The synth saves and loads patches (E2's exit app gets storage).
-3. The card-speed page in the CHECK app; the next unit session measures it.
+3. (**Done** 2026-11-18, see the log.) The card-speed page in the CHECK app; the next unit session measures it.
 4. Streams and WAV, sized by those measurements.
 
 ## Phases
@@ -255,7 +255,8 @@ the DSP library (`include/enaga/dsp`, tested on the host), and `examples/synth`,
 synthesizer (emulator-tested; on the unit: 8 % idle, 24 % with eight notes). The library's block functions, and apps' own `*.ti.c` files, are built with TI's
 cl6x when it is installed (GCC otherwise); the synth's worst case is 30 % of the audio budget that way and 65 % with
 GCC alone (every feature on: sync, ring, chorus, eight voices). The file service's first step is in (the
-"Files" section), and the synth saves patches with it; card-speed measurement and streaming follow.
+"Files" section), and the synth saves patches with it; the CHECK app measures the card (a unit session is to
+run it); streaming follows.
 
 ## Open items
 
@@ -845,3 +846,21 @@ back to that patch's values). Loading a patch now also silences held notes, sinc
   its patch restored. The card is made by `tools/card.py`, since the names are long. 41 tests pass.
 - Not done: naming a patch on the unit (there is no text entry yet; E4's UI toolkit), a confirmation before
   saving over a full slot, deleting a slot.
+
+### Card speed page, file service step 3 (2026-11-18)
+
+CHECK's fourth page, CARD: STEP 1 writes a 4 MiB file to `/RECORD/CHECK.BIN` in 32 KiB requests (four queued),
+reads it back the same way, then makes 256 reads of 4 KiB at random offsets (seek, read, one at a time), and
+removes the file. It shows KiB/s for each, scattered reads a second, and the 48 kHz stereo streams READ's rate
+would feed; results go to the log too. It measures what an app gets through the queue (2 ms a pass in the main
+loop), not the bare driver. On the emulator, which models no card timing, it runs to the end (about 8-9 MiB/s;
+meaningless for the unit). Step 11 of docs/hardware.md's checklist.
+
+- **Bug found and fixed:** `sd_read` and `sd_write` take only word-aligned buffers, and FatFs transfers whole
+  sectors straight in the caller's buffer, so any read or write whose whole sectors fell at an unaligned address
+  (a read from offset 314, a save from an odd pointer) failed with CARD ERROR. Step 1's tests read from offset 0
+  into `new` memory, so they never hit it. `hal/diskio.c` now passes such sectors through an aligned 512-byte
+  buffer, one at a time (aligned transfers are unchanged). `tests/apps/files` checks a save from an odd pointer
+  and a read into one (`unaligned`; it fails with -7 without the fix).
+- Not in the unit dry run: its staged card is 4 MiB, too small for the test file. 42 tests pass; the dry run
+  passes 141/141.

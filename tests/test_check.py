@@ -1,12 +1,19 @@
 """The CHECK app for sessions on a unit (tests/unit/check, docs/hardware.md "Checks on a unit") runs on the
-emulator: tones on the expected channels, the load page's voice cap, and key LEDs on the panel page.
+emulator: tones on the expected channels, the load page's voice cap, key LEDs on the panel page, and the card
+page's measurement running to the end.
 
     ENAGA_EMULATOR=/path/to/emulator python3 -B -m unittest discover -s tests -p test_check.py -v
 """
+import sys
+import tempfile
 import unittest
+from pathlib import Path
 
 from test_e1 import BOOT, HERE, MS, STEP1, build_app, component, paths, samples
-from emulate import Emulation
+from emulate import WORK, Emulation
+
+sys.path.insert(0, str(HERE.parent / "tools"))
+import card  # noqa: E402
 
 F4, F5 = 27, 22
 F5_GREEN = 94                    # its panel MCU address (docs/hardware.md "LED map")
@@ -68,6 +75,31 @@ class Check(unittest.TestCase):
             emu.run(30 * MS)
             self.assertEqual(emu.cpu.read(emu.names["led_level"], 144)[F5_GREEN], 0)
             self.assertEqual(emu.report()["app_status"], "APP RUNNING")
+
+
+    def test_card_page_measures_and_cleans_up(self):
+        with Emulation(HERE / "unit" / "check", "CHECK") as emu, tempfile.TemporaryDirectory() as d:
+            image = Path(d) / "card.img"
+            card.make(image, 16, "fat", {"/ENAGA/APPS/CHECK/APP.ENA": (WORK / "emulate" / "CHECK.ENA").read_bytes()})
+            emu.cpu.sd_load(image.read_bytes())
+            self.assertIsNone(emu.run(BOOT)["error"])
+            for _ in range(3):                                       # F4 held a second, three times: CARD
+                self.press(emu, F4, hold_ms=1100)
+            self.press(emu, STEP1)
+            for _ in range(100):                                     # up to 10 s of emulated time
+                self.assertIsNone(emu.run(100 * MS)["error"])
+                log = emu.report()["log"]
+                if any(line.startswith("CARD S") or line.startswith("CARD ") and "/S" not in line and " W " not in line
+                       for line in log):
+                    break
+            self.assertTrue(any(line.startswith("CARD W") for line in log), log)
+            write_read = next(line for line in log if line.startswith("CARD W")).split()
+            scatter = next(line for line in log if line.startswith("CARD S")).split()
+            print(f"\nemulated card: write {write_read[2]} KiB/s, read {write_read[4]} KiB/s, scattered {scatter[2]} KiB/s")
+            self.assertTrue(all(int(v) > 0 for v in (write_read[2], write_read[4], scatter[2])))
+            self.assertEqual(emu.report()["app_status"], "APP RUNNING")
+            image.write_bytes(emu.cpu.sd_read())
+            self.assertEqual(card.listdir(image, "/RECORD"), [])           # the test file removed
 
 
 if __name__ == "__main__":

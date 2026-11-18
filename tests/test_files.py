@@ -26,7 +26,7 @@ EXPECTED = {
     "info_size": 6, "info_folder": 1, "case_insensitive": 6,
     "deny_apps": -5, "deny_other_app": -5, "deny_prefix_lookalike": -5, "deny_root": -5, "deny_area_itself": -5,
     "bad_dotdot": -9, "bad_dot": -9, "bad_relative": -9, "bad_trailing_slash": -9, "bad_empty_part": -9,
-    "save_shared": 0, "read_shared": 4, "tmp_fallback": 7, "too_big": -11, "not_found": -2,
+    "unaligned": 1, "save_shared": 0, "read_shared": 4, "tmp_fallback": 7, "too_big": -11, "not_found": -2,
     "folder_make": 0, "folder_again": 0, "folder_remove": 0, "remove_missing": -2,
     "open_eight": 0, "open_ninth": -6, "size": 1 << 20,
     "open_write": 0, "save_over_open": -12, "write_on_read_handle": -5, "bad_handle": -10,

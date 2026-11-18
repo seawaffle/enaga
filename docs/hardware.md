@@ -372,11 +372,16 @@ listen on headphones or the line output. Report each result with what the screen
     battery channel); much less means bytes are lost. The PAD line shows the pad with the highest reading; each
     pad lights green by pressure. Note which pad lights for each (the "LED map" order), the RAW reading of
     untouched pads (any pad glowing at rest shows it), and the RAW range when pressed hard.
-
-11. **Synth (optional, if time allows):** switch off, replace the card's `ENAGA` folder with `synth/ENAGA`, switch
+11. **Card speed (CARD page, the fourth):** STEP 1, then wait for DONE (a few seconds; the card needs 4 MiB free).
+    Report WRITE, READ, SCATTER (KiB/s and READS/S) and STREAMS, the card's make, size and format (FAT32 or
+    exFAT), and run it twice. These are the rates an app gets through Enaga's file service, and they size
+    streaming (design.md "Files"). FAILED with a reason: report it; the test file `/RECORD/CHECK.BIN` is removed
+    either way.
+12. **Synth (optional, if time allows):** switch off, replace the card's `ENAGA` folder with `synth/ENAGA`, switch
     on. Expected: the synth's OSC 1 page with INIT at the top left. Pads play notes (lower row white keys, upper
     row black), STEP 1-16 chromatic notes; F2-F8 change pages; F1 + F2 opens PATCH, where VALUE chooses a patch and
-    OK loads it. Report the voices and load at the top right (V and percent of the audio budget; the emulator
+    OK loads it. Choose U1 (after the factory patches), press F1 + OK: SAVED U1. Switch off and on: the same sound
+    comes back, with U1 INIT at the top left. Report the voices and load at the top right (V and percent of the audio budget; the emulator
     gives at most 30 % with every feature on) for: one note; eight notes with INIT; SUPERSAW holding a chord;
     and any crackle or dropout. Note how the pads feel: whether soft hits
     sound and hard hits are loud (velocity thresholds are provisional, "Pads").

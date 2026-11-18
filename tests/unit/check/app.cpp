@@ -1,4 +1,4 @@
-// CHECK: the app for sessions on a unit (docs/hardware.md "Checks on a unit"). Three pages; hold F4 for one
+// CHECK: the app for sessions on a unit (docs/hardware.md "Checks on a unit"). Four pages; hold F4 for one
 // second to go to the next one (the press still counts on the panel page).
 //
 //   AUDIO  STEP 1: 750 Hz left only, STEP 2: 1500 Hz right only, STEP 3: 750 Hz both, STEP 4: off. VALUE: level.
@@ -13,7 +13,13 @@
 //          position, the pad with the highest raw reading, and pad messages per second (the panel MCU sends
 //          every pad all the time, about 3,930 a second for the 15 pads). A held key lights its LED green; a pad lights green by
 //          pressure; A, B and C set VOL L, VOL R and MIC (0-10); VALUE cycles the VALUE LED red, green, blue.
+//   CARD   STEP 1 measures the card through Enaga's file service, as an app gets it (queued in the main loop, 2 ms
+//          a pass): WRITE, a 4 MiB file to /RECORD/CHECK.BIN in 32 KiB writes, four queued at a time; READ, the
+//          file back the same way; SCATTER, 256 reads of 4 KiB at random places in it, one after another (seek,
+//          read). KiB/s for each, SCATTER's reads a second, and how many 48 kHz 16-bit stereo streams (187.5
+//          KiB/s each) READ's rate would feed. The file is removed afterwards; the results also go to the log.
 #include <enaga/app.hpp>
+#include <enaga/files.hpp>
 
 #include <cstdint>
 
@@ -23,6 +29,13 @@ constexpr int kTable = 64;
 constexpr uint32_t kBlockCycles = 496000;          // the 64-frame budget at 372 MHz; load is per mille of it
 constexpr uint32_t kBankSamples = 4u << 20;        // 8 MiB of 16-bit samples
 constexpr int kMaxVoices = 512;
+constexpr int kPageCount = 4;
+
+constexpr const char *kCardPath = "/RECORD/CHECK.BIN";
+constexpr uint32_t kCardBytes = 4u << 20;           // the test file
+constexpr uint32_t kChunk = 32 * 1024;              // WRITE and READ request size
+constexpr uint32_t kInFlight = 4;                   // requests queued at a time
+constexpr uint32_t kScatterBytes = 4096, kScatterReads = 256;
 
 const char *const kKeyNames[ENAGA_KEY_COUNT] = {
     "PUSH B", "PUSH A", "PUSH C", "PUSH D", "PUSH VALUE", nullptr, nullptr, nullptr,
@@ -70,6 +83,7 @@ public:
         }
         table_[kTable] = table_[0];
         bank_ = new int16_t[kBankSamples + 1];
+        card_buffer_ = new uint8_t[kChunk];
         uint32_t r = 1;
         for (uint32_t i = 0; i <= kBankSamples; i++) { r = r * 1664525u + 1013904223u; bank_[i] = int16_t(r >> 16); }
         for (int v = 0; v < kMaxVoices; v++) {
@@ -84,7 +98,7 @@ public:
         if (home_down_ && !home_used_ && ms - home_since_ >= 1000) {
             home_used_ = true;
             leds_off();
-            page_ = (page_ + 1) % 3;
+            page_ = (page_ + 1) % kPageCount;
         }
         uint32_t load = enaga::audio_load();
         if (load > load_window_) load_window_ = load;
@@ -125,6 +139,7 @@ public:
         if (page_ == 1 && step < 3) mode_ = uint32_t(step);
         if (page_ == 1 && step >= 4) voices_ = kPresets[step - 4];
         if (page_ == 1) { load_window_ = 0; uncap_ = uncap_ + 1; }
+        if (page_ == 3 && step == 0) card_start();
     }
 
     void on_encoder(int encoder, int delta) override {
@@ -165,7 +180,7 @@ public:
     }
 
     void draw(enaga::Canvas &canvas) override {
-        static const char *const kPages[3] = {"AUDIO", "LOAD", "PANEL"};
+        static const char *const kPages[kPageCount] = {"AUDIO", "LOAD", "PANEL", "CARD"};
         canvas.clear();
         canvas.text(0, 0, "CHECK");
         canvas.text(48, 0, kPages[page_], 10);
@@ -173,6 +188,7 @@ public:
         if (page_ == 0) draw_audio(canvas);
         if (page_ == 1) draw_load(canvas);
         if (page_ == 2) draw_panel(canvas);
+        if (page_ == 3) draw_card(canvas);
     }
 
 private:
@@ -273,6 +289,87 @@ private:
         canvas.text(0, 96, (Line() << "PAD MSG/S " << pads_per_second_).str(), 10);
     }
 
+    // CARD: one stage after another, each moved on by its request callbacks.
+    enum CardStage { card_idle, card_writing, card_reading, card_scattering, card_done, card_failed };
+
+    void card_start() {
+        if (card_stage_ != card_idle && card_stage_ != card_done && card_stage_ != card_failed) return;
+        for (auto &r : card_kibs_) r = 0;
+        card_reads_per_s_ = 0;
+        card_stage_ = card_writing;
+        card_begin(ENAGA_FILE_WRITE);
+    }
+    void card_begin(uint32_t mode) {          // open the file for the stage and queue its first requests
+        int32_t r = card_file_.open(kCardPath, mode);
+        if (r < 0) { card_fail(r); return; }
+        card_queued_ = card_done_ = 0;
+        card_since_ = enaga::ms();
+        if (card_stage_ == card_scattering) { card_scatter_next(); return; }
+        for (uint32_t i = 0; i < kInFlight; i++) card_queue();
+    }
+    void card_queue() {
+        if (card_queued_ >= kCardBytes) return;
+        int32_t r = card_stage_ == card_writing ? card_file_.write<&Check::card_moved>(card_buffer_, kChunk, this)
+                                                : card_file_.read<&Check::card_moved>(card_buffer_, kChunk, this);
+        if (r < 0) { card_fail(r); return; }
+        card_queued_ += kChunk;
+    }
+    void card_moved(int32_t result) {         // a WRITE or READ request done
+        if (card_stage_ != card_writing && card_stage_ != card_reading) return;   // failed meanwhile
+        if (result != int32_t(kChunk)) { card_fail(result < 0 ? result : int32_t(ENAGA_FILE_FULL)); return; }
+        card_done_ += kChunk;
+        if (card_done_ < kCardBytes) { card_queue(); return; }
+        int stage = card_stage_ == card_writing ? 0 : 1;
+        int32_t r = card_file_.close();       // for a write, the sync: part of its time
+        card_kibs_[stage] = kibs(kCardBytes, enaga::ms() - card_since_);
+        if (r < 0) { card_fail(r); return; }
+        card_stage_ = stage == 0 ? card_reading : card_scattering;
+        card_begin(ENAGA_FILE_READ);
+    }
+    void card_scatter_next() {
+        card_random_ = card_random_ * 1664525u + 1013904223u;
+        uint32_t at = (card_random_ >> 8) % (kCardBytes - kScatterBytes) & ~1u;   // whole 16-bit samples
+        int32_t r = card_file_.seek(at);
+        if (r >= 0) r = card_file_.read<&Check::card_scattered>(card_buffer_, kScatterBytes, this);
+        if (r < 0) card_fail(r);
+    }
+    void card_scattered(int32_t result) {
+        if (card_stage_ != card_scattering) return;
+        if (result != int32_t(kScatterBytes)) { card_fail(result < 0 ? result : int32_t(ENAGA_FILE_CARD_ERROR)); return; }
+        if (++card_done_ < kScatterReads) { card_scatter_next(); return; }
+        uint32_t ms = enaga::ms() - card_since_;
+        card_kibs_[2] = kibs(kScatterReads * kScatterBytes, ms);
+        card_reads_per_s_ = kScatterReads * 1000u / (ms ? ms : 1);
+        card_file_.close();
+        enaga::files::remove(kCardPath);
+        card_stage_ = card_done;
+        enaga::log((Line() << "CARD W " << card_kibs_[0] << " R " << card_kibs_[1]).str());
+        enaga::log((Line() << "CARD S " << card_kibs_[2] << " " << card_reads_per_s_ << "/S").str());
+    }
+    void card_fail(int32_t error) {
+        card_error_ = error;
+        card_stage_ = card_failed;
+        card_file_.close();                   // cancels whatever is still queued
+        enaga::files::remove(kCardPath);
+        enaga::log((Line() << "CARD " << enaga::files::error_name(error)).str());
+    }
+    static uint32_t kibs(uint32_t bytes, uint32_t ms) { return (bytes / 1024u) * 1000u / (ms ? ms : 1); }
+
+    void draw_card(enaga::Canvas &canvas) {
+        static const char *const kStages[6] = {"STEP 1: MEASURE", "WRITING", "READING", "SCATTERED READS",
+                                               "DONE", "FAILED"};
+        canvas.text(0, 16, kStages[card_stage_]);
+        if (card_stage_ == card_failed) canvas.text(0, 28, enaga::files::error_name(card_error_), 15);
+        else if (card_stage_ == card_writing || card_stage_ == card_reading)
+            canvas.text(0, 28, (Line() << card_done_ / 1024u << " KIB").str(), 10);
+        else if (card_stage_ == card_scattering) canvas.text(0, 28, (Line() << card_done_ << " READS").str(), 10);
+        canvas.text(0, 44, (Line() << "WRITE " << card_kibs_[0] << " KIB/S").str());
+        canvas.text(0, 56, (Line() << "READ " << card_kibs_[1] << " KIB/S").str());
+        canvas.text(0, 68, (Line() << "SCATTER " << card_kibs_[2] << " KIB/S").str());
+        canvas.text(0, 80, (Line() << "  " << card_reads_per_s_ << " READS/S").str(), 10);
+        canvas.text(0, 92, (Line() << "STREAMS " << card_kibs_[1] * 2u / 375u).str());
+    }
+
     void leds_off() {
         for (int led = 0; led < ENAGA_LED_COUNT; led++) enaga::host().led(uint32_t(led), 0, 0, 0);
     }
@@ -302,6 +399,12 @@ private:
     uint32_t presses_[ENAGA_KEY_COUNT] = {}, events_ = 0;
     uint32_t pad_raw_[15] = {}, pad_messages_ = 0, pad_messages_last_ = 0, pads_per_second_ = 0;
     int position_[5] = {};
+    enaga::files::File card_file_;
+    uint8_t *card_buffer_ = nullptr;
+    int card_stage_ = card_idle;
+    int32_t card_error_ = 0;
+    uint32_t card_queued_ = 0, card_done_ = 0, card_since_ = 0, card_random_ = 1;
+    uint32_t card_kibs_[3] = {}, card_reads_per_s_ = 0;
 };
 
 }  // namespace
