@@ -15,7 +15,11 @@
  * F1 + POWER opens the Enaga menu (menu.c) and closes it again; F1 held through start-up opens it instead of an
  * app. While the menu is open the app is paused: inputs go to the menu, and update and draw are not called. An
  * app gets a release for every key and pad press it was given (when the menu opens, at once), and none for a press
- * it was not. */
+ * it was not. An app can also open the menu (open_menu): it opens after the app's callback returns.
+ *
+ * Settings (settings.c) are read after the card is mounted: the volume, the display's brightness, the pad
+ * thresholds, and AUTO OFF, which switches off after that long without a key, knob, pad press or POWER, unless the
+ * app says it is busy. */
 
 extern char __bss_start[], __bss_end[];
 static u64 last_keys;
@@ -25,7 +29,8 @@ static int power_seen_up, power_was_down, power_chord;
 static u64 app_keys;                         /* keys down that the app was told of */
 static u16 app_pads;                         /* pads likewise */
 volatile u32 kernel_stage, kernel_passes;
-static u32 power_down_since, last_draw;
+static u32 power_down_since, last_draw, last_input;
+static int powering_off;                     /* survives a stop() that fails or overruns during shutdown */
 static int display_dma;                      /* frames by EDMA once the audio engine has powered it */
 
 static void log_cache(u32 was, u32 now)     /* "CACHE 443 00>444 FF": L2, L1P, L1D modes and DDR MARs */
@@ -58,14 +63,12 @@ static void poll_for(u32 ms)                  /* a pause in the MCU start messag
     while (timer_ms() - start < ms) uart1_poll();
 }
 
-/* Pads. A press starts at the original firmware's 800 and ends below 600. A pad's reading rises over several of
+/* Pads. A press starts at the original firmware's 800 and ends below 600 (the PADS setting moves both). A pad's reading rises over several of
  * the MCU's reports (each pad every 3.8 ms), so the first report over 800 says little about how hard it was hit
  * (on the unit it was nearly always just over 800: session 1, docs/hardware.md "Pad readings"). The press is
  * therefore sent at the next report, with velocity from the higher of the two, 127 at PAD_FULL or more: at most
  * one report (3.8 ms) later. A pad released before that still gives its press, then the release. Measured on the
  * unit: a light press reads about 1,500, a hard one about 3,400. */
-#define PAD_PRESS    800u
-#define PAD_RELEASE  600u
 #define PAD_FULL     3300u
 enum { PAD_UP, PAD_RISING, PAD_DOWN };
 static u8 pad_state[15];
@@ -74,6 +77,7 @@ static u16 pad_peak[15];
 /* An input event to the menu or the app. With no app and the menu closed (the status page), OK opens the menu. */
 static void deliver(const enaga_event_t *e)
 {
+    if (e->type != ENAGA_EVENT_PAD) last_input = e->ms;   /* raw readings arrive all the time */
     if (menu_active) { menu_event(e); return; }
     if (!app_current) {
         if (e->type == ENAGA_EVENT_KEY && e->value && e->id == ENAGA_KEY_OK) menu_open(0);
@@ -112,7 +116,7 @@ static void pad_press(int channel, enaga_event_t *e)
     unsigned peak = pad_peak[channel] < PAD_FULL ? pad_peak[channel] : PAD_FULL;
     pad_state[channel] = PAD_DOWN;
     e->type = ENAGA_EVENT_PAD_PRESS;
-    e->value = 1 + (int)(126u * (peak - PAD_PRESS) / (PAD_FULL - PAD_PRESS));
+    e->value = peak <= pad_press_level ? 1 : 1 + (int)(126u * (peak - pad_press_level) / (PAD_FULL - pad_press_level));
     deliver(e);
 }
 
@@ -121,14 +125,14 @@ static void on_pad(int channel, unsigned value)
     enaga_event_t e;
     if (channel >= 15) return;                /* channel 15 is the battery */
     e.id = (u16)channel; e.ms = timer_ms();
-    if (pad_state[channel] == PAD_UP && value >= PAD_PRESS) {
+    if (pad_state[channel] == PAD_UP && value >= pad_press_level) {
         pad_state[channel] = PAD_RISING;
         pad_peak[channel] = (u16)value;
     } else if (pad_state[channel] == PAD_RISING) {
         if (value > pad_peak[channel]) pad_peak[channel] = (u16)value;
         pad_press(channel, &e);
     }
-    if (pad_state[channel] == PAD_DOWN && value < PAD_RELEASE) {
+    if (pad_state[channel] == PAD_DOWN && value < pad_release_level) {
         pad_state[channel] = PAD_UP;
         e.type = ENAGA_EVENT_PAD_RELEASE; e.value = 0;
         deliver(&e);
@@ -173,6 +177,7 @@ static void status_page(u32 ms)
 
 static void shutdown(void)
 {
+    powering_off = 1;
     apps_unload();
     gfx_clear(0);
     gfx_text(52, 60, "BYE", 15);
@@ -224,6 +229,7 @@ static void poll_power(u32 ms)
         if (!power_was_down) {
             power_was_down = 1;
             power_down_since = ms;
+            last_input = ms;
             if ((last_keys >> ENAGA_KEY_F1) & 1) {
                 power_chord = 1;
                 if (!menu_active) open_menu(0);
@@ -239,6 +245,7 @@ void kernel_loop(void)
 {
     int busy, filing;
     irq_global_enable();
+    if (powering_off) shutdown();                /* the app failed in stop() on the way out */
     if (!app_current) {                          /* start-up with no app, or an app was just dropped */
         leds_off();
         app_keys = 0;
@@ -256,11 +263,16 @@ void kernel_loop(void)
         poll_inputs(ms);
         kernel_stage = 2;
         if (app_current && !menu_active && app_current->update) app_current->update(app_current->context, ms);
+        if (app_menu_request) {                     /* open_menu, from any of the app's callbacks */
+            app_menu_request = 0;
+            if (app_current && !menu_active) open_menu(0);
+        }
         apps_service(ms);
         kernel_stage = 8;
         filing = files_service(ms);                 /* the card-detect pin, then queued file work (files.c) */
         kernel_stage = 3;
         poll_power(ms);
+        if (settings_auto_off_ms && !app_keep_on && ms - last_input >= settings_auto_off_ms) shutdown();
         kernel_stage = 4;
         busy = display_dma ? oled_dma_poll() : 0;   /* also releases the chip select after a frame */
         if (ms - last_draw >= 50 && !busy) {        /* a frame still in flight delays the next draw */
@@ -322,6 +334,7 @@ void main(void)
     splash("CARD");
     files_init();
     apps_mount();
+    settings_load();
     files_write_probe();
     last_keys = keys_reset(timer_ms());       /* keys held through start-up do not become events */
     boot_menu = (last_keys >> ENAGA_KEY_F1) & 1;   /* F1 held through start-up: the menu, no app */
@@ -331,6 +344,7 @@ void main(void)
     log_line("ENAGA " ENAGA_VERSION);
     log_cache(cache_entry_config(), cache_config());
     watchdog_start();
+    last_input = timer_ms();
     if (apps_boot(boot_menu, why, sizeof why)) menu_open(why);
     kernel_loop();
 }

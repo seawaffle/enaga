@@ -4,7 +4,8 @@
  *
  *   - the app's audio callback has not been running for WATCHDOG_AUDIO_MS. The callback runs with this
  *     interrupt allowed to nest (audio.c), so a callback that never returns is seen;
- *   - the main loop has called watchdog_feed within WATCHDOG_MAIN_MS.
+ *   - the main loop has called watchdog_feed within WATCHDOG_MAIN_MS;
+ *   - an app's stop() has not run longer than APPS_STOP_MS (apps.c), fed or not.
  *
  * A hang while an app is loaded, starting or stopping is the app's: it is dropped as with fatal() and the
  * kernel loop continues. With no app it is Enaga's own: the kernel crash screen. Times come from the
@@ -34,6 +35,8 @@ void watchdog_isr(void)
     watchdog_ticks++;
     if (audio_in_callback && now - audio_callback_start > WATCHDOG_AUDIO_MS * TICKS_PER_MS)
         apps_fatal("APP HUNG IN AUDIO");
+    if (app_stopping && now - app_stop_start > APPS_STOP_MS * TICKS_PER_MS)
+        apps_fatal("APP STOP TOO LONG");
     if (now - fed > WATCHDOG_MAIN_MS * TICKS_PER_MS) {
         if (app_current || app_busy) apps_fatal("APP NOT RESPONDING");
         watchdog_irp = irp_read();

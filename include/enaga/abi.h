@@ -200,6 +200,11 @@ typedef struct enaga_host {
     /* A recording is written out to the end first, then `header` (if any) over the file's first bytes, so a
      * WAV header with the final size can go in the reserved space; this waits for the card. */
     int32_t (*stream_close)(int32_t stream, const void *header, uint32_t header_bytes);
+
+    /* System. Main context. */
+    void (*open_menu)(void);                /* opens the Enaga menu once the current callback returns, as F1 + POWER */
+    void (*set_busy)(uint32_t busy);        /* non-zero: do not switch off for being idle (AUTO OFF), e.g. while
+                                             * playing or recording unattended; cleared when the app stops */
 } enaga_host_t;
 
 /* What the app gives Enaga. Every callback receives `context`; any callback may be 0. */

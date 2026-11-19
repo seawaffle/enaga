@@ -43,9 +43,9 @@ fixed-point slots are hidden).
 
 ## Boot and app switching
 
-Built 2026-11-18 (E3's first step; see the log): the menu (`kernel/menu.c`), F1 + POWER, F1 at power-on, the boot
-policy with the start-up record, and switching without a reboot. Where the build differs from the plan below it
-says so.
+Built 2026-11-18 and 2026-11-19 (E3; see the log): the menu (`kernel/menu.c`), F1 + POWER, F1 at power-on, the boot
+policy with the start-up record, switching without a reboot (with the fade and the `stop()` limit), `open_menu`,
+and the SETTINGS page ("Settings" below). Where the build differs from the plan below it says so.
 
 Power-on sequence (proposal):
 
@@ -75,12 +75,39 @@ not start the one-second power-off. When the menu opens the app receives an F1 r
 input-cancel event) and is paused. A plain short POWER press is reserved for Enaga and unused for now.
 POWER held one second with F1 up switches off.
 
-As built: the paused app's audio goes on (no fade) and it gets no events, `update` or `draw`; it is told of the
-release of every key and pad press it was given when the menu opens, and of none it was not. The menu lists the
-folders under `/ENAGA/APPS`, then STATUS (Enaga's status page); UP / DOWN or VALUE move, OK chooses (the running
-app resumes, another replaces it through steps 1-5 above), CLR or F1 + POWER resume. With no app running (a crash,
-a failed load, a card without apps) Enaga shows the status page, and OK there opens the menu. Not yet: a fade
-when switching, a time budget for `stop()`, settings, app icons or display names.
+As built: the paused app's audio goes on and it gets no events, `update` or `draw`; it is told of the release of
+every key and pad press it was given when the menu opens, and of none it was not. An app can open the menu itself
+(`open_menu`, `enaga::system::open_menu()`); it opens once the app's callback returns. The menu lists the apps
+under `/ENAGA/APPS` by the display name in each package's header (the folder name if the header cannot be read),
+then SETTINGS and STATUS (Enaga's status page); UP / DOWN or VALUE move, OK chooses (the running app resumes,
+another replaces it through steps 1-5 above), CLR or F1 + POWER resume. With no app running (a crash, a failed
+load, a card without apps) Enaga shows the status page, and OK there opens the menu.
+
+Steps 1 and 2 as built: the output fades to silence over 8 blocks (11 ms) while the app's callback still runs, then
+the callback is removed and `stop()` called; a new app's output fades in the same way. `stop()` has 3 s
+(`APPS_STOP_MS`, checked by the watchdog tick whether or not the main loop is fed, since saving to the card feeds
+it); a `stop()` that overruns, hangs or calls `fatal` drops the app as any failure does, and the switch then goes
+on to the chosen app (or the power-off goes on, if it was switching off). Not yet: app icons (they want a
+different menu layout than a 9-pixel list, so they wait for E4's UI toolkit).
+
+## Settings
+
+Built 2026-11-19. Enaga's own settings live in `/ENAGA/SETTINGS.TXT` on the card, one `NAME=VALUE` line each
+(`kernel/settings.c`). The plan named the SPI flash; the card is used instead because the flash holds the original
+firmware's sound content, which Enaga promises never to write, and a text file can be read, edited or deleted on a
+computer. A missing file, line or value leaves that setting at its default. The menu's SETTINGS page shows them:
+UP / DOWN choose, LEFT / RIGHT or VALUE change (applied at once), OK or CLR go back and write the file if anything
+changed.
+
+| Setting | Values (default) | Effect |
+|---|---|---|
+| VOLUME | 0-10 (10) | output gain in the audio engine, 3 dB a step, 0 silent; ramps like the fade |
+| BRIGHTNESS | 1-10 (10) | the display controller's contrast command (0x81), 55 to 255 |
+| PADS | LOW, MEDIUM, HIGH (MEDIUM) | pad sensitivity: a press from 1,100 / 800 / 500, released below 3/4 of that |
+| AUTO OFF | OFF, 5, 10, 30, 60 MIN (OFF) | switch off (stopping the app normally) after that long with no key, knob, pad press or POWER, unless the app has called `set_busy` |
+
+MIDI channel waits for MIDI (E4). An app's own settings are separate: `<enaga/settings.hpp>` gives it a key/value
+store in its data folder (`SETTINGS.TXT`, the same text format), built on the file API, with nothing new in Enaga.
 
 ## Memory
 
@@ -288,12 +315,16 @@ GCC alone (every feature on: sync, ring, chorus, eight voices). The file service
 the command; hardware.md "SD card"); the CHECK app measured the card on a unit; streams (playback and recording
 from `audio()`) and WAV headers are in, with multi-block SD transfers (on a unit: reads 7,600 KiB/s, writes about 2,000).
 
-E3 has begun: the Enaga menu on F1 + POWER, F1 at power-on, the boot policy (last app, only app, or the menu) with
-a start-up record, and switching apps without a reboot, on the emulator; its exit, switching between two apps
-repeatedly on the unit, is the next unit session's.
+E3 is built on the emulator: the Enaga menu on F1 + POWER (and `open_menu`), F1 at power-on, the boot policy
+(last app, only app, or the menu) with a start-up record, switching apps without a reboot with a fade and a 3 s limit
+on `stop()`, display names, the SETTINGS page (volume, brightness, pad sensitivity, auto-off) in
+`/ENAGA/SETTINGS.TXT`, and apps' own settings (`<enaga/settings.hpp>`). Its exit, switching between two apps
+repeatedly on the unit, is the next unit session's. App icons are left for E4.
 
 ## Open items
 
+- On the unit: BRIGHTNESS (the contrast command is the one start-up sends, at other levels; the steps' look is
+  unchecked); whether AUTO OFF should apply on USB power too (it does now; `power_on_batteries` could limit it).
 - On the unit: the bootloader passes control normally with F1 held (Enaga reads F1 when start-up ends);
   F1 + POWER mid-run and app switching (E3's exit); power-key bounce; bounce of keys other than STEP 1 (STEP 1 settles within 784 µs,
   smpltrek session M1, well inside the 6 ms sampling and two-sample release).
@@ -1070,4 +1101,26 @@ runs: WRITE 2382 / 2367 / 1837 KiB/s (was 170), READ 7613 / 7585 / 7585 KiB/s (w
   F1 held at power-on opens the menu; a record of a removed app is ignored. An app that hangs in `init` (HANG)
   leaves the status page with APP NOT RESPONDING, OK opens the menu, and the next two boots open the menu with
   `HANG DID NOT START`. 48 tests pass; dry run 141/141.
+
+### E3 completed on the emulator: fade, stop() limit, open_menu, names, settings (2026-11-19)
+
+- `audio.c`: the output is scaled by `audio_volume` and a fade, ramped across each block by at most 1/8 a block;
+  at full level the samples are not touched. `audio_set_callback` starts a new app from silence; `audio_fade_out`
+  ramps down and waits (50 ms at most).
+- `apps.c`: `apps_unload` fades, then runs `stop()` with `app_stopping` set; `watchdog.c` drops an app whose
+  `stop()` has run 3 s (`APP STOP TOO LONG`) even when the main loop is being fed. `apps_start` keeps the folder it
+  is switching to in `apps_next`, so after such a drop `apps_service` finishes the switch; `main.c`'s
+  `powering_off` does the same for a power-off. Host table: `open_menu` (a flag the main loop acts on after the
+  app's callback) and `set_busy` (holds off AUTO OFF; cleared when the app stops). C++:
+  `enaga::system::open_menu()` and `set_busy(bool)`.
+- `menu.c`: display names from each package header (`apps_title`); the lines are now apps, SETTINGS, STATUS.
+  `settings.c`: the settings table, `/ENAGA/SETTINGS.TXT` and the page ("Settings"). `spi_oled.c`: `oled_contrast`,
+  sent after any frame in flight. The pad thresholds are variables (`pad_press_level`, `pad_release_level`).
+- `<enaga/settings.hpp>`: `enaga::Settings` with `load`, `get` / `text`, `set` (number or text) and `save` (only if
+  changed), up to 32 keys.
+- `tests/apps/menu` and a third test in `tests/test_menu.py`: names (MENU-TEST in folder MENUAPP), `open_menu` from
+  STEP 1, `set_busy` holding off AUTO OFF, a `stop()` that saves forever dropped after 3 s with the switch to TONE
+  completed, no step in the output across the switch (the test fails with the fade removed: a jump of 0.25 full
+  scale), the SETTINGS page changing all four settings and writing the file, the app's own `SETTINGS.TXT`, the
+  settings read back at the next boot, and AUTO OFF switching off with no app busy.
 

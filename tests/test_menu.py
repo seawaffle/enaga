@@ -1,9 +1,11 @@
 """The Enaga menu and app switching on the emulator (docs/design.md decisions 2 and 3, "Boot and app switching"):
-F1 + POWER, switching between two apps repeatedly, the boot policy (last app, F1 held at power-on) and an app
-that fails at start-up not being loaded again.
+F1 + POWER, switching between two apps repeatedly, the boot policy (last app, F1 held at power-on), an app
+that fails at start-up not being loaded again, display names, open_menu, the fade and the stop() limit on a
+switch, the SETTINGS page and its file, AUTO OFF and set_busy, and an app's own settings (enaga::Settings).
 
     ENAGA_EMULATOR=/path/to/emulator python3 -B -m unittest tests.test_menu
 """
+import struct
 import sys
 import tempfile
 import unittest
@@ -18,8 +20,10 @@ import card  # noqa: E402
 import paths  # noqa: E402
 
 MS = 372_000
-F1, OK, DOWN, UP, STEP1 = 19, 23, 25, 17, 32
-APPS = {"TONE": ENAGA / "examples" / "tone", "CXXCHECK": ENAGA / "examples" / "cxxcheck", "HANG": HERE / "apps" / "hang"}
+F1, OK, DOWN, UP, LEFT, RIGHT, CLR, STEP1 = 19, 23, 25, 17, 24, 18, 30, 32
+APPS = {"TONE": ENAGA / "examples" / "tone", "CXXCHECK": ENAGA / "examples" / "cxxcheck", "HANG": HERE / "apps" / "hang",
+        "MENUAPP": HERE / "apps" / "menu"}
+TITLES = {"MENUAPP": "MENU-TEST"}                     # display names that differ from the folder
 
 
 @unittest.skipUnless(paths.emulator_present() and build_app.tools_present(), "needs ENAGA_EMULATOR and the toolchain")
@@ -28,7 +32,7 @@ class Menu(unittest.TestCase):
         image = Path(d) / "card.img"
         files = {}
         for name in names:
-            package = build_app.build(APPS[name], paths.BUILD / "apps" / APPS[name].name, name)["package"]
+            package = build_app.build(APPS[name], paths.BUILD / "apps" / APPS[name].name, TITLES.get(name, name))["package"]
             files[f"/ENAGA/APPS/{name}/APP.ENA"] = package
         card.make(image, 16, "fat", files)
         return image
@@ -61,6 +65,9 @@ class Menu(unittest.TestCase):
         self.assertIsNone(emu.run(30 * MS)["error"])
         emu.key(F1, False)
         self.assertIsNone(emu.run(30 * MS)["error"])
+
+    def number(self, emu, name):                     # a float variable
+        return struct.unpack("<f", struct.pack("<I", emu.word(name)))[0]
 
     def state(self, emu):
         r = emu.report()
@@ -142,6 +149,80 @@ class Menu(unittest.TestCase):
                 with self.boot(image) as emu:
                     s = self.state(emu)
                     self.assertEqual((s["menu"], s["running"], s["message"]), (1, False, "HANG DID NOT START"), s)
+
+    def test_names_open_menu_fade_slow_stop_settings_and_auto_off(self):
+        with tempfile.TemporaryDirectory() as d:
+            image = self.card(d, ["MENUAPP", "TONE"])
+            with self.boot(image) as emu:
+                self.assertEqual(self.state(emu)["menu"], 1)
+                raw = emu.cpu.read(emu.names["menu_titles"], 48)
+                titles = [raw[i:i + 24].split(b"\0")[0].decode() for i in (0, 24)]
+                self.assertEqual(sorted(titles), ["MENU-TEST", "TONE"])          # the packages' names, not folders
+                for _ in range(titles.index("MENU-TEST")):
+                    self.press(emu, DOWN)
+                self.press(emu, OK)
+                self.assertEqual(self.state(emu)["name"], "MENU-TEST")
+                self.press(emu, STEP1)                                          # open_menu from the app
+                self.assertEqual(self.state(emu)["menu"], 1)
+                self.press(emu, CLR)
+                self.assertEqual(self.state(emu)["menu"], 0)
+                self.press(emu, STEP1 + 2)                                      # busy: AUTO OFF waits
+                emu.cpu.write(emu.names["settings_auto_off_ms"], (300).to_bytes(4, "little"))
+                self.assertIsNone(emu.run(600 * MS)["error"])
+                self.assertEqual(emu.word("powering_off"), 0)
+                emu.cpu.write(emu.names["settings_auto_off_ms"], (0).to_bytes(4, "little"))
+                # A stop() that never finishes (and keeps feeding the watchdog by saving): dropped after
+                # APPS_STOP_MS, and the switch to TONE goes on.
+                self.press(emu, STEP1 + 1)
+                self.chord(emu)
+                self.press(emu, UP if titles.index("TONE") == 0 else DOWN)
+                self.press(emu, OK)
+                # The app's constant 0.25 fades out before stop() (the capture holds the last 0.68 s): no step.
+                raw, info = emu.cpu.audio_output()
+                words = struct.unpack(f"<{len(raw) // 4}i", raw)
+                left = words[0 if info["first_capture_slot"] == 0 else 1::2]
+                self.assertGreater(max(left), 0.24 * 2 ** 31)
+                self.assertLess(left[-1], 0.001 * 2 ** 31)
+                self.assertLess(max(abs(a - b) for a, b in zip(left, left[1:])), 0.01 * 2 ** 31)
+                self.assertIsNone(emu.run(3500 * MS)["error"])
+                s = self.state(emu)
+                self.assertEqual((s["menu"], s["running"], s["name"]), (0, True, "TONE"), s)
+                self.assertIn("APP STOP TOO LONG", s["log"])
+                self.assertEqual(emu.word("kernel_crashed"), 0)
+                # SETTINGS: VOLUME 6, BRIGHTNESS 9, PADS HIGH, AUTO OFF 5 MIN, applied at once and saved on OK.
+                self.chord(emu)
+                for _ in range(3):
+                    self.press(emu, UP)
+                self.press(emu, DOWN)
+                self.press(emu, DOWN)
+                self.press(emu, OK)
+                for _ in range(4):
+                    self.press(emu, LEFT)
+                self.assertAlmostEqual(self.number(emu, "audio_volume"), 0.251, places=3)
+                self.press(emu, DOWN)
+                self.press(emu, LEFT)
+                self.press(emu, DOWN)
+                self.press(emu, RIGHT)
+                self.assertEqual(emu.word("pad_press_level"), 500)
+                self.press(emu, DOWN)
+                self.press(emu, RIGHT)
+                self.assertEqual(emu.word("settings_auto_off_ms"), 300_000)
+                self.press(emu, OK)
+                self.assertEqual(self.state(emu)["menu"], 1)
+                self.press(emu, CLR)
+                self.assertIsNone(emu.run(2200 * MS)["error"])
+                image.write_bytes(emu.cpu.sd_read())
+            self.assertEqual(card.get(image, "/ENAGA/SETTINGS.TXT"),
+                             b"VOLUME=6\nBRIGHTNESS=9\nPADS=HIGH\nAUTO OFF=5 MIN\n")
+            self.assertEqual(card.get(image, "/ENAGA/DATA/MENU-TEST/SETTINGS.TXT"),
+                             b"STARTS=1\nNOTE=SAVED BY MENU-TEST\n")
+            with self.boot(image) as emu:              # read back at power-on; AUTO OFF without the app busy
+                self.assertAlmostEqual(self.number(emu, "audio_volume"), 0.251, places=3)
+                self.assertEqual((emu.word("pad_press_level"), emu.word("pad_release_level")), (500, 375))
+                self.assertEqual(self.state(emu)["name"], "TONE")
+                emu.cpu.write(emu.names["settings_auto_off_ms"], (300).to_bytes(4, "little"))
+                self.assertIsNone(emu.run(600 * MS)["error"])
+                self.assertEqual(emu.word("powering_off"), 1)
 
 
 if __name__ == "__main__":

@@ -39,6 +39,8 @@ int  audio_init(void);                        /* 0 = running; else -stage: -2 ED
 void audio_isr(void);
 void audio_set_callback(audio_callback_t callback, void *context);   /* 0 = silence; safe from main context */
 void audio_mute(void);                        /* power-off order: silence, DAC mute, output mute */
+void audio_fade_out(void);                    /* main context: ramp the output to silence (about 11 ms) */
+extern volatile float audio_volume;           /* output gain, 0-1 (the VOLUME setting) */
 void audio_silence_now(void);                 /* zero the transmit ring at once (crash paths) */
 void audio_irq_rearm(void);                   /* re-evaluate the EDMA interrupt (after leaving the ISR abnormally) */
 extern volatile u32 audio_blocks, audio_overruns, audio_cycles_last, audio_cycles_peak;
@@ -57,6 +59,7 @@ void apps_card_status(void);                  /* app_status from the card's stat
 #define APPS_FOLDER 32                       /* bytes for an app's folder name under /ENAGA/APPS, with the NUL */
 int  apps_scan(char (*names)[APPS_FOLDER], int max);   /* the installed apps' folders; count, or -1: no /ENAGA/APPS */
 int  apps_start(const char *folder);          /* stops the running app, starts /ENAGA/APPS/<folder>; 0 = running */
+int  apps_title(const char *folder, char title[ENAGA_NAME_BYTES]);   /* the package's display name; 0 = read */
 int  apps_boot(int menu_requested, char *message, unsigned size);   /* the boot policy; 1 = open the menu */
 void apps_service(u32 ms);                    /* each pass: the boot record once the app has settled */
 extern char app_folder[APPS_FOLDER];          /* the running (or last started) app's folder */
@@ -66,7 +69,19 @@ void menu_open(const char *message);          /* message: a line under the title
 void menu_close(void);                        /* back to the running app (none: stays) */
 void menu_event(const enaga_event_t *event);
 void menu_draw(void);
-void apps_unload(void);
+/* settings.c: Enaga's settings, /ENAGA/SETTINGS.TXT, and the menu's SETTINGS page */
+void settings_load(void);                     /* read and apply (defaults without a card or file) */
+void settings_open(void);
+int  settings_event(const enaga_event_t *event);   /* 1: the page closed (saved if changed) */
+void settings_draw(void);
+extern u32 pad_press_level, pad_release_level;    /* the PADS setting */
+extern u32 settings_auto_off_ms;              /* the AUTO OFF setting; 0 = never */
+void apps_unload(void);                       /* fades the sound, calls stop() (APPS_STOP_MS at most) */
+#define APPS_STOP_MS 3000u
+extern volatile int app_stopping;             /* the app's stop() is running, since app_stop_start (TSC) */
+extern volatile u32 app_stop_start;
+extern volatile int app_menu_request;         /* the app called open_menu */
+extern int app_keep_on;                       /* the app asked not to be switched off when idle (set_busy) */
 void apps_event(const enaga_event_t *event);
 void apps_drop(const char *reason);           /* forget a failed app; returns */
 void apps_fatal(const char *reason);          /* never returns */

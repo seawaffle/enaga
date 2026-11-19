@@ -15,6 +15,10 @@
  *   - Buffers live in DDR behind the caches: the receive block is invalidated before it is read and the
  *     transmit block written back after it is filled.
  *
+ * Level: the app's output is scaled by audio_volume (the VOLUME setting) and a fade. A new callback fades in, and
+ * audio_fade_out ramps to silence before an app is stopped, each over AUDIO_FADE_BLOCKS blocks (about 11 ms), so
+ * switching apps does not click; a change of volume ramps the same way. At full level the output is not touched.
+ *
  * Cost accounting: cycles from interrupt entry to exit per block (audio_cycles_last/peak) against
  * AUDIO_BUDGET_CYCLES; a block that took longer than its budget counts as an overrun. */
 
@@ -79,6 +83,10 @@ static float in_block[WORDS], out_block[WORDS];
 static u32 *tx_last, rx_done;            /* tx_last: the transmit buffer refilled last */
 static volatile audio_callback_t callback;
 static void *volatile callback_context;
+volatile float audio_volume = 1.0f;          /* the VOLUME setting's gain (settings.c) */
+static volatile float fade_target = 1.0f;    /* 1, or 0 while fading out */
+static volatile float audio_level;           /* the gain applied at the end of the last block */
+#define AUDIO_FADE_BLOCKS 8
 
 static void gpio_setup(void)                           /* the original firmware's board set-up, in its order */
 {
@@ -219,7 +227,16 @@ void audio_set_callback(audio_callback_t fn, void *context)
     callback_context = context;
     callback = fn;
     audio_cycles_peak = 0;
+    audio_level = 0.0f;                       /* a new callback fades in */
+    fade_target = 1.0f;
     if (gie) irq_global_enable();
+}
+
+void audio_fade_out(void)                     /* main context: ramp to silence; the callback keeps running */
+{
+    u32 start = tsc_read();
+    fade_target = 0.0f;
+    while (audio_level != 0.0f && audio_status == 0 && tsc_read() - start < 50 * TICKS_PER_MS) {}
 }
 
 void audio_mute(void)
@@ -262,6 +279,16 @@ void audio_isr(void)
             irq_nest_end(saved);
             audio_in_callback = 0;
         } else for (i = 0; i < WORDS; i++) out_block[i] = 0.0f;
+        {                                     /* the level: a ramp across the block towards volume x fade */
+            float from = audio_level, to = audio_volume * fade_target, step = 1.0f / AUDIO_FADE_BLOCKS;
+            if (to > from + step) to = from + step;
+            else if (to < from - step) to = from - step;
+            if (from != 1.0f || to != 1.0f) {
+                float g = from, d = (to - from) * (1.0f / FRAMES);
+                for (i = 0; i < WORDS; i += 2) { out_block[i] *= g; out_block[i + 1] *= g; g += d; }
+            }
+            audio_level = to;
+        }
         /* Chosen after the callback, so a callback that ran past its block still writes the buffer not playing.
          * The same buffer twice in a row means the ring replayed a block nobody refilled: it counts as a block
          * and an overrun. */

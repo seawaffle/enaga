@@ -74,10 +74,14 @@ ENAGA_APP(Beep)
   folder (`files::data_folder()`, `/ENAGA/DATA/<package name>`), `/SAMPLES` and `/RECORD`. `on_card(bool)` says
   when the card is removed or inserted. Not from `audio()`, except streams: `files::Stream` plays a file into
   `audio()` or records one from it through a ring buffer Enaga keeps filled or drained in the main loop, and
-  `<enaga/wav.hpp>` reads and writes WAV headers.
+  `<enaga/wav.hpp>` reads and writes WAV headers. `<enaga/settings.hpp>` keeps an app's own settings
+  (`settings.get("TEMPO", 120)`, `settings.set("TEMPO", tempo)`, `save()`) as text in its data folder.
+- `enaga::system::open_menu()` opens the Enaga menu as F1 + POWER does; `enaga::system::set_busy(true)` keeps the
+  unit from switching itself off (the AUTO OFF setting) while the app works unattended, e.g. recording.
 - `enaga::fatal(reason)` stops the app; Enaga shows the reason and keeps running. Enaga's watchdog stops an
   app the same way when a main-loop call (including `init` and `stop`) has not returned after 1 s, or `audio`
-  after 100 ms.
+  after 100 ms; `stop` has 3 s in all, even while it is saving to the card. When an app is switched away from,
+  its sound fades out before `stop` is called.
 
 See `examples/tone` for a minimal app and `examples/synth` for a whole instrument: an eight-voice virtual
 analogue synthesizer with hard sync and a ring modulator, a filter, three envelopes, two LFOs that can fade in,
@@ -113,7 +117,8 @@ Not yet recommended: 0.1.0 has not been run on a unit. When it is:
 2. Hold **F4** (HOME on a SmplTrek) while switching on to reach BOOT MODE, and choose SYSTEM UPDATE.
 
 Enaga starts the last app that ran (or the only one installed); **F1 + POWER** opens the Enaga menu, which lists
-the apps and switches between them, and holding F1 while switching on opens it instead of an app.
+the apps and switches between them and holds the settings (volume, brightness, pad sensitivity, auto-off, kept in
+`/ENAGA/SETTINGS.TXT`), and holding F1 while switching on opens it instead of an app.
 
 To go back, install an official SmplTrek system update the same way. Enaga never modifies the bootloader or
 the original sounds in flash, so that restores the unit completely. See docs/hardware.md, "Installing and
@@ -127,7 +132,7 @@ project. Point `ENAGA_EMULATOR` at its emulator directory (the one containing `c
 
 ```sh
 export ENAGA_EMULATOR=/path/to/emulator
-python3 -B -m unittest discover -s tests -v                           # 48 tests, about 4 minutes
+python3 -B -m unittest discover -s tests -v                           # 49 tests, about 5 minutes
 python3 -B tools/emulate.py examples/tone --key 32@300000000           # press STEP 1; writes build/emulate/
 ```
 
@@ -157,9 +162,9 @@ only `g++`. `tools/emulate.py` writes the last screen to
 | `runtime/dsp/` | The DSP library's block functions, built by cl6x or GCC into every app |
 | `runtime/` | Linked into every app: entry point, static constructors, heap, `new`/`delete`, C++ ABI hooks, `app.ld` |
 | `loader/` | The package loader (freestanding C, used by the firmware and the tests) |
-| `firmware/` | Enaga itself: `hal/` drivers, `kernel/` (interrupts, audio engine, app host, menu, exceptions, watchdog, main loop), `start.s`, `link.ld`, `build.py` |
+| `firmware/` | Enaga itself: `hal/` drivers, `kernel/` (interrupts, audio engine, app host, menu, settings, exceptions, watchdog, main loop), `start.s`, `link.ld`, `build.py` |
 | `examples/` | `synth` (the virtual analogue synthesizer); `tone` (STEP 1-8 play 750 Hz x step); `cxxcheck` (exercises the C++ runtime) |
-| `tests/` | `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board; `test_check.py` and `unit/check`: the CHECK app for sessions on a unit; `test_synth.py`: the synth example; `test_files.py` and `apps/files`: the file service; `test_streams.py` and `apps/streams`: streams and WAV; `test_menu.py`: the Enaga menu, boot policy and app switching; `test_dsp.py` and `dsp/`: the DSP library on the host |
+| `tests/` | `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board; `test_check.py` and `unit/check`: the CHECK app for sessions on a unit; `test_synth.py`: the synth example; `test_files.py` and `apps/files`: the file service; `test_streams.py` and `apps/streams`: streams and WAV; `test_menu.py` and `apps/menu`: the Enaga menu, boot policy, app switching and settings; `test_dsp.py` and `dsp/`: the DSP library on the host |
 | `tools/` | `build_app.py`, `emulate.py`, `panel.py` (apps live in the emulator's web panel), `card.py` (FAT and exFAT card images through Enaga's own FatFs), `unit_card.py` and `unit_dry_run.py` (files for a session on a unit, and the session walked on the emulator), `sysimage.py` (the update-file format), `paths.py`, toolchain build scripts |
 | `docs/` | `design.md` (decisions, architecture, plan, log), `hardware.md` (the hardware notes) |
 

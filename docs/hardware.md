@@ -398,11 +398,17 @@ listen on headphones or the line output. Report each result with what the screen
 
 13. **Menu and switching (E3's exit):** with CHECK and SYNTH both on the card (copy `synth/ENAGA/APPS/SYNTH` into
     the card's `ENAGA/APPS`), switch on. Expected: the last app (CHECK), or the menu if none is recorded. Hold F1 and
-    press POWER: the menu (the apps, then STATUS; ON marks the running one). DOWN to SYNTH, OK: the synth starts.
+    press POWER: the menu (the apps by name, then SETTINGS and STATUS; ON marks the running one). DOWN to SYNTH, OK: the synth starts.
     F1 + POWER, UP to CHECK, OK: CHECK starts again. Switch back and forth at least ten times, playing a note in the
     synth each time; report any hang, crash screen, wrong app, or sound that stays after switching. Then: F1 + POWER
     with a synth note held (the note should stop when the menu opens, F1 + POWER again to resume); switch off and on
     (the last app comes back); hold F1 while switching on (the menu, `F1 HELD: MENU`; note whether the bootloader
-    still starts normally with F1 held).
+    still starts normally with F1 held). Listen for a click when switching away from the synth with a note
+    sounding (it should fade out).
+14. **Settings:** F1 + POWER, SETTINGS, OK. With the synth playing behind the menu, VOLUME down with LEFT (quieter
+    each step, silent at 0) and back up; BRIGHTNESS down to 1 and back (report how the steps look); PADS to LOW
+    and HIGH (a light pad touch should play on HIGH and not on LOW; leave it at MEDIUM); AUTO OFF to 5 MIN. OK, then
+    switch off and on: the settings are kept (the card's `/ENAGA/SETTINGS.TXT`). Leave the unit untouched for 5
+    minutes: it should switch itself off. Set AUTO OFF back to OFF afterwards.
 
 Afterwards the official update restores the unit ("Installing and recovery").
