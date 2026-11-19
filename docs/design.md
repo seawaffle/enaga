@@ -255,8 +255,8 @@ the DSP library (`include/enaga/dsp`, tested on the host), and `examples/synth`,
 synthesizer (emulator-tested; on the unit: 8 % idle, 24 % with eight notes). The library's block functions, and apps' own `*.ti.c` files, are built with TI's
 cl6x when it is installed (GCC otherwise); the synth's worst case is 30 % of the audio budget that way and 65 % with
 GCC alone (every feature on: sync, ring, chorus, eight voices). The file service's first step is in (the
-"Files" section), and the synth saves patches with it; the CHECK app measures the card (a unit session is to
-run it); streaming follows.
+"Files" section), and the synth saves patches with it; SD writes work on a unit (polled, FIFO primed before
+the command; hardware.md "SD card"); the CHECK app measures the card (a unit session is to run it); streaming follows.
 
 ## Open items
 
@@ -972,4 +972,13 @@ theory does not hold for sequence 1. Sequences 2 and 3 never ran: the probe stop
 - Sequence 4 is Linux's davinci_mmc PIO write: 64 bytes in the FIFO, the command without DCLR, then 64 bytes at
   each DXRDY (sequence 2 waits for FIFOEMP instead).
 - The probe now runs 4, 2, 3, the likeliest first, and lines are named by sequence (`W4 OK T0 3MS`). 44 tests pass.
+
+Eighth try: `W4 OK T0 3MS`, `W2 OK T0 1MS`, `W3 ERR-2 S26 T0`, status `SD R12 W2`. **Writes work on a unit.**
+Both FIFO-first sequences without DCLR read back exact; sequence 3 (command first) got no response to CMD24,
+like sequence 0, so the controller holds a write command until its FIFO has data.
+
+- `sd_write` is now sequence 4 only (Linux's); the other sequences, `sd_write_mode` and the filler are gone.
+- The probe writes SDTEST.BIN's first sector once per boot and reads it back (`W OK 3MS`), as a check per card.
+- hardware.md "SD card" records the write rule. Next on the unit: the CARD page (step 11) and synth patch saving
+  (step 12). 44 tests pass; dry run 141/141.
 

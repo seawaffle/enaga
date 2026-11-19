@@ -305,6 +305,13 @@ the DATDNE, DRRDY or DXRDY being waited for, so a data-phase wait fails when any
 otherwise a write the card rejected looks like a success (found in smpltrek's bring-up firmware, commit
 cdd968f; the emulator injects no SD errors, so this path is untested).
 
+**Writes without DMA (unit session 2):** put 64 bytes in the FIFO (write direction, 64-byte level) *before*
+CMD24, send CMD24 **without DCLR**, then 64 bytes at each DXRDY (waiting for MMCST1 FIFOEMP works too); Linux's
+davinci_mmc does the same. The controller holds a write command until its FIFO has data, so the command first
+(as the stock firmware does, with DMATRIG and EDMA filling the FIFO) gets no response; and with DCLR after
+priming the controller leaves the transfer without DATDNE. After either failure the card answers nothing,
+not even CMD0, until it is taken out; GP4[1] is not its power switch. One sector takes 1-3 ms.
+
 ## Interrupts and exceptions
 
 The C674x interrupt controller routes events to CPU interrupts 4-15 through INTMUX1-3. Enaga uses CPU

@@ -217,17 +217,6 @@ int sd_init(void)
     return 0;
 }
 
-int sd_write_mode = 1;
-
-static int fifo_empty(u32 timeout_ms)          /* MMCST1 FIFOEMP */
-{
-    u32 start = timer_ticks();
-    while (!(REG32(MMC + MMCST1) & 0x20)) {
-        if (sd_wait_hook) sd_wait_hook();
-        if (timer_ticks() - start > timeout_ms * TICKS_PER_MS) return 0;
-    }
-    return 1;
-}
 
 void sd_data_clock(u32 clkrt) { REG32(MMC + MMCCLK) = 0x100 | clkrt; }
 
@@ -261,81 +250,31 @@ int sd_read(u8 *buffer, u32 sector, u32 count)
     return 0;
 }
 
-/* Waits for DATDNE after a write's data. With sd_write_topup set (the write probe), a controller that sits with its
- * clock stopped and its FIFO empty (MMCST1 CLKSTP | FIFOEMP, not BUSY) for 20 ms, which means it still wants data, is
- * given 64 bytes of filler, at most 8 times; sd_write_topups counts them. */
-int sd_write_topup;
-u32 sd_write_topups;
-
-static u32 data_done(void)
-{
-    u32 start = timer_ticks(), stalled = 0, st1;
-    for (;;) {
-        if (sd_wait_hook) sd_wait_hook();
-        status |= REG32(MMC + MMCST0);
-        if (status & (ST0_DATDNE | ST0_ERRORS)) {
-            u32 st = status;
-            status &= ~ST0_DATDNE;
-            return st;
-        }
-        st1 = REG32(MMC + MMCST1);
-        if (sd_write_topup && (st1 & 0x23) == 0x22 && sd_write_topups < 8) {
-            if (!stalled) stalled = timer_ticks();
-            else if (timer_ticks() - stalled > 20u * TICKS_PER_MS) {
-                u32 k;
-                for (k = 0; k < 16; k++) REG32(MMC + MMCDXR) = 0xF111F111u;
-                sd_write_topups++;
-                stalled = 0;
-            }
-        } else {
-            stalled = 0;
-        }
-        if (timer_ticks() - start > 2000u * TICKS_PER_MS) return status | ST0_TOUTRS;
-    }
-}
-
-/* The write sequences (sd_write_mode; unit session 2 is finding which a real card takes):
- *   0  the command (with DCLR), then 64 bytes at each DXRDY. On a unit: the CMD24 got no response.
- *   1  64 bytes in the FIFO, the command with DCLR, then 64 more each time the FIFO is empty (MMCST1 FIFOEMP). On a
- *      unit: answered, but the controller then stopped its clock with the FIFO empty, still wanting data.
- *   2  as 1, without DCLR in the command (DCLR may empty the FIFO on the chip).
- *   3  the command with DCLR, then the first 64 bytes at once, then as 1.
- *   4  Linux's davinci_mmc PIO write: 64 bytes in the FIFO, the command without DCLR, then 64 bytes at each DXRDY.
- * Unit session 2, sequence 1 with filler: after one 64-byte filler the FIFO held it and nothing moved for 2 s, so
- * the controller had already left the transfer (MMCST1 0x26 was idle, not a stall). */
+/* A write as Linux's davinci_mmc does it without DMA: 64 bytes in the FIFO before the command, which goes without DCLR,
+ * then 64 bytes at each DXRDY. Unit session 2 found this out the hard way: the controller holds a write command
+ * until its FIFO has data (so the command first, as with EDMA, is never answered), and DCLR after the FIFO is primed
+ * leaves the controller dropping out of the transfer short of DATDNE; either way the card then stays silent until
+ * it is taken out. (Waiting for MMCST1 FIFOEMP instead of DXRDY also works on a unit.) */
 int sd_write(const u8 *buffer, u32 sector, u32 count)
 {
     const u32 *in = (const u32 *)buffer;
     if (!card_ready || ((u32)buffer & 3)) return -1;
     while (count--) {
         u32 i, k, st, programming, begin = timer_ticks();
-        u32 arg = high_capacity ? sector : sector * 512, flags = RSP_48 | CMD_WDATX | CMD_DTRW | CMD_DCLR;
-        int mode = sd_write_mode;
+        u32 arg = high_capacity ? sector : sector * 512;
         fifo_setup(1);
         REG32(MMC + MMCBLEN) = 512;
         REG32(MMC + MMCNBLK) = 1;
-        if (mode == 0) {
-            st = command(24, arg, flags);
-            if (!ok(st)) return write_fail(-2, st);
-            for (i = 0; i < 512 / 4; i += 16) {
-                if (!data_ok(st = wait_status(ST0_DXRDY, 500), ST0_DXRDY)) return write_fail(-3, st);
-                for (k = 0; k < 16; k++) REG32(MMC + MMCDXR) = *in++;
-            }
-        } else {
-            if (mode != 3) for (k = 0; k < 16; k++) REG32(MMC + MMCDXR) = *in++;
-            st = command(24, arg, mode == 2 || mode == 4 ? flags & ~CMD_DCLR : flags);
-            if (!ok(st)) return write_fail(-2, st);
-            if (mode == 3) for (k = 0; k < 16; k++) REG32(MMC + MMCDXR) = *in++;
-            for (i = 16; i < 512 / 4; i += 16) {
-                if (mode == 4) {
-                    if (!data_ok(st = wait_status(ST0_DXRDY, 500), ST0_DXRDY)) return write_fail(-3, st);
-                } else if (!fifo_empty(500)) return write_fail(-3, REG32(MMC + MMCST1));
-                for (k = 0; k < 16; k++) REG32(MMC + MMCDXR) = *in++;
-            }
+        for (k = 0; k < 16; k++) REG32(MMC + MMCDXR) = *in++;
+        st = command(24, arg, RSP_48 | CMD_WDATX | CMD_DTRW);
+        if (!ok(st)) return write_fail(-2, st);
+        for (i = 16; i < 512 / 4; i += 16) {
+            if (!data_ok(st = wait_status(ST0_DXRDY, 500), ST0_DXRDY)) return write_fail(-3, st);
+            for (k = 0; k < 16; k++) REG32(MMC + MMCDXR) = *in++;
         }
         /* DATDNE waits for the card's CRC status and its programming (busy); the SD limit for that is 250 ms (SDSC)
          * to 500 ms (SDHC/SDXC), and 2 s leaves room. */
-        if (!data_ok(st = data_done(), ST0_DATDNE)) return write_fail(-4, st);
+        if (!data_ok(st = wait_status(ST0_DATDNE, 2000), ST0_DATDNE)) return write_fail(-4, st);
         programming = timer_ticks();                 /* CMD13 until the card is back in tran (state 4) */
         for (;;) {
             if (!ok(st = command(13, rca << 16, RSP_48))) return write_fail(-5, st);

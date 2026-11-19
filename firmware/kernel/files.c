@@ -311,15 +311,13 @@ static void card_watch(u32 ms)
     if (present) card_inserted(); else card_removed();
 }
 
-/* The write probe (unit session 2): how a real card takes Enaga's writes, without risking the file system. When
- * /ENAGA/SDTEST.BIN (at least 2 KiB, made on a computer) is on the card, each boot writes a pattern into its first
- * three sectors by write sequences 4, 2 and 3, in that order (mmcsd.c sd_write), with filler for a controller still wanting data
- * (sd_write_topup), reads each back, and stops after a write that fails (on a unit that leaves the card silent until
- * it is taken out). One line each, at most 21 characters (the status page's width):
- *   "W1 OK T0 3MS"     sequence 1: the sector reads back as written, no filler, in 3 ms
- *   "W2 BAD SH-16 T1"  written, but the pattern is moved 16 words earlier (the first 16 lost), after one filler
- *   "W2 BAD 5 T1"      written, wrong from word 5, not a simple shift
- *   "W3 ERR-4 S26 T8"  sd_write's code, MMCST1 at the failure, fillers given
+/* The write probe (unit session 2): a check that writes work on this card, without risking the file system. When
+ * /ENAGA/SDTEST.BIN (at least 512 bytes, made on a computer) is on the card, each boot writes a pattern into its first
+ * sector and reads it back. One line, at most 21 characters (the status page's width):
+ *   "W OK 3MS"      the sector reads back as written, in 3 ms
+ *   "W BAD SH-16"   written, but the pattern is moved 16 words earlier (the first 16 lost)
+ *   "W BAD 5"       written, wrong from word 5, not a simple shift
+ *   "W ERR-4 S26"   sd_write's code and MMCST1 at the failure (the card may now be silent until taken out)
  * Only the file's own data is overwritten, never the FAT or a folder. */
 static u32 probe_out[128], probe_back[128];
 
@@ -331,21 +329,15 @@ static int put_hex(char *line, int n, u32 v, int digits)
     return n;
 }
 
-static int probe_step(int mode, u32 sector)       /* 0 if the card may now be silent */
+static void probe_write(u32 sector)
 {
-    char line[40] = "W0 ";
-    int i, bad = -1, shift = 0, w, n = 3, normal = sd_write_mode;
+    char line[40] = "W ";
+    int i, bad = -1, shift = 0, w, n = 2;
     u32 start;
-    line[1] = (char)('0' + mode);
-    for (i = 0; i < 128; i++) probe_out[i] = (u32)mode << 28 | (u32)i << 16 | (~(u32)i & 0xFFFF);
+    for (i = 0; i < 128; i++) probe_out[i] = 0xE0000000u | (u32)i << 16 | (~(u32)i & 0xFFFF);
     for (i = 0; i < 128; i++) probe_back[i] = 0;
-    sd_write_mode = mode;
-    sd_write_topup = 1;
-    sd_write_topups = 0;
     start = tsc_read();
     w = sd_write((const u8 *)probe_out, sector, 1);
-    sd_write_mode = normal;
-    sd_write_topup = 0;
     if (w) {
         n = put_text(line, n, "ERR");
         n = put_dec(line, n, w);
@@ -373,8 +365,6 @@ static int probe_step(int mode, u32 sector)       /* 0 if the card may now be si
         }
         w = 0;
     }
-    n = put_text(line, n, " T");
-    n = put_dec(line, n, (int)sd_write_topups);
     if (!w && bad < 0) {
         line[n++] = ' ';
         n = put_dec(line, n, (int)((tsc_read() - start) / TICKS_PER_MS));
@@ -382,26 +372,19 @@ static int probe_step(int mode, u32 sector)       /* 0 if the card may now be si
     }
     line[n] = 0;
     log_line(line);
-    return !w;
 }
 
 void files_write_probe(void)
 {
     static FIL f;
-    static const int order[3] = {4, 2, 3};
-    u32 sector[3];
     UINT got;
     u8 byte;
-    int k;
+    u32 sector;
     if (!mounted || f_open(&f, "/ENAGA/SDTEST.BIN", FA_READ) != FR_OK) return;
-    if (f_size(&f) < 2048) { f_close(&f); log_line("SDT FILE UNDER 2 KIB"); return; }
-    for (k = 0; k < 3; k++) {                     /* the sectors holding bytes 0, 512 and 1024 */
-        if (f_lseek(&f, 512u * (u32)k) != FR_OK || f_read(&f, &byte, 1, &got) != FR_OK || !got) { f_close(&f); return; }
-        sector[k] = (u32)f.sect;
-    }
+    if (f_read(&f, &byte, 1, &got) != FR_OK || !got) { f_close(&f); log_line("SDT FILE EMPTY"); return; }
+    sector = (u32)f.sect;                            /* the sector holding byte 0 */
     f_close(&f);
-    for (k = 0; k < 3; k++)                          /* most likely first: a failed write silences the card */
-        if (!probe_step(order[k], sector[k])) break;
+    probe_write(sector);
 }
 
 void files_init(void)
