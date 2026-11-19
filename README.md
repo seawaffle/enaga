@@ -4,8 +4,10 @@ Enaga is replacement firmware for the **Sonicware SmplTrek** that turns it into 
 is a whole instrument written in C++: Enaga starts it from the SD card, hands it the pads, keys, encoders,
 display and a real-time audio callback, and recovers cleanly if it crashes.
 
-**Status: early development.** The kernel, audio engine, display and crash handling work on an emulator;
-nothing has run on a unit yet, and the app interface (`include/enaga/abi.h`) is provisional until 1.0.
+**Status: early development.** Enaga runs on a SmplTrek: the kernel, audio engine, display, keys, pads, SD
+card, the synth example and the Enaga menu with app switching have all run on a unit (three sessions so far,
+docs/hardware.md "Checks on a unit"); everything is also tested on an emulator. The app interface
+(`include/enaga/abi.h`) is provisional until 1.0.
 The design and plan are in [docs/design.md](docs/design.md); the hardware facts Enaga relies on are in
 [docs/hardware.md](docs/hardware.md).
 
@@ -111,7 +113,7 @@ python3 -B firmware/build.py                    # -> build/firmware/ENAGA_0_1_0.
 
 ## Installing
 
-Not yet recommended: 0.1.0 has not been run on a unit. When it is:
+For developers and testers: 0.1.0 runs on a unit, but it is early software (docs/design.md "Open items").
 
 1. Copy `build/firmware/ENAGA_<version>.bin` to the root of the SD card as `SmplTrek.bin`, and an app's
    package to `/ENAGA/APPS/<NAME>/APP.ENA` (8.3 names).

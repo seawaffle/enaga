@@ -349,7 +349,7 @@ first (from the simulated cache hand-over) and saves the screen at each step in 
 control); hold F4 (HOME) for one second to go to its next page. Images from E3's speaker change on play the speaker
 unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it muted. Report each result with what the screen showed.
 
-1. **Install.** A card with only `install/SmplTrek.bin` at its root; F4 (HOME) held while switching on, SYSTEM UPDATE,
+1. **Install.** A card with only `SmplTrek.bin` (staged as `build/unit-card/install/SmplTrek.bin`) at its root; F4 (HOME) held while switching on, SYSTEM UPDATE,
    restart. Expected: the ENAGA splash with MCU, AUDIO and CARD, then Enaga's status page with `NO /ENAGA/APPS`.
    A unit stuck on the SONICWARE logo with the power key dead: remove power, then BOOT MODE and the official
    update ("Installing and recovery").
