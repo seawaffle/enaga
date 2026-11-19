@@ -19,6 +19,10 @@
  * audio_fade_out ramps to silence before an app is stopped, each over AUDIO_FADE_BLOCKS blocks (about 11 ms), so
  * switching apps does not click; a change of volume ramps the same way. At full level the output is not touched.
  *
+ * Speaker: GP2[8] (active-high mute) is released when the SPEAKER setting is ON and the app has not muted it
+ * (audio_speaker_apply). Plugging in headphones cuts the speaker in hardware, as in the original firmware (a
+ * switched jack: smpltrek HW-15, an inference to confirm on the unit). Switching it fades the output around it.
+ *
  * Cost accounting: cycles from interrupt entry to exit per block (audio_cycles_last/peak) against
  * AUDIO_BUDGET_CYCLES; a block that took longer than its budget counts as an overrun. */
 
@@ -87,6 +91,8 @@ volatile float audio_volume = 1.0f;          /* the VOLUME setting's gain (setti
 static volatile float fade_target = 1.0f;    /* 1, or 0 while fading out */
 static volatile float audio_level;           /* the gain applied at the end of the last block */
 #define AUDIO_FADE_BLOCKS 8
+int audio_speaker_setting = 1, audio_speaker_app = 1;
+static int speaker_on;                       /* GP2[8] driven low */
 
 static void gpio_setup(void)                           /* the original firmware's board set-up, in its order */
 {
@@ -239,8 +245,23 @@ void audio_fade_out(void)                     /* main context: ramp to silence; 
     while (audio_level != 0.0f && audio_status == 0 && tsc_read() - start < 50 * TICKS_PER_MS) {}
 }
 
+void audio_speaker_apply(void)               /* main context: the speaker as the setting and the app want it */
+{
+    int want = audio_speaker_setting && audio_speaker_app && audio_status == 0;
+    if (want == speaker_on) return;
+    audio_fade_out();
+    if (want) gpio_clr(SPK_MUTE_BANK, SPK_MUTE_PIN);
+    else gpio_set(SPK_MUTE_BANK, SPK_MUTE_PIN);
+    speaker_on = want;
+    fade_target = 1.0f;
+}
+
+int audio_jack(void) { return (int)(gpio_read_bank16(JACK_BANK) >> JACK_PIN) & 1; }
+
 void audio_mute(void)
 {
+    gpio_set(SPK_MUTE_BANK, SPK_MUTE_PIN);
+    speaker_on = 0;
     audio_set_callback(0, 0);
     delay_us(3000);                           /* two blocks of silence through the ring */
     codec_mute();

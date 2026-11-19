@@ -42,6 +42,11 @@ namespace system {
 inline void open_menu() { host().open_menu(); }
 // While busy, Enaga does not switch the unit off for being idle (the AUTO OFF setting). Cleared when the app stops.
 inline void set_busy(bool busy) { host().set_busy(busy ? 1u : 0u); }
+// Mutes (false) or releases (true) the built-in speaker, e.g. while monitoring the built-in microphone. The user's
+// SPEAKER setting still wins, and headphones cut the speaker anyway. Released again when the app stops.
+inline void speaker(bool on) { host().speaker(on ? 1u : 0u); }
+// The jack detect input, 0 or 1. Provisional: which jack (headphones or INPUT) and its polarity are unconfirmed.
+inline int jack() { return int(host().jack()); }
 }  // namespace system
 
 // The draw target: ENAGA_SCREEN_W x ENAGA_SCREEN_H bytes, row-major, grey 0-15.

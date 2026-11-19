@@ -10,6 +10,7 @@
  *   BRIGHTNESS  1-10      the display's contrast command (0x81)
  *   PADS        LOW MEDIUM HIGH   sensitivity: a press from 1,100 / 800 / 500, released below 3/4 of that
  *   AUTO OFF    OFF 5-60 MIN      switch off after that long without input, unless the app is busy (set_busy)
+ *   SPEAKER     ON OFF            the built-in speaker (headphones cut it in any case); an app can also mute it
  *
  * The SPI flash is not used: it holds the original firmware's sound content, which Enaga never writes. */
 #define SETTINGS_FILE "/ENAGA/SETTINGS.TXT"
@@ -17,6 +18,7 @@
 static const char *const numbers[] = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10" };
 static const char *const pads[] = { "LOW", "MEDIUM", "HIGH" };
 static const char *const off[] = { "OFF", "5 MIN", "10 MIN", "30 MIN", "60 MIN" };
+static const char *const on_off[] = { "ON", "OFF" };
 
 typedef struct {
     const char *name;
@@ -24,12 +26,13 @@ typedef struct {
     int first, count, fallback;               /* labels[first .. first + count - 1]; the default's index */
 } setting_t;
 
-enum { VOLUME, BRIGHTNESS, PADS, AUTO_OFF, SETTINGS_COUNT };
+enum { VOLUME, BRIGHTNESS, PADS, AUTO_OFF, SPEAKER, SETTINGS_COUNT };
 static const setting_t table[SETTINGS_COUNT] = {
     { "VOLUME", numbers, 0, 11, 10 },
     { "BRIGHTNESS", numbers, 1, 10, 9 },
     { "PADS", pads, 0, 3, 1 },
     { "AUTO OFF", off, 0, 5, 0 },
+    { "SPEAKER", on_off, 0, 2, 0 },
 };
 static int settings_value[SETTINGS_COUNT], settings_saved[SETTINGS_COUNT];
 static int settings_cursor;
@@ -48,6 +51,7 @@ static void apply(int which)
     case BRIGHTNESS: oled_contrast((u8)(25 * (v + 1) + 5)); break;   /* 1 -> 55, 10 -> 255 */
     case PADS: pad_press_level = press[v]; pad_release_level = press[v] * 3u / 4u; break;
     case AUTO_OFF: settings_auto_off_ms = minutes[v] * 60000u; break;
+    case SPEAKER: audio_speaker_setting = v == 0; audio_speaker_apply(); break;
     default: break;
     }
 }

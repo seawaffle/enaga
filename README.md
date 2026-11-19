@@ -77,7 +77,8 @@ ENAGA_APP(Beep)
   `<enaga/wav.hpp>` reads and writes WAV headers. `<enaga/settings.hpp>` keeps an app's own settings
   (`settings.get("TEMPO", 120)`, `settings.set("TEMPO", tempo)`, `save()`) as text in its data folder.
 - `enaga::system::open_menu()` opens the Enaga menu as F1 + POWER does; `enaga::system::set_busy(true)` keeps the
-  unit from switching itself off (the AUTO OFF setting) while the app works unattended, e.g. recording.
+  unit from switching itself off (the AUTO OFF setting) while the app works unattended, e.g. recording;
+  `enaga::system::speaker(false)` mutes the built-in speaker (e.g. while monitoring the built-in microphone).
 - `enaga::fatal(reason)` stops the app; Enaga shows the reason and keeps running. Enaga's watchdog stops an
   app the same way when a main-loop call (including `init` and `stop`) has not returned after 1 s, or `audio`
   after 100 ms; `stop` has 3 s in all, even while it is saving to the card. When an app is switched away from,
@@ -117,7 +118,7 @@ Not yet recommended: 0.1.0 has not been run on a unit. When it is:
 2. Hold **F4** (HOME on a SmplTrek) while switching on to reach BOOT MODE, and choose SYSTEM UPDATE.
 
 Enaga starts the last app that ran (or the only one installed); **F1 + POWER** opens the Enaga menu, which lists
-the apps and switches between them and holds the settings (volume, brightness, pad sensitivity, auto-off, kept in
+the apps and switches between them and holds the settings (volume, brightness, pad sensitivity, auto-off, speaker, kept in
 `/ENAGA/SETTINGS.TXT`), and holding F1 while switching on opens it instead of an app.
 
 To go back, install an official SmplTrek system update the same way. Enaga never modifies the bootloader or

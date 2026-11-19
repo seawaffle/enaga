@@ -280,7 +280,9 @@ the block. Details in docs/design.md, "First unit session: results".
   scheme with 256-word buffers): even words left only, odd words right only, both at the same level. The line
   outputs and the receive side (which input lands in which words) are not yet checked; with nothing connected,
   0.3.1's input peak sat around 2 in 32,768.
-- **Speaker:** plays with GP2[8] (speaker mute) driven low and headphones unplugged (M1). Enaga keeps it muted.
+- **Speaker:** plays with GP2[8] (speaker mute) driven low and headphones unplugged (M1). Enaga releases it unless
+  the SPEAKER setting is OFF or the app mutes it (docs/design.md "Settings"); that headphones cut it in hardware is
+  an inference (smpltrek HW-15) to confirm.
 - **Audio GPIOs:**
 
 | Pin | Use |
@@ -410,5 +412,9 @@ listen on headphones or the line output. Report each result with what the screen
     and HIGH (a light pad touch should play on HIGH and not on LOW; leave it at MEDIUM); AUTO OFF to 5 MIN. OK, then
     switch off and on: the settings are kept (the card's `/ENAGA/SETTINGS.TXT`). Leave the unit untouched for 5
     minutes: it should switch itself off. Set AUTO OFF back to OFF afterwards.
+15. **Speaker and jack:** with headphones unplugged, play the synth: the speaker should play. Plug headphones in: the
+    speaker should stop and the headphones play. SETTINGS, SPEAKER OFF: the speaker stays silent unplugged; back to
+    ON. Then open STATUS and note the `J` reading (top right of the AUDIO line) with nothing plugged in, with
+    headphones in, and with a cable in INPUT L (unpowered is fine): that tells which jack GP3[8] senses.
 
 Afterwards the official update restores the unit ("Installing and recovery").

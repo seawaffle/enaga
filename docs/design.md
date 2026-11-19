@@ -105,6 +105,14 @@ changed.
 | BRIGHTNESS | 1-10 (10) | the display controller's contrast command (0x81), 55 to 255 |
 | PADS | LOW, MEDIUM, HIGH (MEDIUM) | pad sensitivity: a press from 1,100 / 800 / 500, released below 3/4 of that |
 | AUTO OFF | OFF, 5, 10, 30, 60 MIN (OFF) | switch off (stopping the app normally) after that long with no key, knob, pad press or POWER, unless the app has called `set_busy` |
+| SPEAKER | ON, OFF (ON) | the built-in speaker's mute, GP2[8], as the original firmware's SPEAKER MUTE |
+
+The speaker, as in the original firmware: it plays unless the user has switched it off, the app has muted it
+(`speaker(false)`, e.g. while monitoring the built-in microphone, where the original firmware mutes it against
+feedback), or headphones are plugged in, which cuts it in hardware (a switched jack: smpltrek HW-15, to confirm on
+the unit). Switching it fades the output around the change. Apps can also read GP3[8], the jack detect input
+(`jack()`), provisional until a unit shows which jack it senses and which level means plugged in; the status page
+shows it as `J`.
 
 MIDI channel waits for MIDI (E4). An app's own settings are separate: `<enaga/settings.hpp>` gives it a key/value
 store in its data folder (`SETTINGS.TXT`, the same text format), built on the file API, with nothing new in Enaga.
@@ -323,6 +331,10 @@ repeatedly on the unit, is the next unit session's. App icons are left for E4.
 
 ## Open items
 
+- On the unit: the speaker plays, and headphones cut it (hardware); which jack GP3[8] senses and its polarity, so
+  `jack()` can become a headphones / input event (smpltrek M1 G6, never run). Input routing for apps (the
+  microphone switch GP1[2], INPUT L front end and +10 dB GP7[14] / GP7[15], INPUT R microphone stage GP5[11], line
+  pad GP1[3]) waits on the same session: their roles are the original firmware's settings, mostly unconfirmed.
 - On the unit: BRIGHTNESS (the contrast command is the one start-up sends, at other levels; the steps' look is
   unchecked); whether AUTO OFF should apply on USB power too (it does now; `power_on_batteries` could limit it).
 - On the unit: the bootloader passes control normally with F1 held (Enaga reads F1 when start-up ends);
@@ -1123,4 +1135,13 @@ runs: WRITE 2382 / 2367 / 1837 KiB/s (was 170), READ 7613 / 7585 / 7585 KiB/s (w
   completed, no step in the output across the switch (the test fails with the fade removed: a jump of 0.25 full
   scale), the SETTINGS page changing all four settings and writing the file, the app's own `SETTINGS.TXT`, the
   settings read back at the next boot, and AUTO OFF switching off with no app busy.
+
+### The speaker (2026-11-19)
+
+Enaga had kept the speaker muted since bring-up (GP2[8] high), which the owner noticed on the unit. Now
+`audio_speaker_apply` releases it when the SPEAKER setting is ON and the app has not muted it, with a fade around
+the change; power-off mutes it first. Host table: `speaker(on)` (reset when the app stops, or is dropped) and
+`jack()` (GP3[8] as read, provisional); C++ `enaga::system::speaker(bool)` and `jack()`. The status page shows `J`
+and the jack reading. `tests/test_menu.py` reads GP2[8] back from the GPIO registers: released by default, set by
+the app's mute and by SPEAKER OFF, released when the muting app is dropped, and SPEAKER OFF kept across a reboot.
 

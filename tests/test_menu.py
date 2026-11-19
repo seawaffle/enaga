@@ -69,6 +69,9 @@ class Menu(unittest.TestCase):
     def number(self, emu, name):                     # a float variable
         return struct.unpack("<f", struct.pack("<I", emu.word(name)))[0]
 
+    def speaker_muted(self, emu):                    # GP2[8] driven high (GPIO bank pair 1 OUT_DATA, bit 8)
+        return (int.from_bytes(emu.cpu.read(0x01E26000 + 0x14 + 0x28, 4), "little") >> 8) & 1
+
     def state(self, emu):
         r = emu.report()
         return dict(menu=emu.word("menu_active"), running=r["app_running"], name=r["app_name"],
@@ -166,6 +169,9 @@ class Menu(unittest.TestCase):
                 self.assertEqual(self.state(emu)["menu"], 1)
                 self.press(emu, CLR)
                 self.assertEqual(self.state(emu)["menu"], 0)
+                self.assertEqual(self.speaker_muted(emu), 0)                    # SPEAKER ON by default
+                self.press(emu, STEP1 + 3)                                      # the app mutes it
+                self.assertEqual(self.speaker_muted(emu), 1)
                 self.press(emu, STEP1 + 2)                                      # busy: AUTO OFF waits
                 emu.cpu.write(emu.names["settings_auto_off_ms"], (300).to_bytes(4, "little"))
                 self.assertIsNone(emu.run(600 * MS)["error"])
@@ -188,8 +194,9 @@ class Menu(unittest.TestCase):
                 s = self.state(emu)
                 self.assertEqual((s["menu"], s["running"], s["name"]), (0, True, "TONE"), s)
                 self.assertIn("APP STOP TOO LONG", s["log"])
+                self.assertEqual(self.speaker_muted(emu), 0)                    # the app's mute ends with it
                 self.assertEqual(emu.word("kernel_crashed"), 0)
-                # SETTINGS: VOLUME 6, BRIGHTNESS 9, PADS HIGH, AUTO OFF 5 MIN, applied at once and saved on OK.
+                # SETTINGS: VOLUME 6, BRIGHTNESS 9, PADS HIGH, AUTO OFF 5 MIN, SPEAKER OFF, applied at once, saved on OK.
                 self.chord(emu)
                 for _ in range(3):
                     self.press(emu, UP)
@@ -207,18 +214,22 @@ class Menu(unittest.TestCase):
                 self.press(emu, DOWN)
                 self.press(emu, RIGHT)
                 self.assertEqual(emu.word("settings_auto_off_ms"), 300_000)
+                self.press(emu, DOWN)
+                self.press(emu, RIGHT)
+                self.assertEqual(self.speaker_muted(emu), 1)
                 self.press(emu, OK)
                 self.assertEqual(self.state(emu)["menu"], 1)
                 self.press(emu, CLR)
                 self.assertIsNone(emu.run(2200 * MS)["error"])
                 image.write_bytes(emu.cpu.sd_read())
             self.assertEqual(card.get(image, "/ENAGA/SETTINGS.TXT"),
-                             b"VOLUME=6\nBRIGHTNESS=9\nPADS=HIGH\nAUTO OFF=5 MIN\n")
+                             b"VOLUME=6\nBRIGHTNESS=9\nPADS=HIGH\nAUTO OFF=5 MIN\nSPEAKER=OFF\n")
             self.assertEqual(card.get(image, "/ENAGA/DATA/MENU-TEST/SETTINGS.TXT"),
                              b"STARTS=1\nNOTE=SAVED BY MENU-TEST\n")
             with self.boot(image) as emu:              # read back at power-on; AUTO OFF without the app busy
                 self.assertAlmostEqual(self.number(emu, "audio_volume"), 0.251, places=3)
                 self.assertEqual((emu.word("pad_press_level"), emu.word("pad_release_level")), (500, 375))
+                self.assertEqual(self.speaker_muted(emu), 1)
                 self.assertEqual(self.state(emu)["name"], "TONE")
                 emu.cpu.write(emu.names["settings_auto_off_ms"], (300).to_bytes(4, "little"))
                 self.assertIsNone(emu.run(600 * MS)["error"])

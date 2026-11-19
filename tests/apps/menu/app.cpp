@@ -1,6 +1,7 @@
 // Menu test app (tests/test_menu.py): counts its starts in its own settings (enaga::Settings), plays a constant
 // level (so a switch's fade shows in the output), STEP 1 opens the Enaga menu itself, STEP 2 makes stop() never
-// finish (saving to the card all the while, which feeds the watchdog), STEP 3 says it is busy (AUTO OFF waits).
+// finish (saving to the card all the while, which feeds the watchdog), STEP 3 says it is busy (AUTO OFF waits),
+// STEP 4 mutes the speaker.
 #include <enaga/app.hpp>
 #include <enaga/settings.hpp>
 
@@ -17,6 +18,7 @@ public:
         if (key == ENAGA_KEY_STEP1) enaga::system::open_menu();
         if (key == ENAGA_KEY_STEP1 + 1) slow_stop_ = true;
         if (key == ENAGA_KEY_STEP1 + 2) enaga::system::set_busy(true);
+        if (key == ENAGA_KEY_STEP1 + 3) enaga::system::speaker(false);
     }
     void stop() override {
         while (slow_stop_) enaga::files::save("/ENAGA/DATA/MENU-TEST/SPIN.TXT", "x", 1);
