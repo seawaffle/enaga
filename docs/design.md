@@ -988,3 +988,9 @@ saving works: U1 saved and came back after switching off and on. Writes are abou
 with its programming wait, so recording needs multi-block writes (CMD25) before it streams; reading is enough for
 15 streams as it is.
 
+Synth on the unit: one note V1 about 11 %, eight notes V8 about 24 %, SUPERSAW two-note chord V8 about 25 %.
+SUPERSAW (four unison voices a note) holds only two notes and steals the oldest; a little crackle on pad presses
+there. Cause, from the code: a stolen voice still sounding (held, or in SUPERSAW's long release) restarts with
+reset oscillator phases and filters at its current level, a step in the output. Velocity is noticeable on the bells
+(VELO 80) but not usually: most patches keep the default VELO 50, a 6 dB span from softest to hardest.
+
