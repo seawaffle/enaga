@@ -994,3 +994,8 @@ there. Cause, from the code: a stolen voice still sounding (held, or in SUPERSAW
 reset oscillator phases and filters at its current level, a step in the output. Velocity is noticeable on the bells
 (VELO 80) but not usually: most patches keep the default VELO 50, a 6 dB span from softest to hardest.
 
+- The click fixed: a voice taken while still sounding keeps its oscillator phases and filter state (the envelope
+  already went on from its level, and the output gains are ramped). A test holds eight sines and takes one with a
+  ninth note: the largest sample-to-sample step was 6.7 times the sines' own before, and stays under twice now.
+  The synth is a demo for app writers, so voice count and velocity stay as they are. 45 tests pass.
+

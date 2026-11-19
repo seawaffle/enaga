@@ -122,20 +122,24 @@ void Engine::start(Voice &voice, const NoteEvent &event, bool retrigger, float u
     voice.random = random_.bipolar();
     bool glide = s_.glide < 1.0f && (s_.mode != mode_legato);
     voice.pitch = glide ? last_pitch_ : voice.target;
-    if (s_.unison > 1) {                          // unison: each voice from its own phase, or they start as one
-        voice.osc1.reset(random_.unipolar());
-        voice.osc2.reset(random_.unipolar());
-        voice.sub.reset(random_.unipolar());
-    } else {
-        voice.osc1.reset();
-        voice.osc2.reset();
-        voice.sub.reset();
+    // A voice taken while still sounding keeps its oscillators' phases and its filters, and its envelope goes on
+    // from its level: resetting them while it plays would put a step in the output, a click.
+    if (!voice.amp.active()) {
+        if (s_.unison > 1) {                      // unison: each voice from its own phase, or they start as one
+            voice.osc1.reset(random_.unipolar());
+            voice.osc2.reset(random_.unipolar());
+            voice.sub.reset(random_.unipolar());
+        } else {
+            voice.osc1.reset();
+            voice.osc2.reset();
+            voice.sub.reset();
+        }
+        voice.sync_carry = 0.0f;
+        voice.svf1.reset();
+        voice.svf2.reset();
     }
-    voice.sync_carry = 0.0f;
     voice.lfo_fade[0] = s_.lfo_fade_step[0] >= 1.0f ? 1.0f : 0.0f;
     voice.lfo_fade[1] = s_.lfo_fade_step[1] >= 1.0f ? 1.0f : 0.0f;
-    voice.svf1.reset();
-    voice.svf2.reset();
     voice.amp.gate_on();
     voice.env2.gate_on();
     voice.env3.gate_on();

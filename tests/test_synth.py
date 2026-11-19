@@ -296,6 +296,24 @@ class Synth(unittest.TestCase):
             self.assertAlmostEqual(self.pitch(emu), hz(48), delta=1.5)
             self.assertEqual(emu.word("audio_overruns"), 0)
 
+    def test_a_voice_taken_while_sounding_does_not_click(self):
+        # Eight sines held, then a ninth note takes the oldest voice. Low sines change little from one sample to
+        # the next; a voice whose phase or filter is reset at its level steps by a large part of its amplitude.
+        with self.start() as emu:
+            self.set_values(emu, {OSC1_WAVE: 3, MIX_OSC2: 0})
+            for k in range(8):
+                emu.key(STEP1 + k, True)
+                emu.run(5 * MS)
+            emu.run(300 * MS)
+            self.assertEqual(self.active_voices(emu), 8)
+            held = samples(emu)[-4800 * 2:][0::2]
+            emu.key(STEP1 + 8, True)
+            emu.run(100 * MS)
+            taken = samples(emu)[-4800 * 2:][0::2]
+            steady = max(abs(b - a) for a, b in zip(held, held[1:]))
+            step = max(abs(b - a) for a, b in zip(taken, taken[1:]))
+            self.assertLess(step, 2 * steady, (step, steady))
+
     @unittest.skipUnless(paths.ti_present(), "TI's cl6x not installed (tools/paths.py, TI_CGT)")
     def test_cl6x_and_gcc_builds_sound_the_same(self):
         # The DSP library (runtime/dsp) is built by cl6x when it is installed, by GCC otherwise. Both do the same IEEE
