@@ -6,7 +6,7 @@
 install/SmplTrek.bin            the Enaga update; alone on the card for the install and the first start-up
 app/ENAGA/APPS/CHECK/APP.ENA    the CHECK app (tests/unit/check); copy the ENAGA folder to the card afterwards
 synth/ENAGA/APPS/SYNTH/APP.ENA  the synth (examples/synth), for the last step: replaces the card's ENAGA folder
-app/ENAGA/SDTEST.BIN (and synth/)  4 KiB of zeros: with it on the card each boot tests the SD write sequences
+app/ENAGA/SDTEST.BIN (and synth/)  4 KiB of zeros: with it on the card each boot tests SD writes (CMD24, CMD25)
 
 Prints each file's size and SHA-256 so a copy on the card can be compared.
 """
@@ -38,7 +38,7 @@ def main():
     files = {OUT / "install" / "SmplTrek.bin": firmware["image_path"].read_bytes(),
              OUT / "app" / "ENAGA" / "APPS" / "CHECK" / "APP.ENA": package,
              OUT / "synth" / "ENAGA" / "APPS" / "SYNTH" / "APP.ENA": synth,
-             # The write probe's file (files.c files_write_probe): its sectors take the SD write tests at each boot.
+             # The write probe's file (files.c files_write_probe): its sectors take the SD write checks at each boot.
              OUT / "app" / "ENAGA" / "SDTEST.BIN": bytes(4096),
              OUT / "synth" / "ENAGA" / "SDTEST.BIN": bytes(4096)}
     for path, data in files.items():

@@ -8,6 +8,9 @@
 //     // Large ones in the background: done() runs in the main context when the load has finished.
 //     enaga::files::load("/SAMPLES/Kick.raw", buffer, bytes, this, &MyApp::loaded);   // void loaded(int32_t)
 //
+//     // Longer than memory, or recorded: a Stream (below), read or written in audio(). <enaga/wav.hpp> reads and
+//     // writes WAV headers.
+//
 // Results are byte counts, handles or ENAGA_FILE_OK, or a negative enaga_file_error (enaga::files::error_name
 // gives a short name for one). Paths are absolute, UTF-8. An app reads anywhere and writes in
 // enaga::files::data_folder() (/ENAGA/DATA/<package name>), /SAMPLES and /RECORD. Main context only. A
@@ -87,6 +90,53 @@ public:
 
 private:
     int32_t handle_ = -1;
+};
+
+// A stream: a file played into audio(), or recorded from it, through a ring buffer the app gives (a power of
+// two, ENAGA_STREAM_RING_MIN or more; it belongs to Enaga until close). open/create/status/close in the main
+// context; read or write in audio(), where they never wait. Closed when the object goes.
+//
+//     ring_ = new uint8_t[1 << 16];
+//     stream_.open("/SAMPLES/Loop.wav", wav.data_offset, ring_, 1 << 16);   // then wait for ready()
+//     ...in audio(): uint32_t got = stream_.read(buffer, frames * 4);       // short = an underrun, or the end
+class Stream {
+public:
+    using Status = enaga_stream_status_t;
+    Stream() = default;
+    ~Stream() { close(); }
+    Stream(const Stream &) = delete;
+    Stream &operator=(const Stream &) = delete;
+
+    int32_t open(const char *path, uint32_t offset, void *ring, uint32_t ring_bytes) {   // playback
+        close();
+        return set(host().stream_open(path, offset, ring, ring_bytes));
+    }
+    int32_t create(const char *path, uint32_t reserve, void *ring, uint32_t ring_bytes) {   // recording
+        close();
+        return set(host().stream_create(path, reserve, ring, ring_bytes));
+    }
+    // A recording is written out first, then `header` over the file's start (the space `reserve` kept).
+    int32_t close(const void *header = nullptr, uint32_t header_bytes = 0) {
+        int32_t r = stream_ >= 0 ? host().stream_close(stream_, header, header_bytes) : int32_t(ENAGA_FILE_OK);
+        stream_ = -1;
+        return r;
+    }
+    bool is_open() const { return stream_ >= 0; }
+    uint32_t read(void *out, uint32_t bytes) { return host().stream_read(stream_, out, bytes); }
+    uint32_t write(const void *data, uint32_t bytes) { return host().stream_write(stream_, data, bytes); }
+    Status status() const {
+        Status s{};
+        if (host().stream_status(stream_, &s) != ENAGA_FILE_OK) s.state = ENAGA_FILE_BAD_HANDLE;
+        return s;
+    }
+    bool ready() const { return status().state >= ENAGA_STREAM_RUNNING; }   // playback: filled, start reading
+
+private:
+    int32_t set(int32_t r) {
+        stream_ = r >= 0 ? r : -1;
+        return r < 0 ? r : int32_t(ENAGA_FILE_OK);
+    }
+    int32_t stream_ = -1;
 };
 
 inline const char *error_name(int32_t result) {

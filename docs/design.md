@@ -213,14 +213,28 @@ The card-detect pin (GP4[0]) is read every pass. When the card goes, every reque
 open handles become dead (calls on them fail), and the app gets an event; when a card comes back Enaga mounts
 it and sends another. An app that was saving keeps its data and can save again.
 
-### Streaming (second step)
+### Streaming (step 4, built 2026-11-18)
 
-A stream is a file Enaga reads ahead into a ring buffer for the audio context: `stream_open(path, offset,
-ring_bytes)`, then in `audio()` `stream_read(stream, out, bytes)`, which never waits (an empty ring gives what
-it has and counts an underrun). Enaga tops up the emptiest rings first in the main loop's file budget. Playing
-16-bit stereo at 48 kHz takes 192 KiB/s per stream; how many streams a card can feed is the measurement the
-next unit session should take (a card-speed page in the CHECK app: sequential and scattered reads, writes).
-WAV parsing (`enaga::wav`) sits on top: header, format, data offset.
+A stream is a file played into the audio context, or recorded from it, through a ring buffer the app gives (a
+power of two, 4 KiB or more, from its own heap): `stream_open(path, offset, ring, bytes)` for playback,
+`stream_create(path, reserve, ring, bytes)` for a recording that starts with `reserve` zero bytes, then in
+`audio()` `stream_read` / `stream_write`, which never wait (a dry or full ring moves what it can and counts an
+underrun). `stream_status` gives the state (filling, running, ended, or the error), position, bytes buffered and
+underruns; `stream_close(stream, header, bytes)` writes a recording out to the end, then the header over its first
+bytes, so a WAV header with the final size goes in the reserved space. Up to 8 streams an app, besides its 8 files.
+
+The ring is single-producer, single-consumer with free-running counters, so the audio side never locks. In the
+main loop's file slice, each step of the request queue follows a step of the neediest stream (a playback ring's
+free share, a recording ring's full share), one FatFs call of at most a quarter of its ring and 8 KiB. Card
+removal fails every stream with "no card"; an app that stops has its streams closed (recordings flushed); a
+dropped app's are discarded.
+
+`<enaga/wav.hpp>` parses a WAV header (PCM 8/16/24/32-bit, float 32-bit, WAVE_FORMAT_EXTENSIBLE, other chunks
+skipped), reading byte by byte since the format is packed, and makes the 44-byte header for a recording.
+
+Card speed on a unit (session 2, one sector a command): reads 2,860 KiB/s, enough for about 15 streams of 16-bit
+stereo at 48 kHz (192 KiB/s each); writes 170 KiB/s, short of one. So the driver now moves up to 128 sectors a
+command (CMD18 / CMD25, ended by CMD12); the next unit session measures what that gives.
 
 ### Order of work
 
@@ -230,7 +244,7 @@ WAV parsing (`enaga::wav`) sits on top: header, format, data offset.
    pin (the emulator drives that pin; a card that stops answering mid-transfer is not modelled).
 2. (**Done** 2026-11-18, see the log.) The synth saves and loads patches (E2's exit app gets storage).
 3. (**Done** 2026-11-18, see the log.) The card-speed page in the CHECK app; the next unit session measures it.
-4. Streams and WAV, sized by those measurements.
+4. (**Done** 2026-11-18, see the log.) Streams and WAV, and multi-block SD transfers for recording.
 
 ## Phases
 
@@ -256,7 +270,8 @@ synthesizer (emulator-tested; on the unit: 8 % idle, 24 % with eight notes). The
 cl6x when it is installed (GCC otherwise); the synth's worst case is 30 % of the audio budget that way and 65 % with
 GCC alone (every feature on: sync, ring, chorus, eight voices). The file service's first step is in (the
 "Files" section), and the synth saves patches with it; SD writes work on a unit (polled, FIFO primed before
-the command; hardware.md "SD card"); the CHECK app measures the card (a unit session is to run it); streaming follows.
+the command; hardware.md "SD card"); the CHECK app measured the card on a unit; streams (playback and recording
+from `audio()`) and WAV headers are in, with multi-block SD transfers, on the emulator.
 
 ## Open items
 
@@ -998,4 +1013,18 @@ reset oscillator phases and filters at its current level, a step in the output. 
   already went on from its level, and the output gains are ramped). A test holds eight sines and takes one with a
   ninth note: the largest sample-to-sample step was 6.7 times the sines' own before, and stays under twice now.
   The synth is a demo for app writers, so voice count and velocity stay as they are. 45 tests pass.
+
+### Streams, WAV and multi-block SD transfers, file service step 4 (2026-11-18)
+
+- `hal/mmcsd.c` moves up to 128 sectors a command: CMD18 and CMD25, each ended by CMD12 (a failed multi-block
+  transfer is stopped too). Writes keep the unit's rule (FIFO primed, no DCLR). The emulator's card speed hardly
+  changes (it models no per-command programming time); the unit's single-sector writes were 170 KiB/s.
+- The boot probe writes SDTEST.BIN's first sector (CMD24) and then sectors 1-7 in one CMD25, reading each back:
+  `W1 OK 3MS`, `W7 OK 4MS` (or `W7 NOT IN A ROW` when the file's sectors are not consecutive).
+- Streams (abi.h, `enaga::files::Stream`; "Streaming" above) and `<enaga/wav.hpp>`.
+- `tests/test_streams.py`: four 64 KiB-ring playback streams from one WAV file (after a LIST chunk) and one from a
+  short file played to its end, every word checked in `audio()`; a recording from `audio()` for 1.5 s closed
+  with its WAV header and read back with Python's `wave`; no underruns, no audio overruns. With the stream
+  service switched off the streams never fill and the test fails. 46 tests pass.
+- Not tested: a card removed while streaming (the path is the handles' one), underruns on a slow card.
 

@@ -310,7 +310,8 @@ CMD24, send CMD24 **without DCLR**, then 64 bytes at each DXRDY (waiting for MMC
 davinci_mmc does the same. The controller holds a write command until its FIFO has data, so the command first
 (as the stock firmware does, with DMATRIG and EDMA filling the FIFO) gets no response; and with DCLR after
 priming the controller leaves the transfer without DATDNE. After either failure the card answers nothing,
-not even CMD0, until it is taken out; GP4[1] is not its power switch. One sector takes 1-3 ms.
+not even CMD0, until it is taken out; GP4[1] is not its power switch. One sector takes 1-3 ms. Multi-block
+transfers (CMD18, CMD25, then CMD12) use the same sequence with MMCNBLK set; the boot probe checks CMD25.
 
 ## Interrupts and exceptions
 

@@ -83,6 +83,12 @@ int32_t files_write(int32_t file, const void *data, uint32_t bytes, enaga_file_d
 int32_t files_load(const char *path, void *buffer, uint32_t max, enaga_file_done_t done, void *user);
 int32_t files_list(const char *path, enaga_file_entry_t entry, enaga_file_done_t done, void *user);
 const char *files_data_folder(void);
+int32_t files_stream_open(const char *path, uint32_t offset, void *ring, uint32_t ring_bytes);
+int32_t files_stream_create(const char *path, uint32_t reserve, void *ring, uint32_t ring_bytes);
+uint32_t files_stream_read(int32_t stream, void *out, uint32_t bytes);
+uint32_t files_stream_write(int32_t stream, const void *data, uint32_t bytes);
+int32_t files_stream_status(int32_t stream, enaga_stream_status_t *status);
+int32_t files_stream_close(int32_t stream, const void *header, uint32_t header_bytes);
 extern char crash_reason[48];
 
 /* leds.c: panel LEDs by enaga_led, cached per address so only changes are sent */

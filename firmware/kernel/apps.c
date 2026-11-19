@@ -46,6 +46,8 @@ enaga_host_t app_host = {                     /* heap filled in per app by load_
     host_led,
     files_open, files_close, files_size, files_seek, files_info, files_remove, files_make_folder,
     files_read_all, files_save, files_read, files_write, files_load, files_list, files_data_folder,
+    files_stream_open, files_stream_create, files_stream_read, files_stream_write, files_stream_status,
+    files_stream_close,
 };
 
 static void cache_sync(uint32_t address, uint32_t bytes)   /* the loader calls this just before the app's entry */

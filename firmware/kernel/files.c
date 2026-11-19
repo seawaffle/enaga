@@ -51,6 +51,20 @@ static u32 card_change_ms;
 volatile int files_reset_pending;
 u32 files_requests_done;
 
+/* Streams (abi.h). The ring is single-producer, single-consumer: for playback the main loop puts bytes in
+ * (`in`) and the app takes them out (`out`), for a recording the other way round. The counters run freely and
+ * index the ring masked; each side writes only its own. */
+typedef struct {
+    FIL fil;
+    u8 used, writing;
+    volatile u8 primed, eof;                  /* playback: the ring has been full; the file is all in it */
+    volatile int32_t error;                   /* a negative enaga_file_error once the stream has failed */
+    u8 *ring;
+    u32 mask;
+    volatile u32 in, out, underruns;
+} stream_t;
+static stream_t streams[ENAGA_STREAMS];
+
 /* ---- helpers ---------------------------------------------------------------------------------------------- */
 
 /* Card failures in the log (the status page shows it): "FS ERR 2" (FatFs's FRESULT for a failure reported as
@@ -286,6 +300,7 @@ static void card_removed(void)
 {
     unsigned i;
     for (i = 0; i < ENAGA_FILES_OPEN; i++) if (handles[i].used) handles[i].dead = 1;
+    for (i = 0; i < ENAGA_STREAMS; i++) if (streams[i].used && !streams[i].error) streams[i].error = ENAGA_FILE_NO_CARD;
     drop_all(ENAGA_FILE_NO_CARD, 1);
     f_mount(0, "", 0);
     mounted = 0;
@@ -417,6 +432,7 @@ void files_app_stopped(void)                  /* main context: the app stopped n
         if (handles[i].used && !handles[i].dead && mounted) f_close(&handles[i].fil);
         handles[i].used = 0;
     }
+    for (i = 0; i < ENAGA_STREAMS; i++) if (streams[i].used) files_stream_close((int32_t)i, 0, 0);
 }
 
 static void reset_after_drop(void)
@@ -425,6 +441,7 @@ static void reset_after_drop(void)
     files_reset_pending = 0;
     queue_head = queue_count = 0;
     for (i = 0; i < ENAGA_FILES_OPEN; i++) handles[i].used = handles[i].pending = 0;
+    for (i = 0; i < ENAGA_STREAMS; i++) streams[i].used = 0;
     if (mounted) { f_mount(0, "", 0); files_mount(); }      /* app_status keeps the reason the app stopped */
 }
 
@@ -649,6 +666,202 @@ int32_t files_list(const char *path, enaga_file_entry_t entry, enaga_file_done_t
     return queue_path(REQ_LIST, path, 0, 0, entry, done, user);
 }
 
+/* ---- streams --------------------------------------------------------------------------------------------- */
+
+static stream_t *stream(int32_t id)
+{
+    if (id < 0 || id >= (int32_t)ENAGA_STREAMS || !streams[id].used) return 0;
+    return &streams[id];
+}
+
+static int32_t stream_new(const void *ring, uint32_t ring_bytes)   /* a free slot, or an error */
+{
+    int32_t i;
+    if (!ring || ring_bytes < ENAGA_STREAM_RING_MIN || (ring_bytes & (ring_bytes - 1))) return ENAGA_FILE_BAD_HANDLE;
+    for (i = 0; i < (int32_t)ENAGA_STREAMS && streams[i].used; i++)
+        ;
+    return i == (int32_t)ENAGA_STREAMS ? ENAGA_FILE_TOO_MANY : i;
+}
+
+static void stream_start(stream_t *s, void *ring, uint32_t ring_bytes, int writing)
+{
+    s->ring = ring;
+    s->mask = ring_bytes - 1;
+    s->in = s->out = s->underruns = 0;
+    s->primed = writing;
+    s->eof = 0;
+    s->error = 0;
+    s->writing = (u8)writing;
+    s->used = 1;                              /* last: the audio side may look from here on */
+}
+
+int32_t files_stream_open(const char *path, uint32_t offset, void *ring, uint32_t ring_bytes)
+{
+    int32_t r = usable(), i;
+    FRESULT f;
+    if (r || (r = check_path(path))) return r;
+    if ((i = stream_new(ring, ring_bytes)) < 0) return i;
+    if ((f = f_open(&streams[i].fil, path, FA_READ)) != FR_OK) return map(f);
+    if ((f = f_lseek(&streams[i].fil, offset)) != FR_OK) { f_close(&streams[i].fil); return map(f); }
+    stream_start(&streams[i], ring, ring_bytes, 0);
+    return i;
+}
+
+int32_t files_stream_create(const char *path, uint32_t reserve, void *ring, uint32_t ring_bytes)
+{
+    static const u8 zeros[64];
+    int32_t r = usable(), i;
+    FRESULT f = FR_OK;
+    if (r || (r = check_write(path))) return r;
+    if ((i = stream_new(ring, ring_bytes)) < 0) return i;
+    make_parents(path);
+    if ((f = f_open(&streams[i].fil, path, FA_WRITE | FA_CREATE_ALWAYS)) != FR_OK) return map(f);
+    while (reserve && f == FR_OK) {
+        UINT put, n = reserve > sizeof zeros ? sizeof zeros : reserve;
+        f = f_write(&streams[i].fil, zeros, n, &put);
+        if (f == FR_OK && put < n) { f_close(&streams[i].fil); return ENAGA_FILE_FULL; }
+        reserve -= n;
+    }
+    if (f != FR_OK) { f_close(&streams[i].fil); return map(f); }
+    stream_start(&streams[i], ring, ring_bytes, 1);
+    return i;
+}
+
+static void copy_bytes(u8 *dst, const u8 *src, u32 n)
+{
+    if (!(((u32)dst | (u32)src | n) & 3)) {
+        u32 *d = (u32 *)dst;
+        const u32 *s = (const u32 *)src;
+        for (n >>= 2; n; n--) *d++ = *s++;
+    } else {
+        while (n--) *dst++ = *src++;
+    }
+}
+
+uint32_t files_stream_read(int32_t id, void *out, uint32_t bytes)
+{
+    stream_t *s = stream(id);
+    u32 n, at, first;
+    if (!s || s->writing || s->error) return 0;
+    n = s->in - s->out;
+    if (n > bytes) n = bytes;
+    at = s->out & s->mask;
+    first = n < s->mask + 1 - at ? n : s->mask + 1 - at;
+    copy_bytes(out, s->ring + at, first);
+    copy_bytes((u8 *)out + first, s->ring, n - first);
+    s->out += n;
+    if (n < bytes && !s->eof) s->underruns++;
+    return n;
+}
+
+uint32_t files_stream_write(int32_t id, const void *data, uint32_t bytes)
+{
+    stream_t *s = stream(id);
+    u32 n, at, first;
+    if (!s || !s->writing || s->error) return 0;
+    n = s->mask + 1 - (s->in - s->out);
+    if (n > bytes) n = bytes;
+    at = s->in & s->mask;
+    first = n < s->mask + 1 - at ? n : s->mask + 1 - at;
+    copy_bytes(s->ring + at, data, first);
+    copy_bytes(s->ring, (const u8 *)data + first, n - first);
+    s->in += n;
+    if (n < bytes) s->underruns++;
+    return n;
+}
+
+int32_t files_stream_status(int32_t id, enaga_stream_status_t *status)
+{
+    stream_t *s = stream(id);
+    u32 in, out;
+    if (!s) return ENAGA_FILE_BAD_HANDLE;
+    in = s->in;
+    out = s->out;
+    status->buffered = in - out;
+    status->position = s->writing ? in : out;
+    status->underruns = s->underruns;
+    status->state = s->error ? s->error
+                  : s->writing ? ENAGA_STREAM_RUNNING
+                  : s->eof && in == out ? ENAGA_STREAM_ENDED
+                  : s->primed ? ENAGA_STREAM_RUNNING : ENAGA_STREAM_FILLING;
+    return ENAGA_FILE_OK;
+}
+
+/* The work a stream wants now: playback, room for a chunk (a quarter of the ring, at most FILES_CHUNK); a
+ * recording, a chunk waiting (or, when closing, anything). As a share of the ring, so the neediest goes first. */
+static u32 stream_chunk(const stream_t *s) { u32 q = (s->mask + 1) / 4; return q < FILES_CHUNK ? q : FILES_CHUNK; }
+
+static u32 stream_need(const stream_t *s)    /* 0 = nothing to do; else higher is needier, 1 to 1025 */
+{
+    u32 size = s->mask + 1, used = s->in - s->out, shift = (u32)__builtin_ctz(size) - 10;   /* size >= 4096 */
+    if (!s->used || s->error || !mounted) return 0;
+    if (s->writing) return used >= stream_chunk(s) ? 1 + (used >> shift) : 0;
+    if (s->eof || size - used < stream_chunk(s)) return 0;
+    return 1 + ((size - used) >> shift);
+}
+
+/* One FatFs call for a stream: a chunk into a playback ring, or out of a recording one, up to the ring's end. */
+static void stream_step(stream_t *s, int flush)
+{
+    u32 size = s->mask + 1, used = s->in - s->out, at, want;
+    UINT got;
+    FRESULT f;
+    if (s->writing) {
+        at = s->out & s->mask;
+        want = used < size - at ? used : size - at;
+        if (!flush && want > FILES_CHUNK) want = FILES_CHUNK;
+        if (!want) return;
+        f = f_write(&s->fil, s->ring + at, want, &got);
+        s->out += got;
+        if (f != FR_OK) s->error = map(f);
+        else if (got < want) s->error = ENAGA_FILE_FULL;
+    } else {
+        at = s->in & s->mask;
+        want = size - used < size - at ? size - used : size - at;
+        if (want > FILES_CHUNK) want = FILES_CHUNK;
+        if (!want) return;
+        f = f_read(&s->fil, s->ring + at, want, &got);
+        s->in += got;
+        if (f != FR_OK) s->error = map(f);
+        else if (got < want) s->eof = 1;
+        if (s->eof || s->in - s->out == size) s->primed = 1;
+    }
+}
+
+static int stream_service(void)               /* one step for the neediest stream; 0 if none wanted one */
+{
+    stream_t *best = 0;
+    u32 i, need, most = 0;
+    for (i = 0; i < ENAGA_STREAMS; i++)
+        if ((need = stream_need(&streams[i])) > most) { most = need; best = &streams[i]; }
+    if (best) stream_step(best, 0);
+    return best != 0;
+}
+
+int32_t files_stream_close(int32_t id, const void *header, uint32_t header_bytes)
+{
+    stream_t *s;
+    int32_t r;
+    UINT put;
+    FRESULT f;
+    if (irq_active) return ENAGA_FILE_WRONG_CONTEXT;
+    if (!(s = stream(id))) return ENAGA_FILE_BAD_HANDLE;
+    s->used = 0;                              /* first: the audio side stops looking */
+    if (!mounted || s->error == ENAGA_FILE_NO_CARD) return ENAGA_FILE_NO_CARD;
+    if (s->writing) {
+        while (!s->error && s->in != s->out) { stream_step(s, 1); watchdog_feed(); }
+        if (!s->error && header && header_bytes) {
+            if ((f = f_lseek(&s->fil, 0)) != FR_OK || (f = f_write(&s->fil, header, header_bytes, &put)) != FR_OK)
+                s->error = map(f);
+            else if (put < header_bytes)
+                s->error = ENAGA_FILE_FULL;
+        }
+    }
+    r = s->error;
+    f = f_close(&s->fil);
+    return r ? r : map(f);
+}
+
 /* ---- the service ------------------------------------------------------------------------------------------ */
 
 static void finish(int32_t result)
@@ -715,18 +928,25 @@ static void step(request_t *r)
     }
 }
 
-/* Each main-loop pass: the card-detect pin, then queued work for up to FILES_SLICE_MS. Returns non-zero while
- * work remains, so the loop does not sleep. */
+/* Each main-loop pass: the card-detect pin, then streams and queued work for up to FILES_SLICE_MS, a step of the
+ * neediest stream before each step of the queue's head. Returns non-zero while work remains, so the loop does
+ * not sleep. */
 int files_service(u32 ms)
 {
-    u32 start = tsc_read();
+    u32 start = tsc_read(), i;
     if (files_reset_pending) reset_after_drop();
     card_watch(ms);
-    while (queue_count && tsc_read() - start < FILES_SLICE_MS * TICKS_PER_MS) {
-        request_t *r = &queue[queue_head];
-        if (r->cancelled) finish(ENAGA_FILE_CANCELLED);
-        else step(r);
+    while (tsc_read() - start < FILES_SLICE_MS * TICKS_PER_MS) {   /* a stream step, then a request step */
+        int worked = mounted && stream_service();
+        if (queue_count) {
+            request_t *r = &queue[queue_head];
+            if (r->cancelled) finish(ENAGA_FILE_CANCELLED);
+            else step(r);
+            worked = 1;
+        }
+        if (!worked) break;
     }
     log_slow_writes();
+    for (i = 0; i < ENAGA_STREAMS; i++) if (stream_need(&streams[i])) return 1;
     return queue_count != 0;
 }

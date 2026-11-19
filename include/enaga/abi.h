@@ -132,6 +132,26 @@ typedef struct enaga_file_info {
 typedef void (*enaga_file_done_t)(void *user, int32_t result);
 typedef void (*enaga_file_entry_t)(void *user, const enaga_file_info_t *entry);
 
+/* Streams: a file played into the audio context, or recorded from it, through a ring buffer the app gives
+ * (docs/design.md "Streaming"). Enaga keeps a playback ring topped up, and a recording ring drained to the card,
+ * in the main loop, before the file request queue. In audio() the app reads or writes the ring, which never
+ * waits: a playback ring that runs dry gives what it has, a recording ring that is full takes what fits, and
+ * either counts an underrun. Open, create, status and close are for the main context; read and write for any,
+ * one context per stream. */
+#define ENAGA_STREAMS         8u            /* open streams per app, besides ENAGA_FILES_OPEN files */
+#define ENAGA_STREAM_RING_MIN 4096u         /* ring sizes: a power of two, at least this */
+enum enaga_stream_state {
+    ENAGA_STREAM_FILLING = 0,               /* playback: the ring has not yet been full */
+    ENAGA_STREAM_RUNNING = 1,               /* playback: it has (or holds the rest of the file); recording: always */
+    ENAGA_STREAM_ENDED = 2                  /* playback: the whole file has been read out */
+};                                          /* or a negative enaga_file_error: the card went, failed or is full */
+typedef struct enaga_stream_status {
+    int32_t state;                          /* enaga_stream_state or a negative enaga_file_error */
+    uint32_t position;                      /* bytes the app has read or written so far */
+    uint32_t buffered;                      /* bytes in the ring: ready to play, or not yet on the card */
+    uint32_t underruns;                     /* reads or writes that moved fewer bytes than asked (not a playback's end) */
+} enaga_stream_status_t;
+
 /* Services Enaga gives the app. Pointers stay valid until the app is unloaded. */
 typedef struct enaga_host {
     uint32_t abi_version;                   /* ENAGA_ABI_VERSION of the running firmware */
@@ -169,6 +189,17 @@ typedef struct enaga_host {
     int32_t (*file_load)(const char *path, void *buffer, uint32_t max, enaga_file_done_t done, void *user);
     int32_t (*file_list)(const char *path, enaga_file_entry_t entry, enaga_file_done_t done, void *user);
     const char *(*file_data_folder)(void);  /* the app's own folder, "/ENAGA/DATA/<package name>" */
+    /* Streams (above). Open, create and close return a stream (0 or more), ENAGA_FILE_OK or an error; the ring
+     * belongs to Enaga until close. */
+    int32_t (*stream_open)(const char *path, uint32_t offset, void *ring, uint32_t ring_bytes);   /* playback from offset */
+    int32_t (*stream_create)(const char *path, uint32_t reserve, void *ring, uint32_t ring_bytes);
+                                            /* recording: a new file starting with `reserve` zero bytes (a header) */
+    uint32_t (*stream_read)(int32_t stream, void *out, uint32_t bytes);           /* bytes read; never waits */
+    uint32_t (*stream_write)(int32_t stream, const void *data, uint32_t bytes);   /* bytes taken; never waits */
+    int32_t (*stream_status)(int32_t stream, enaga_stream_status_t *status);
+    /* A recording is written out to the end first, then `header` (if any) over the file's first bytes, so a
+     * WAV header with the final size can go in the reserved space; this waits for the card. */
+    int32_t (*stream_close)(int32_t stream, const void *header, uint32_t header_bytes);
 } enaga_host_t;
 
 /* What the app gives Enaga. Every callback receives `context`; any callback may be 0. */
