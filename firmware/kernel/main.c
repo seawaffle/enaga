@@ -5,7 +5,7 @@
  * Start-up follows an order proven on the unit: power hold, time-stamp counter, keys, timer, encoders,
  * display, the panel MCU link (90, B1, A0), audio, card. Before any of it Enaga sets its own cache
  * configuration (hal/cache.c) and logs the one it was handed. Then interrupts are enabled, the
- * first app found is loaded, and kernel_loop runs: inputs become events for the app, `update` runs every pass,
+ * boot policy picks an app (apps.c apps_boot) or opens the menu, and kernel_loop runs: inputs become events for the app, `update` runs every pass,
  * `draw` every 50 ms with the frame sent by EDMA (the loop keeps running while it goes out; a frame still in
  * flight delays the next draw), and the power key held one second switches the unit off. With no app
  * (none found, or one that failed) Enaga shows its own status page. Each pass feeds the watchdog (watchdog.c).

@@ -95,6 +95,6 @@ void menu_draw(void)
         if (i == menu_cursor) gfx_text(0, y, ">", 15);
         copy(shown, sizeof shown, i < menu_count ? menu_names[i] : "STATUS");
         gfx_text(8, y, shown, i == menu_cursor ? 15 : 8);
-        if (running) gfx_text(116, y, "*", 12);
+        if (running) gfx_text(116, y, "ON", 12);
     }
 }
