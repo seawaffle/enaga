@@ -110,9 +110,9 @@ changed.
 The speaker, as in the original firmware: it plays unless the user has switched it off, the app has muted it
 (`speaker(false)`, e.g. while monitoring the built-in microphone, where the original firmware mutes it against
 feedback), or headphones are plugged in, which cuts it in hardware (a switched jack: smpltrek HW-15, to confirm on
-the unit). Switching it fades the output around the change. Apps can also read GP3[8], the jack detect input
-(`jack()`), provisional until a unit shows which jack it senses and which level means plugged in; the status page
-shows it as `J`.
+the unit). Switching it fades the output around the change. Apps can read whether headphones are plugged in
+(`headphones()`, GP3[8]: 1 with a plug in PHONES, unaffected by the other jacks, confirmed on the unit); the
+status page shows it as `H`.
 
 MIDI channel waits for MIDI (E4). An app's own settings are separate: `<enaga/settings.hpp>` gives it a key/value
 store in its data folder (`SETTINGS.TXT`, the same text format), built on the file API, with nothing new in Enaga.
@@ -326,13 +326,20 @@ from `audio()`) and WAV headers are in, with multi-block SD transfers (on a unit
 E3 is built on the emulator: the Enaga menu on F1 + POWER (and `open_menu`), F1 at power-on, the boot policy
 (last app, only app, or the menu) with a start-up record, switching apps without a reboot with a fade and a 3 s limit
 on `stop()`, display names, the SETTINGS page (volume, brightness, pad sensitivity, auto-off) in
-`/ENAGA/SETTINGS.TXT`, and apps' own settings (`<enaga/settings.hpp>`). Its exit, switching between two apps
-repeatedly on the unit, is the next unit session's. App icons are left for E4.
+`/ENAGA/SETTINGS.TXT`, and apps' own settings (`<enaga/settings.hpp>`). On the unit (session 3, 2026-11-19) its
+exit passed: switching, the menu, the boot policy, volume, brightness, the speaker and headphone detect behave as
+expected. Open from that session: AUTO OFF does not keep its value on the unit (below), and the PADS steps differ
+too little. App icons are left for E4.
 
 ## Open items
 
-- On the unit: the speaker plays, and headphones cut it (hardware); which jack GP3[8] senses and its polarity, so
-  `jack()` can become a headphones / input event (smpltrek M1 G6, never run). Input routing for apps (the
+- AUTO OFF on the unit: set to 5 MIN, it reads OFF again after leaving the SETTINGS page, and after a restart; the
+  other settings keep their values. The emulator keeps it through the same steps and a reboot (the file holds
+  `AUTO OFF=5 MIN`), so the cause is unit-only and not yet found. Saving now logs `SETTINGS SAVED` or
+  `SETTINGS NOT SAVED` on the status page to narrow it down.
+- PADS: LOW / MEDIUM / HIGH (press 1,100 / 800 / 500) made very little difference on the unit; the steps need to
+  be wider, against the pad readings measured in session 1.
+- Input routing for apps (the
   microphone switch GP1[2], INPUT L front end and +10 dB GP7[14] / GP7[15], INPUT R microphone stage GP5[11], line
   pad GP1[3]) waits on the same session: their roles are the original firmware's settings, mostly unconfirmed.
 - On the unit: BRIGHTNESS (the contrast command is the one start-up sends, at other levels; the steps' look is
@@ -1145,3 +1152,11 @@ the change; power-off mutes it first. Host table: `speaker(on)` (reset when the 
 and the jack reading. `tests/test_menu.py` reads GP2[8] back from the GPIO registers: released by default, set by
 the app's mute and by SPEAKER OFF, released when the muting app is dropped, and SPEAKER OFF kept across a reboot.
 
+### Unit session 3: E3 on the unit (2026-11-19)
+
+Image ba465148. Switching, the menu, F1 at power-on, the fade, volume, brightness and SPEAKER worked as expected;
+the speaker plays and headphones cut it. Headphone detect: GP3[8] reads 0 with nothing plugged in, 1 with
+headphones, 0 with a plug in any other jack (inputs or outputs), so `jack()` became `headphones()` (host table
+`headphones`, status page `H`). PADS made only a small difference. AUTO OFF set to 5 MIN read OFF again after
+leaving the SETTINGS page and after a restart, while the other settings were kept; the emulator does not show
+it (open items).

@@ -101,7 +101,7 @@ static void gpio_setup(void)                           /* the original firmware'
     pinmux_set(9, 5, 8);                               /* GP4[10] */
     pinmux_set(4, 4, 8); pinmux_set(4, 5, 8);          /* GP1[3], GP1[2] */
     pinmux_set(5, 6, 8); pinmux_set(5, 7, 8);          /* GP2[9], GP2[8] */
-    pinmux_set(7, 7, 8);                               /* GP3[8], the jack detect input */
+    pinmux_set(7, 7, 8);                               /* GP3[8], headphone detect */
     pinmux_set(11, 4, 8);                              /* GP5[11] */
     pinmux_set(16, 2, 8); pinmux_set(16, 3, 8);        /* GP7[15], GP7[14] */
     gpio_dir_output(4, 12); gpio_dir_output(4, 14); gpio_dir_output(4, 15); gpio_dir_output(4, 13); gpio_dir_output(4, 10);
@@ -256,7 +256,7 @@ void audio_speaker_apply(void)               /* main context: the speaker as the
     fade_target = 1.0f;
 }
 
-int audio_jack(void) { return (int)(gpio_read_bank16(JACK_BANK) >> JACK_PIN) & 1; }
+int audio_headphones(void) { return (int)(gpio_read_bank16(PHONES_BANK) >> PHONES_PIN) & 1; }
 
 void audio_mute(void)
 {

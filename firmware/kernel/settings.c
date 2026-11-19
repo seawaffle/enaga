@@ -110,9 +110,11 @@ static void save(void)
         for (i = 0; label[i]; i++) text[n++] = label[i];
         text[n++] = '\n';
     }
-    if (!files_mounted() || f_open(&f, SETTINGS_FILE, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK) return;
+    if (!files_mounted() || f_open(&f, SETTINGS_FILE, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK) { log_line("SETTINGS NOT SAVED"); return; }
     f_write(&f, text, n, &put);
-    if (f_close(&f) == FR_OK && put == n) for (k = 0; k < SETTINGS_COUNT; k++) settings_saved[k] = settings_value[k];
+    if (f_close(&f) != FR_OK || put != n) { log_line("SETTINGS NOT SAVED"); return; }
+    for (k = 0; k < SETTINGS_COUNT; k++) settings_saved[k] = settings_value[k];
+    log_line("SETTINGS SAVED");
 }
 
 /* The SETTINGS page: UP / DOWN choose a setting, LEFT / RIGHT or VALUE change it, OK or CLR go back (saving). */

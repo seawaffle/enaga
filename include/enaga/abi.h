@@ -209,9 +209,9 @@ typedef struct enaga_host {
      * headphones cuts it in hardware. Muting is for e.g. monitoring the built-in microphone (feedback), as the
      * original firmware does. Reset to unmuted when the app stops. */
     void (*speaker)(uint32_t on);
-    /* The jack detect input (GP3[8]) as read, 0 or 1. PROVISIONAL: which jack it senses (headphones or INPUT) and
-     * which level means plugged in are not yet confirmed on a unit. */
-    int32_t (*jack)(void);
+    /* 1 while headphones are plugged in, else 0 (GP3[8], high with a plug in PHONES; the other jacks do not
+     * change it). The speaker is cut in hardware meanwhile. */
+    int32_t (*headphones)(void);
 } enaga_host_t;
 
 /* What the app gives Enaga. Every callback receives `context`; any callback may be 0. */

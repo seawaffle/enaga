@@ -296,7 +296,7 @@ the block. Details in docs/design.md, "First unit session: results".
 | GP5[11] | INPUT R microphone stage |
 | GP1[3] | line input pad |
 | GP4[13] | held high (role unknown) |
-| GP3[8] | jack detect input (polarity unconfirmed) |
+| GP3[8] | headphone detect: 1 with a plug in PHONES, 0 otherwise; INPUT L / R and the outputs do not change it (unit, E3 check) |
 
 ## SD card
 
@@ -412,9 +412,9 @@ unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it mut
     and HIGH (a light pad touch should play on HIGH and not on LOW; leave it at MEDIUM); AUTO OFF to 5 MIN. OK, then
     switch off and on: the settings are kept (the card's `/ENAGA/SETTINGS.TXT`). Leave the unit untouched for 5
     minutes: it should switch itself off. Set AUTO OFF back to OFF afterwards.
-15. **Speaker and jack:** with headphones unplugged, play the synth: the speaker should play. Plug headphones in: the
+15. **Speaker and headphones:** with headphones unplugged, play the synth: the speaker should play. Plug headphones in: the
     speaker should stop and the headphones play. SETTINGS, SPEAKER OFF: the speaker stays silent unplugged; back to
-    ON. Then open STATUS and note the `J` reading (top right of the AUDIO line) with nothing plugged in, with
-    headphones in, and with a cable in INPUT L (unpowered is fine): that tells which jack GP3[8] senses.
+    ON. Then open STATUS: `H` (right end of the AUDIO line) is 1 with headphones in and 0 without, whatever else
+    is plugged in (first unit result: 0 / 1 / 0 for nothing, headphones, a plug in any other jack).
 
 Afterwards the official update restores the unit ("Installing and recovery").

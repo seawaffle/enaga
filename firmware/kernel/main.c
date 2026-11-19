@@ -158,8 +158,8 @@ static void status_page(u32 ms)
     gfx_text(0, 48, "AUDIO", 10);
     gfx_dec(36, 48, audio_status, 15);
     gfx_dec(54, 48, (int)(audio_blocks % 100000u), 15);
-    gfx_text(96, 48, "J", 10);                /* GP3[8], the jack detect input (docs/hardware.md "Audio") */
-    gfx_dec(102, 48, audio_jack(), 15);
+    gfx_text(96, 48, "H", 10);                /* headphones in (GP3[8], docs/hardware.md "Audio") */
+    gfx_dec(102, 48, audio_headphones(), 15);
     gfx_text(0, 57, "LOAD", 10);
     gfx_dec(36, 57, (int)(audio_cycles_peak / (AUDIO_BUDGET_CYCLES / 1000u)), 15);
     gfx_dec(78, 57, (int)audio_overruns, 15);

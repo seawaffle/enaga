@@ -44,7 +44,7 @@ int app_keep_on;
 static void host_open_menu(void) { app_menu_request = 1; }          /* main.c opens it after the callback */
 static void host_set_busy(uint32_t busy) { app_keep_on = busy != 0; }
 static void host_speaker(uint32_t on) { audio_speaker_app = on != 0; audio_speaker_apply(); }
-static int32_t host_jack(void) { return audio_jack(); }
+static int32_t host_headphones(void) { return audio_headphones(); }
 
 enaga_host_t app_host = {                     /* heap filled in per app by load_path */
     ENAGA_ABI_VERSION, sizeof(enaga_host_t), 0, 0,
@@ -54,7 +54,7 @@ enaga_host_t app_host = {                     /* heap filled in per app by load_
     files_read_all, files_save, files_read, files_write, files_load, files_list, files_data_folder,
     files_stream_open, files_stream_create, files_stream_read, files_stream_write, files_stream_status,
     files_stream_close,
-    host_open_menu, host_set_busy, host_speaker, host_jack,
+    host_open_menu, host_set_busy, host_speaker, host_headphones,
 };
 
 static void cache_sync(uint32_t address, uint32_t bytes)   /* the loader calls this just before the app's entry */

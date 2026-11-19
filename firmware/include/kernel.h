@@ -43,7 +43,7 @@ void audio_fade_out(void);                    /* main context: ramp the output t
 extern volatile float audio_volume;           /* output gain, 0-1 (the VOLUME setting) */
 extern int audio_speaker_setting, audio_speaker_app;   /* SPEAKER setting ON; the app has not muted it */
 void audio_speaker_apply(void);               /* main context: GP2[8] from the two above, with a fade */
-int  audio_jack(void);                        /* GP3[8], the jack detect input, as read */
+int  audio_headphones(void);                  /* 1 while headphones are plugged in (GP3[8]) */
 void audio_silence_now(void);                 /* zero the transmit ring at once (crash paths) */
 void audio_irq_rearm(void);                   /* re-evaluate the EDMA interrupt (after leaving the ISR abnormally) */
 extern volatile u32 audio_blocks, audio_overruns, audio_cycles_last, audio_cycles_peak;
