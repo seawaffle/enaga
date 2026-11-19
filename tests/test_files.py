@@ -129,7 +129,8 @@ class Files(unittest.TestCase):
 
 
     def test_write_probe(self):
-        # /ENAGA/SDTEST.BIN: its first sector written and read back; the rest of the card untouched.
+        # /ENAGA/SDTEST.BIN: its first sector written and read back, then the next seven in one command; the
+        # rest of the card untouched.
         from emulate import Emulation
         with tempfile.TemporaryDirectory() as d:
             image = Path(d) / "card.img"
@@ -139,12 +140,12 @@ class Files(unittest.TestCase):
                 self.assertIsNone(emu.run(1000 * MS)["error"])
                 log = emu.report()["log"]
                 image.write_bytes(emu.cpu.sd_read())
-            self.assertEqual([line.split()[:2] for line in log if line[:2] == "W "], [["W", "OK"]], log)
+            self.assertEqual([line.split()[:2] for line in log if line[:1] == "W"], [["W1", "OK"], ["W7", "OK"]], log)
             self.assertTrue(all(len(line) <= 21 for line in log), log)        # the status page's width
             data = card.get(image, "/ENAGA/SDTEST.BIN")
-            words = struct.unpack("<128I", data[:512])
-            self.assertEqual(words, tuple(0xE0000000 | i << 16 | (~i & 0xFFFF) for i in range(128)))
-            self.assertEqual(data[512:], bytes(4096 - 512))
+            for count, start, words in ((1, 0, 128), (7, 512, 7 * 128)):     # CMD24, then CMD25
+                got = struct.unpack(f"<{words}I", data[start:start + 4 * words])
+                self.assertEqual(got, tuple(count << 28 | i << 16 | (~i & 0xFFFF) for i in range(words)))
             self.assertEqual(card.get(image, "/SAMPLES/BIG.RAW"), BIG)
 
 

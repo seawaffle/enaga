@@ -227,25 +227,43 @@ static void fifo_setup(int write)
     REG32(MMC + MMCFIFOCTL) = 4 | (write ? 2 : 0);   /* 64-byte level, direction, 4-byte access */
 }
 
+/* Up to SD_RUN sectors go in one command: CMD18 or CMD25 for more than one, ended by STOP_TRANSMISSION (CMD12),
+ * which saves the card's per-command overhead (for writes, a programming wait per sector: about 3 ms on a unit's
+ * card, so 170 KiB/s one sector at a time). */
+#define SD_RUN 128u
+
+static int stop(void) { return ok(command(12, 0, RSP_48 | CMD_BSYEXP)); }
+
+static int read_fail(int code, u32 st, u32 run)   /* the data logic reset, and a multi-block read stopped */
+{
+    u32 ctl = REG32(MMC + MMCCTL);
+    REG32(MMC + MMCCTL) = ctl | 1;
+    REG32(MMC + MMCCTL) = ctl & ~1u;
+    if (run > 1) stop();
+    return io_fail(code, st);
+}
+
 int sd_read(u8 *buffer, u32 sector, u32 count)
 {
     u32 *out = (u32 *)buffer;
     if (!card_ready || ((u32)buffer & 3)) return -1;
-    while (count--) {
-        u32 i, st;
+    while (count) {
+        u32 i, st, run = count > SD_RUN ? SD_RUN : count;
         fifo_setup(0);
         REG32(MMC + MMCBLEN) = 512;
-        REG32(MMC + MMCNBLK) = 1;
-        st = command(17, high_capacity ? sector : sector * 512, RSP_48 | CMD_WDATX | CMD_DCLR);
-        if (!ok(st)) return io_fail(-2, st);
-        for (i = 0; i < 512 / 4; i += 16) {          /* 64-byte FIFO fills */
+        REG32(MMC + MMCNBLK) = run;
+        st = command(run > 1 ? 18 : 17, high_capacity ? sector : sector * 512, RSP_48 | CMD_WDATX | CMD_DCLR);
+        if (!ok(st)) return read_fail(-2, st, 1);
+        for (i = 0; i < run * 512 / 4; i += 16) {    /* 64-byte FIFO fills */
             u32 k;
-            if (!data_ok(st = wait_status(ST0_DRRDY, 500), ST0_DRRDY)) return io_fail(-3, st);
+            if (!data_ok(st = wait_status(ST0_DRRDY, 500), ST0_DRRDY)) return read_fail(-3, st, run);
             for (k = 0; k < 16; k++) *out++ = REG32(MMC + MMCDRR);
         }
-        if (!data_ok(st = wait_status(ST0_DATDNE, 500), ST0_DATDNE)) return io_fail(-4, st);
-        sd_reads++;
-        sector++;
+        if (!data_ok(st = wait_status(ST0_DATDNE, 500), ST0_DATDNE)) return read_fail(-4, st, run);
+        if (run > 1 && !stop()) return io_fail(-7, last_st);
+        sd_reads += run;
+        sector += run;
+        count -= run;
     }
     return 0;
 }
@@ -259,22 +277,22 @@ int sd_write(const u8 *buffer, u32 sector, u32 count)
 {
     const u32 *in = (const u32 *)buffer;
     if (!card_ready || ((u32)buffer & 3)) return -1;
-    while (count--) {
-        u32 i, k, st, programming, begin = timer_ticks();
-        u32 arg = high_capacity ? sector : sector * 512;
+    while (count) {
+        u32 i, k, st, programming, begin = timer_ticks(), run = count > SD_RUN ? SD_RUN : count;
         fifo_setup(1);
         REG32(MMC + MMCBLEN) = 512;
-        REG32(MMC + MMCNBLK) = 1;
+        REG32(MMC + MMCNBLK) = run;
         for (k = 0; k < 16; k++) REG32(MMC + MMCDXR) = *in++;
-        st = command(24, arg, RSP_48 | CMD_WDATX | CMD_DTRW);
+        st = command(run > 1 ? 25 : 24, high_capacity ? sector : sector * 512, RSP_48 | CMD_WDATX | CMD_DTRW);
         if (!ok(st)) return write_fail(-2, st);
-        for (i = 16; i < 512 / 4; i += 16) {
-            if (!data_ok(st = wait_status(ST0_DXRDY, 500), ST0_DXRDY)) return write_fail(-3, st);
+        for (i = 16; i < run * 512 / 4; i += 16) {
+            if (!data_ok(st = wait_status(ST0_DXRDY, 500), ST0_DXRDY)) { if (run > 1) stop(); return write_fail(-3, st); }
             for (k = 0; k < 16; k++) REG32(MMC + MMCDXR) = *in++;
         }
         /* DATDNE waits for the card's CRC status and its programming (busy); the SD limit for that is 250 ms (SDSC)
-         * to 500 ms (SDHC/SDXC), and 2 s leaves room. */
-        if (!data_ok(st = wait_status(ST0_DATDNE, 2000), ST0_DATDNE)) return write_fail(-4, st);
+         * to 500 ms (SDHC/SDXC) a block, and 2 s leaves room. */
+        if (!data_ok(st = wait_status(ST0_DATDNE, 2000), ST0_DATDNE)) { if (run > 1) stop(); return write_fail(-4, st); }
+        if (run > 1 && !stop()) return write_fail(-7, last_st);
         programming = timer_ticks();                 /* CMD13 until the card is back in tran (state 4) */
         for (;;) {
             if (!ok(st = command(13, rca << 16, RSP_48))) return write_fail(-5, st);
@@ -282,8 +300,9 @@ int sd_write(const u8 *buffer, u32 sector, u32 count)
             if (timer_ticks() - programming > 1000u * TICKS_PER_MS) return write_fail(-6, response());
         }
         if (timer_ticks() - begin > sd_write_slowest) sd_write_slowest = timer_ticks() - begin;
-        sd_writes++;
-        sector++;
+        sd_writes += run;
+        sector += run;
+        count -= run;
     }
     return 0;
 }

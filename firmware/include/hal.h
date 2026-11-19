@@ -81,17 +81,17 @@ int  sd_init(void);                   /* 0 = a card is initialised and readable 
 extern int sd_error;                  /* the last sd_init failure: its return code ... */
 extern u32 sd_error_status;           /* ... and the MMCST0 bits the failing command saw */
 int  sd_present(void);                /* card detect, GP4[0] low */
-int  sd_read(u8 *buffer, u32 sector, u32 count);     /* 512-byte sectors; 0 = ok */
+int  sd_read(u8 *buffer, u32 sector, u32 count);     /* 512-byte sectors, word-aligned buffer; 0 = ok */
 int  sd_write(const u8 *buffer, u32 sector, u32 count);
 void sd_power_cycle(void);           /* GP4[1] high 250 ms, then low (a guess at the card's power switch) */
 extern void (*sd_wait_hook)(void);   /* called while the driver waits on the card (the kernel feeds its watchdog) */
-extern int sd_io_error;              /* the last sd_read / sd_write failure: its return code ... */
+extern int sd_io_error;              /* the last sd_read / sd_write failure: its return code (-7: CMD12) ... */
 extern u32 sd_io_status;             /* ... MMCST0 bits, or for -6 the card status (still programming after 1 s) */
-extern u32 sd_write_slowest;
+extern u32 sd_write_slowest;          /* the longest write command so far (up to 128 sectors), in time-stamp ticks */
 extern u32 sd_reads, sd_writes;      /* sectors moved without error since start-up */
-extern u32 sd_io_command;
+extern u32 sd_io_command;            /* the command index in flight at the last sd_read / sd_write failure */
 extern u32 sd_io_status1;            /* MMCST1 when a write failed (BUSY 1, CLKSTP 2, DXEMP 4, FIFOEMP 0x20, FIFOFUL 0x40) */
-void sd_data_clock(u32 clkrt);       /* the bus clock after initialisation: 186 MHz / (2 (clkrt + 1)); 3 = 23 MHz */            /* the command index in flight at the last sd_read / sd_write failure */         /* the longest one-sector write so far, in time-stamp ticks */
+void sd_data_clock(u32 clkrt);       /* the bus clock after initialisation: 186 MHz / (2 (clkrt + 1)); 3 = 23 MHz */
 /* Graphics: Enaga and apps draw on a row-major canvas, one byte (0-15) per pixel; gfx_present converts it
  * to the panel's 4-bpp order (gfx.c) and sends it. */
 #define CANVAS_W 128
