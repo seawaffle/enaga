@@ -281,8 +281,10 @@ the block. Details in docs/design.md, "First unit session: results".
   outputs and the receive side (which input lands in which words) are not yet checked; with nothing connected,
   0.3.1's input peak sat around 2 in 32,768.
 - **Speaker:** plays with GP2[8] (speaker mute) driven low and headphones unplugged (M1). Enaga releases it unless
-  the SPEAKER setting is OFF or the app mutes it (docs/design.md "Settings"); that headphones cut it in hardware is
-  an inference (smpltrek HW-15) to confirm.
+  the SPEAKER setting is OFF or the app mutes it (docs/design.md "Settings"). Headphones cut it in hardware (unit
+  session 3, E3 check; no code involved, as smpltrek HW-15 inferred). GP3[8] is the only jack-sensing input the stock
+  firmware reads (smpltrek hardware-access.md); it mixes the input into the monitor only while GP3[8] reads high,
+  i.e. with headphones in, which keeps the speaker from feeding back.
 - **Audio GPIOs:**
 
 | Pin | Use |
