@@ -217,7 +217,7 @@ typedef struct enaga_host {
      * change it). The speaker is cut in hardware meanwhile. */
     int32_t (*headphones)(void);
     /* Which device of the family this is (enaga_device), from its bootloader: ENAGA_DEVICE_UNKNOWN when none of
-     * the known ones was recognised. The board is the same; printed labels, and possibly audio parts, differ. */
+     * the known ones was recognised. The board and its use are the same; the printed labels differ. */
     uint32_t (*device)(void);
 } enaga_host_t;
 

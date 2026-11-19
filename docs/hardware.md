@@ -86,7 +86,7 @@ the measured state.
   files (family word, both CRCs). The update chord is the same key, printed PAD on both (CyDrums manual: PAD +
   power). **Never installed on either.** Unknown until one is: what their bootloaders (not dumped) leave set up
   (PLL and DDR clocks, cache, where the bootloader itself sits; Enaga loads at `0xC0000000`), whether their panel
-  MCU firmware scales pads the same way, and which audio parts (speaker, microphone, jacks) they have.
+  MCU firmware scales pads the same way (the stock code drives the same audio pins on all three, below).
 - **Hardware use is the same in every product** (smpltrek platform-map.md "Hardware use per product", XF-20 to
   XF-25, all 13 stock releases): no release of any of the three uses a pin, codec register, panel command or
   peripheral beyond what SmplTrek 3.2.174 uses. GP3[8] is the only jack detect, with no input or line-out
