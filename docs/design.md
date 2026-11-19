@@ -232,9 +232,9 @@ dropped app's are discarded.
 `<enaga/wav.hpp>` parses a WAV header (PCM 8/16/24/32-bit, float 32-bit, WAVE_FORMAT_EXTENSIBLE, other chunks
 skipped), reading byte by byte since the format is packed, and makes the 44-byte header for a recording.
 
-Card speed on a unit (session 2, one sector a command): reads 2,860 KiB/s, enough for about 15 streams of 16-bit
-stereo at 48 kHz (192 KiB/s each); writes 170 KiB/s, short of one. So the driver now moves up to 128 sectors a
-command (CMD18 / CMD25, ended by CMD12); the next unit session measures what that gives.
+Card speed on a unit: one sector a command, reads 2,860 KiB/s and writes 170 KiB/s, short of one recording; with
+up to 128 sectors a command (CMD18 / CMD25, ended by CMD12), reads about 7,600 KiB/s and writes 1,800-2,400 KiB/s,
+room for dozens of playback streams (192 KiB/s each for 16-bit stereo at 48 kHz) and several recordings.
 
 ### Order of work
 
@@ -271,7 +271,7 @@ cl6x when it is installed (GCC otherwise); the synth's worst case is 30 % of the
 GCC alone (every feature on: sync, ring, chorus, eight voices). The file service's first step is in (the
 "Files" section), and the synth saves patches with it; SD writes work on a unit (polled, FIFO primed before
 the command; hardware.md "SD card"); the CHECK app measured the card on a unit; streams (playback and recording
-from `audio()`) and WAV headers are in, with multi-block SD transfers, on the emulator.
+from `audio()`) and WAV headers are in, with multi-block SD transfers (on a unit: reads 7,600 KiB/s, writes about 2,000).
 
 ## Open items
 
@@ -1027,4 +1027,9 @@ reset oscillator phases and filters at its current level, a step in the output. 
   with its WAV header and read back with Python's `wave`; no underruns, no audio overruns. With the stream
   service switched off the streams never fill and the test fails. 46 tests pass.
 - Not tested: a card removed while streaming (the path is the handles' one), underruns on a slow card.
+
+On the unit (same Toshiba 3.6 GB FAT32 card): probe `W1 OK 3MS`, `W7 OK 6MS`, so CMD25 works. The CARD page, three
+runs: WRITE 2382 / 2367 / 1837 KiB/s (was 170), READ 7613 / 7585 / 7585 KiB/s (was 2,860), SCATTER 2085 / 2077 /
+2115 KiB/s (521 / 519 / 528 reads/s; was 447). That is room for about 39 playback streams of 16-bit stereo at
+48 kHz by reading, or about 9 recordings at the slowest write run, on this card.
 
