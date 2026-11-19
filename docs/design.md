@@ -964,3 +964,12 @@ command until the FIFO has data, sequence 0's unanswered CMD24 is explained too.
 - Test runs met the emulator core being rebuilt mid-edit (`C++ core build failed`); after it settled, 44 tests
   pass; dry run 141/141.
 
+Seventh try, the filler: `W1 ERR-4 S10 T1`. One filler went in, then the FIFO held it (MMCST1 0x10: not empty,
+clock not stopped) and nothing moved for 2 s, with no error bit and no DATDNE. A controller still wanting data
+would have taken it, so 0x26 last time was the controller idle, having already left the transfer; the lost-DCLR
+theory does not hold for sequence 1. Sequences 2 and 3 never ran: the probe stops at its first failure.
+
+- Sequence 4 is Linux's davinci_mmc PIO write: 64 bytes in the FIFO, the command without DCLR, then 64 bytes at
+  each DXRDY (sequence 2 waits for FIFOEMP instead).
+- The probe now runs 4, 2, 3, the likeliest first, and lines are named by sequence (`W4 OK T0 3MS`). 44 tests pass.
+

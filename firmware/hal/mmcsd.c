@@ -299,7 +299,10 @@ static u32 data_done(void)
  *   1  64 bytes in the FIFO, the command with DCLR, then 64 more each time the FIFO is empty (MMCST1 FIFOEMP). On a
  *      unit: answered, but the controller then stopped its clock with the FIFO empty, still wanting data.
  *   2  as 1, without DCLR in the command (DCLR may empty the FIFO on the chip).
- *   3  the command with DCLR, then the first 64 bytes at once, then as 1. */
+ *   3  the command with DCLR, then the first 64 bytes at once, then as 1.
+ *   4  Linux's davinci_mmc PIO write: 64 bytes in the FIFO, the command without DCLR, then 64 bytes at each DXRDY.
+ * Unit session 2, sequence 1 with filler: after one 64-byte filler the FIFO held it and nothing moved for 2 s, so
+ * the controller had already left the transfer (MMCST1 0x26 was idle, not a stall). */
 int sd_write(const u8 *buffer, u32 sector, u32 count)
 {
     const u32 *in = (const u32 *)buffer;
@@ -320,11 +323,13 @@ int sd_write(const u8 *buffer, u32 sector, u32 count)
             }
         } else {
             if (mode != 3) for (k = 0; k < 16; k++) REG32(MMC + MMCDXR) = *in++;
-            st = command(24, arg, mode == 2 ? flags & ~CMD_DCLR : flags);
+            st = command(24, arg, mode == 2 || mode == 4 ? flags & ~CMD_DCLR : flags);
             if (!ok(st)) return write_fail(-2, st);
             if (mode == 3) for (k = 0; k < 16; k++) REG32(MMC + MMCDXR) = *in++;
             for (i = 16; i < 512 / 4; i += 16) {
-                if (!fifo_empty(500)) return write_fail(-3, REG32(MMC + MMCST1));
+                if (mode == 4) {
+                    if (!data_ok(st = wait_status(ST0_DXRDY, 500), ST0_DXRDY)) return write_fail(-3, st);
+                } else if (!fifo_empty(500)) return write_fail(-3, REG32(MMC + MMCST1));
                 for (k = 0; k < 16; k++) REG32(MMC + MMCDXR) = *in++;
             }
         }

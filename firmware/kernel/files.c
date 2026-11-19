@@ -313,7 +313,7 @@ static void card_watch(u32 ms)
 
 /* The write probe (unit session 2): how a real card takes Enaga's writes, without risking the file system. When
  * /ENAGA/SDTEST.BIN (at least 2 KiB, made on a computer) is on the card, each boot writes a pattern into its first
- * three sectors by write sequences 1, 2 and 3 (mmcsd.c sd_write), with filler for a controller still wanting data
+ * three sectors by write sequences 4, 2 and 3, in that order (mmcsd.c sd_write), with filler for a controller still wanting data
  * (sd_write_topup), reads each back, and stops after a write that fails (on a unit that leaves the card silent until
  * it is taken out). One line each, at most 21 characters (the status page's width):
  *   "W1 OK T0 3MS"     sequence 1: the sector reads back as written, no filler, in 3 ms
@@ -388,6 +388,7 @@ static int probe_step(int mode, u32 sector)       /* 0 if the card may now be si
 void files_write_probe(void)
 {
     static FIL f;
+    static const int order[3] = {4, 2, 3};
     u32 sector[3];
     UINT got;
     u8 byte;
@@ -399,8 +400,8 @@ void files_write_probe(void)
         sector[k] = (u32)f.sect;
     }
     f_close(&f);
-    for (k = 0; k < 3; k++)
-        if (!probe_step(k + 1, sector[k])) break;
+    for (k = 0; k < 3; k++)                          /* most likely first: a failed write silences the card */
+        if (!probe_step(order[k], sector[k])) break;
 }
 
 void files_init(void)
