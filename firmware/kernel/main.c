@@ -308,6 +308,7 @@ void main(void)
     power_hold();
     for (p = __bss_start; p < __bss_end; p++) *p = 0;
     cache_setup();
+    device_detect();                          /* before anything can reuse the bootloader's memory */
     irq_init();
     exceptions_enable();
     keys_init();
@@ -344,7 +345,8 @@ void main(void)
     irq_enable(1u << IRQ_UART1);
     irq_global_enable();                      /* audio blocks start being serviced (silence until an app) */
     log_line("ENAGA " ENAGA_VERSION);
-    log_cache(cache_entry_config(), cache_config());
+    log_cache(cache_entry_config(), cache_config());   /* the second line: hardware.md "Checks on a unit" step 2 */
+    log_line(device_name);
     watchdog_start();
     last_input = timer_ms();
     if (apps_boot(boot_menu, why, sizeof why)) menu_open(why);

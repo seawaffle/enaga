@@ -1172,5 +1172,13 @@ smpltrek's `tools/palette_swap.py`), and `firmware/build.py` writes `build/firmw
 each, plus `ENAGA_<version>.bin` (the SmplTrek's, byte-identical to before: image 63a110a1 either way).
 The family words and both CRCs were checked against the official Lofi-12 XT 1.2.179 / 1.5.205 and CyDrums 1.1.84
 files. `tests/test_sysimage.py` (host) pins the SmplTrek bytes and checks each file verifies only as its own
-device. Untested on either device; the firmware does not yet know which device it runs on (key names, LED
-meanings and audio parts that differ would need it).
+device. Untested on either device.
+
+Enaga also tells which device it runs on: each bootloader contains its update file's name, and the SmplTrek's
+is still in DDR at the hand-over (`SmplTrek.bin` at 0xC70A8BA0). `firmware/kernel/device.c` searches
+0xC7000000-0xC7200000 at power-on, before an app can reuse that memory; the result is the third log line, the
+host table's `device()` (`enaga_device`) and `enaga::system::device()`. The family word was the other candidate,
+but the bootloader compares it as an instruction immediate, not a stored word. A search of the top 16 MiB took
+0.4 s on the emulator when nothing was found, so it covers 2 MiB (about 30 M cycles). The emulator writes the name
+where BOOT 1.0.17 has it (`tools/emulate.py`, `bootloader_file`); `tests/test_e1.py` covers each name, none, and a
+near miss.

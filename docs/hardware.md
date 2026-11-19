@@ -87,6 +87,14 @@ the measured state.
   power). **Never installed on either.** Unknown until one is: what their bootloaders (not dumped) leave set up
   (PLL and DDR clocks, cache, where the bootloader itself sits; Enaga loads at `0xC0000000`), whether their panel
   MCU firmware scales pads the same way, and which audio parts (speaker, microphone, jacks) they have.
+- **Which device Enaga runs on:** each bootloader opens its update file by name, so the name is a constant string
+  in it. BOOT 1.0.17 is still in DDR at the hand-over, with `SmplTrek.bin` at `0xC70A8BA0` (smpltrek flash dump,
+  section loaded at `0xC70A6BC0`; in flash at boot-area offset `0x345E0`). Enaga looks for the three names in
+  `0xC7000000`-`0xC7200000` before it loads an app (`firmware/kernel/device.c`). The family word is not a stored
+  value there: the parser compares it as an immediate (`cmpeq 5,b4,b0` at `0xC7090CEC`), so it can't simply be
+  read. The other two bootloaders are assumed to load in the same area; if one doesn't, the device shows as
+  unknown, and reading the boot area of the SPI flash (offset 0, where the C6748 ROM boots from on every unit)
+  is the fallback.
 
 ## Power
 
@@ -358,8 +366,9 @@ control); hold F4 (HOME) for one second to go to its next page. Images from E3's
 unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it muted. Report each result with what the screen showed.
 
 1. **Install.** A card with only `SmplTrek.bin` (staged as `build/unit-card/install/SmplTrek.bin`) at its root; F4 (HOME) held while switching on, SYSTEM UPDATE,
-   restart. Expected: the ENAGA splash with MCU, AUDIO and CARD, then Enaga's status page with `NO /ENAGA/APPS`.
-   A unit stuck on the SONICWARE logo with the power key dead: remove power, then BOOT MODE and the official
+   restart. Expected: the ENAGA splash with MCU, AUDIO and CARD, then Enaga's status page with `NO /ENAGA/APPS`,
+   and `SMPLTREK` as the third log line (the device, from the bootloader's file name; `UNKNOWN DEVICE` means the
+   name was not found where `firmware/kernel/device.c` looks). A unit stuck on the SONICWARE logo with the power key dead: remove power, then BOOT MODE and the official
    update ("Installing and recovery").
 2. **Cache state at entry** (measured by session M1, "Boot"): the status page's second log line. Expected
    `CACHE 043 8F>444 FF`; anything else before the `>` means Enaga read the registers wrongly or the bootloader

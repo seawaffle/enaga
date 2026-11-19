@@ -45,6 +45,16 @@ def component(channel, period):
 @unittest.skipUnless(build_app.tools_present(), "tic6x GCC not built (tools/build_tic6x_*.sh)")
 @unittest.skipUnless(paths.emulator_present(), "ENAGA_EMULATOR not set to the SmplTrek emulator directory")
 class E1(unittest.TestCase):
+    def test_device_from_the_bootloaders_file_name(self):
+        """The device is told by the update file name its bootloader left in DDR (firmware/kernel/device.c)."""
+        for file, device, name in [("Lofi-12 XT.bin", 2, "LOFI-12 XT"), ("CyDrums.bin", 3, "CYDRUMS"),
+                                   ("SmplTrek.bin", 1, "SMPLTREK"), (None, 0, "UNKNOWN DEVICE"),
+                                   ("SmplTrek.binX", 0, "UNKNOWN DEVICE")]:
+            with self.subTest(file=file), Emulation(bootloader_file=file) as emu:
+                self.assertIsNone(emu.run(BOOT)["error"])
+                self.assertEqual(emu.word("device_id"), device)
+                self.assertEqual(emu.report()["log"][2], name)
+
     def test_boots_without_card_and_runs_audio(self):
         with Emulation() as emu:
             result = emu.run(BOOT)
@@ -62,7 +72,7 @@ class E1(unittest.TestCase):
             self.assertIn(emu.word("watchdog_ticks") - ticks, range(10, 13))    # one tick per 10 ms
             self.assertEqual(emu.report()["audio_overruns"], 0)
             self.assertTrue(all(v == 0 for v in samples(emu)[-4096:]))
-            self.assertEqual(report["log"], ["ENAGA 0.1.0", CACHE_LOG])
+            self.assertEqual(report["log"], ["ENAGA 0.1.0", CACHE_LOG, "SMPLTREK"])
             self.assertGreater(report["oled"]["complete_frames"], 0)
 
     def test_cache_set_up_from_the_bootloaders_hand_over(self):
@@ -87,7 +97,7 @@ class E1(unittest.TestCase):
             self.assertIsNone(emu.run(BOOT)["error"])
             report = emu.report()
             self.assertEqual((report["app_status"], report["app_name"]), ("APP RUNNING", "TONE"))
-            self.assertEqual(report["log"], ["ENAGA 0.1.0", CACHE_LOG, "tone ready", "TONE"])
+            self.assertEqual(report["log"], ["ENAGA 0.1.0", CACHE_LOG, "SMPLTREK", "tone ready", "TONE"])
             # The heap follows the image (4 KiB aligned) and runs to the end of the 128 MiB DDR.
             package = (paths.BUILD / "emulate" / "TONE.ENA").read_bytes()
             _, _, _, base, size, bss, *_ = build_app.HEADER.unpack_from(package)

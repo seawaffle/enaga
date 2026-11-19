@@ -47,6 +47,9 @@ inline void set_busy(bool busy) { host().set_busy(busy ? 1u : 0u); }
 inline void speaker(bool on) { host().speaker(on ? 1u : 0u); }
 // True while headphones are plugged in (the speaker is then cut in hardware). Poll it, e.g. in update().
 inline bool headphones() { return host().headphones() != 0; }
+// Which device Enaga runs on: ENAGA_DEVICE_SMPLTREK, _LOFI12XT, _CYDRUMS or _UNKNOWN (enaga_device in abi.h).
+// Same board and controls in the same places; use it for what differs, such as the labels printed on the panel.
+inline int device() { return int(host().device()); }
 }  // namespace system
 
 // The draw target: ENAGA_SCREEN_W x ENAGA_SCREEN_H bytes, row-major, grey 0-15.

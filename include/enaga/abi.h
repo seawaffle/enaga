@@ -61,6 +61,10 @@ enum enaga_led {
     ENAGA_LED_COUNT = ENAGA_LED_KEY + ENAGA_KEY_COUNT
 };
 
+enum enaga_device {
+    ENAGA_DEVICE_UNKNOWN = 0, ENAGA_DEVICE_SMPLTREK = 1, ENAGA_DEVICE_LOFI12XT = 2, ENAGA_DEVICE_CYDRUMS = 3,
+};
+
 enum enaga_event_type {
     ENAGA_EVENT_KEY = 1,                    /* id: key bit; value: 1 down, 0 up */
     ENAGA_EVENT_ENCODER = 2,                /* id: 0-3 = A-D, 4 = VALUE; value: signed detents */
@@ -212,6 +216,9 @@ typedef struct enaga_host {
     /* 1 while headphones are plugged in, else 0 (GP3[8], high with a plug in PHONES; the other jacks do not
      * change it). The speaker is cut in hardware meanwhile. */
     int32_t (*headphones)(void);
+    /* Which device of the family this is (enaga_device), from its bootloader: ENAGA_DEVICE_UNKNOWN when none of
+     * the known ones was recognised. The board is the same; printed labels, and possibly audio parts, differ. */
+    uint32_t (*device)(void);
 } enaga_host_t;
 
 /* What the app gives Enaga. Every callback receives `context`; any callback may be 0. */

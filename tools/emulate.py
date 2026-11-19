@@ -33,7 +33,11 @@ WORK = paths.BUILD
 class Emulation:
     """Enaga firmware + optional app card on the C++ emulator core."""
 
-    def __init__(self, app_dir=None, name=None, card_files=None):
+    # What the bootloader leaves in DDR that Enaga reads: its update file's name (BOOT 1.0.17 on a SmplTrek has
+    # "SmplTrek.bin" at 0xC70A8BA0; firmware/kernel/device.c). None leaves DDR empty, as no known bootloader.
+    BOOTLOADER_NAME_AT = 0xC70A8BA0
+
+    def __init__(self, app_dir=None, name=None, card_files=None, bootloader_file="SmplTrek.bin"):
         paths.use_emulator()
         from cpu import CPU
         from media import build_card
@@ -55,6 +59,8 @@ class Emulation:
         self.cpu.enable_board(profile=1)
         self.cpu.map(0xC0000000, 0x8000000, 7)
         entry = self.cpu.load_elf(self.firmware["elf"], map_allocations=False)
+        if bootloader_file is not None:
+            self.cpu.write(self.BOOTLOADER_NAME_AT, bootloader_file.encode() + b"\0")
         self.cpu.reset(entry, return_address=None)
         if card is not None:
             self.cpu.sd_load(card)
