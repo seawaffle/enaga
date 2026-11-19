@@ -342,13 +342,25 @@ too little. App icons are left for E4.
   `SETTINGS NOT SAVED` on the status page to narrow it down.
 - PADS: LOW / MEDIUM / HIGH (press 1,100 / 800 / 500) made very little difference on the unit; the steps need to
   be wider, against the pad readings measured in session 1.
-- Input routing for apps (the
-  microphone switch GP1[2], INPUT L front end and +10 dB GP7[14] / GP7[15], INPUT R microphone stage GP5[11], line
-  pad GP1[3]) waits on the same session: their roles are the original firmware's settings, mostly unconfirmed.
+- Input selection for apps (E4). Model it on Lofi-12 XT and CyDrums: a (source, level) pair, sources built-in mic,
+  Hi-Z L, dynamic mic R, stereo line, mono line (USB and resample later), levels 0-2, which maps one-to-one onto
+  the SmplTrek's REC SRC routes: codec routing plus the pins GP1[2] (mic switch), GP7[14] / GP7[15] (INPUT L front
+  end, +10 dB), GP5[11] (INPUT R mic stage) and GP1[3] (line pad). Table: smpltrek `sdk/docs/platform-map.md`
+  "Hardware use per product", Audio (XF-21). Keep the stock rule in Enaga, not in apps: the built-in mic is used
+  or monitored only while headphones are in (GP3[8] high), in every product, against speaker feedback. The pin
+  roles come from the stock code and still want a unit check per route.
+- Pad pressure (E4, an `ENAGA_EVENT_PAD_PRESSURE` beside press / release). Derived on the DSP from the normal pad
+  stream, as Lofi-12 XT does (XF-23): a press starts a 40-sample countdown and at 1 the raw value becomes the
+  baseline; raw > baseline + 200 enables pressure until release; pressure is the mean of the last 9 raw readings
+  passed through a steep curve (Lofi's runs 800, 1277, 1401 ... 3200), scaled to 0-127, and sent only when it
+  moves by more than 1/127. Use our own curve fitted to that shape rather than Lofi's table. CyDrums sends every
+  sample unfiltered (MIDI Channel Pressure, a flood): copy Lofi's change filter, not that.
+- MIDI (E4): send Song Position Pointer before CONTINUE, as Lofi-12 XT does (XF-24). The family keeps SYNC at
+  2 PPQN with a 15 ms pulse.
 - On the unit: BRIGHTNESS (the contrast command is the one start-up sends, at other levels; the steps' look is
   unchecked); whether AUTO OFF should apply on USB power too (it does now; `power_on_batteries` could limit it).
 - On the unit: the bootloader passes control normally with F1 held (Enaga reads F1 when start-up ends);
-  F1 + POWER mid-run and app switching (E3's exit); power-key bounce; bounce of keys other than STEP 1 (STEP 1 settles within 784 µs,
+  power-key bounce; bounce of keys other than STEP 1 (STEP 1 settles within 784 µs,
   smpltrek session M1, well inside the 6 ms sampling and two-sample release).
 - LED map: 53 addresses known only from the code, 24 seen on another channel of their LED (docs/hardware.md
   "LED map"; smpltrek session L1); the level-to-brightness steps. Whether the unit has a hardware MIDI port;

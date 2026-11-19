@@ -87,6 +87,12 @@ the measured state.
   power). **Never installed on either.** Unknown until one is: what their bootloaders (not dumped) leave set up
   (PLL and DDR clocks, cache, where the bootloader itself sits; Enaga loads at `0xC0000000`), whether their panel
   MCU firmware scales pads the same way, and which audio parts (speaker, microphone, jacks) they have.
+- **Hardware use is the same in every product** (smpltrek platform-map.md "Hardware use per product", XF-20 to
+  XF-25, all 13 stock releases): no release of any of the three uses a pin, codec register, panel command or
+  peripheral beyond what SmplTrek 3.2.174 uses. GP3[8] is the only jack detect, with no input or line-out
+  detection anywhere; the headphone / speaker split is mechanical. Differences are product code: the block size
+  (Lofi and CyDrums 48 frames against 64), the input-source model, pad pressure (Lofi), and AUTO POWER OFF's
+  first step (20 min in Lofi and CyDrums 2.0.97).
 - **Which device Enaga runs on:** each bootloader opens its update file by name, so the name is a constant string
   in it. BOOT 1.0.17 is still in DDR at the hand-over, with `SmplTrek.bin` at `0xC70A8BA0` (smpltrek flash dump,
   section loaded at `0xC70A6BC0`; in flash at boot-area offset `0x345E0`). Enaga looks for the three names in
