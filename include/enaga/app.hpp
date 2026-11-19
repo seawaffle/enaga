@@ -37,6 +37,18 @@ inline void vol_led(int channel, unsigned level) {               // 0 = VOL L, 1
 inline void mic_led(unsigned level) { host().led(ENAGA_LED_MIC, level, level, level); }
 inline void value_led(unsigned red, unsigned green, unsigned blue) { host().led(ENAGA_LED_VALUE, red, green, blue); }
 
+namespace system {
+// Opens the Enaga menu once the current callback returns, as F1 + POWER does; the app is paused meanwhile.
+inline void open_menu() { host().open_menu(); }
+// While busy, Enaga does not switch the unit off for being idle (the AUTO OFF setting). Cleared when the app stops.
+inline void set_busy(bool busy) { host().set_busy(busy ? 1u : 0u); }
+// Mutes (false) or releases (true) the built-in speaker, e.g. while monitoring the built-in microphone. The user's
+// SPEAKER setting still wins, and headphones cut the speaker anyway. Released again when the app stops.
+inline void speaker(bool on) { host().speaker(on ? 1u : 0u); }
+// True while headphones are plugged in (the speaker is then cut in hardware). Poll it, e.g. in update().
+inline bool headphones() { return host().headphones() != 0; }
+}  // namespace system
+
 // The draw target: ENAGA_SCREEN_W x ENAGA_SCREEN_H bytes, row-major, grey 0-15.
 class Canvas {
 public:

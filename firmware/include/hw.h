@@ -48,5 +48,7 @@ typedef unsigned long long u64;
 #define OUT_MUTE_PIN     9
 #define SPK_MUTE_BANK    2            /* GP2[8]: speaker mute, active high (the original firmware's SPEAKER MUTE setting) */
 #define SPK_MUTE_PIN     8
+#define PHONES_BANK      3            /* GP3[8]: headphone detect, high with a plug in PHONES (unit, E3 check) */
+#define PHONES_PIN       8
 
 #endif

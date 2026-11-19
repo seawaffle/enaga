@@ -280,7 +280,9 @@ the block. Details in docs/design.md, "First unit session: results".
   scheme with 256-word buffers): even words left only, odd words right only, both at the same level. The line
   outputs and the receive side (which input lands in which words) are not yet checked; with nothing connected,
   0.3.1's input peak sat around 2 in 32,768.
-- **Speaker:** plays with GP2[8] (speaker mute) driven low and headphones unplugged (M1). Enaga keeps it muted.
+- **Speaker:** plays with GP2[8] (speaker mute) driven low and headphones unplugged (M1). Enaga releases it unless
+  the SPEAKER setting is OFF or the app mutes it (docs/design.md "Settings"); that headphones cut it in hardware is
+  an inference (smpltrek HW-15) to confirm.
 - **Audio GPIOs:**
 
 | Pin | Use |
@@ -294,7 +296,7 @@ the block. Details in docs/design.md, "First unit session: results".
 | GP5[11] | INPUT R microphone stage |
 | GP1[3] | line input pad |
 | GP4[13] | held high (role unknown) |
-| GP3[8] | jack detect input (polarity unconfirmed) |
+| GP3[8] | headphone detect: 1 with a plug in PHONES, 0 otherwise; INPUT L / R and the outputs do not change it (unit, E3 check) |
 
 ## SD card
 
@@ -342,8 +344,8 @@ tick, and measures no time with it.
 Things only a unit can settle, in the order of a session. `python3 -B tools/unit_card.py` stages the files in
 `build/unit-card/` and prints their SHA-256; `python3 -B tools/unit_dry_run.py` walks this list on the emulator
 first (from the simulated cache hand-over) and saves the screen at each step in `build/unit-dry-run/`. The CHECK app is `tests/unit/check` (its header lists every
-control); hold F4 (HOME) for one second to go to its next page. The speaker stays muted (GP2[9] low, GP2[8] high), so
-listen on headphones or the line output. Report each result with what the screen showed.
+control); hold F4 (HOME) for one second to go to its next page. Images from E3's speaker change on play the speaker
+unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it muted. Report each result with what the screen showed.
 
 1. **Install.** A card with only `install/SmplTrek.bin` at its root; F4 (HOME) held while switching on, SYSTEM UPDATE,
    restart. Expected: the ENAGA splash with MCU, AUDIO and CARD, then Enaga's status page with `NO /ENAGA/APPS`.
@@ -395,5 +397,24 @@ listen on headphones or the line output. Report each result with what the screen
     gives at most 30 % with every feature on) for: one note; eight notes with INIT; SUPERSAW holding a chord;
     and any crackle or dropout. Note how the pads feel: whether soft hits
     sound and hard hits are loud (velocity thresholds are provisional, "Pads").
+
+13. **Menu and switching (E3's exit):** with CHECK and SYNTH both on the card (copy `synth/ENAGA/APPS/SYNTH` into
+    the card's `ENAGA/APPS`), switch on. Expected: the last app (CHECK), or the menu if none is recorded. Hold F1 and
+    press POWER: the menu (the apps by name, then SETTINGS and STATUS; ON marks the running one). DOWN to SYNTH, OK: the synth starts.
+    F1 + POWER, UP to CHECK, OK: CHECK starts again. Switch back and forth at least ten times, playing a note in the
+    synth each time; report any hang, crash screen, wrong app, or sound that stays after switching. Then: F1 + POWER
+    with a synth note held (the note should stop when the menu opens, F1 + POWER again to resume); switch off and on
+    (the last app comes back); hold F1 while switching on (the menu, `F1 HELD: MENU`; note whether the bootloader
+    still starts normally with F1 held). Listen for a click when switching away from the synth with a note
+    sounding (it should fade out).
+14. **Settings:** F1 + POWER, SETTINGS, OK. With the synth playing behind the menu, VOLUME down with LEFT (quieter
+    each step, silent at 0) and back up; BRIGHTNESS down to 1 and back (report how the steps look); PADS to LOW
+    and HIGH (a light pad touch should play on HIGH and not on LOW; leave it at MEDIUM); AUTO OFF to 5 MIN. OK, then
+    switch off and on: the settings are kept (the card's `/ENAGA/SETTINGS.TXT`). Leave the unit untouched for 5
+    minutes: it should switch itself off. Set AUTO OFF back to OFF afterwards.
+15. **Speaker and headphones:** with headphones unplugged, play the synth: the speaker should play. Plug headphones in: the
+    speaker should stop and the headphones play. SETTINGS, SPEAKER OFF: the speaker stays silent unplugged; back to
+    ON. Then open STATUS: `H` (right end of the AUDIO line) is 1 with headphones in and 0 without, whatever else
+    is plugged in (first unit result: 0 / 1 / 0 for nothing, headphones, a plug in any other jack).
 
 Afterwards the official update restores the unit ("Installing and recovery").

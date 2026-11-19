@@ -94,6 +94,15 @@ int oled_init(void)
     return 0;
 }
 
+int oled_contrast(u8 level)                   /* 0x81 level: after any frame in flight (between frames) */
+{
+    u8 command[2];
+    command[0] = 0x81;
+    command[1] = level;
+    oled_dma_finish();
+    return oled_command(command, 2);
+}
+
 int oled_flush(const u8 *fb)
 {
     gpio_set(OLED_DC_BANK, OLED_DC_PIN);

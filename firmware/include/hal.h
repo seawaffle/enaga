@@ -33,6 +33,7 @@ void power_off(void);
 void fault(unsigned code);           /* wait code x 5 s, release the power hold, stop: the stage is read off the clock */
 
 int  oled_init(void);                /* 0; -2 = SPI1's PSC enable failed; -3 = a command byte never completed */
+int  oled_contrast(u8 level);         /* the contrast command (0x81 level; start-up sets 0xFF); waits for a DMA frame */
 int  oled_flush(const u8 *framebuffer);  /* 8192 bytes, 128 x 128 x 4 bpp, polled SPI; -1 = a byte never completed */
 int  oled_dma_start(const u8 *framebuffer);   /* EDMA frame (EDMA must be powered); -1 = one is in flight */
 int  oled_dma_poll(void);             /* 1 while a frame is in flight; completes it (chip select released) */

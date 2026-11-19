@@ -200,6 +200,18 @@ typedef struct enaga_host {
     /* A recording is written out to the end first, then `header` (if any) over the file's first bytes, so a
      * WAV header with the final size can go in the reserved space; this waits for the card. */
     int32_t (*stream_close)(int32_t stream, const void *header, uint32_t header_bytes);
+
+    /* System. Main context. */
+    void (*open_menu)(void);                /* opens the Enaga menu once the current callback returns, as F1 + POWER */
+    void (*set_busy)(uint32_t busy);        /* non-zero: do not switch off for being idle (AUTO OFF), e.g. while
+                                             * playing or recording unattended; cleared when the app stops */
+    /* The built-in speaker plays when the user's SPEAKER setting is ON and the app has not muted it; plugging in
+     * headphones cuts it in hardware. Muting is for e.g. monitoring the built-in microphone (feedback), as the
+     * original firmware does. Reset to unmuted when the app stops. */
+    void (*speaker)(uint32_t on);
+    /* 1 while headphones are plugged in, else 0 (GP3[8], high with a plug in PHONES; the other jacks do not
+     * change it). The speaker is cut in hardware meanwhile. */
+    int32_t (*headphones)(void);
 } enaga_host_t;
 
 /* What the app gives Enaga. Every callback receives `context`; any callback may be 0. */
