@@ -43,6 +43,10 @@ fixed-point slots are hidden).
 
 ## Boot and app switching
 
+Built 2026-11-18 (E3's first step; see the log): the menu (`kernel/menu.c`), F1 + POWER, F1 at power-on, the boot
+policy with the start-up record, and switching without a reboot. Where the build differs from the plan below it
+says so.
+
 Power-on sequence (proposal):
 
 1. The bootloader hands over (it is never modified; F4 + POWER still reaches its BOOT MODE, the recovery
@@ -50,8 +54,12 @@ Power-on sequence (proposal):
 2. Enaga takes the power hold, starts the display and the key matrix, and samples F1 while the power key
    is still held (the original firmware checks F1 at about 0.58 s for its factory test mode). The
    bootloader only tests F4, so F1 at power-on is Enaga's to use.
-3. F1 held: Enaga menu. Otherwise the boot policy in decision 2.
-4. A last app that faults or trips the watchdog during start-up is not auto-loaded on the next boot.
+3. F1 held: Enaga menu. Otherwise the boot policy in decision 2. (Built: F1 is read when start-up ends, about
+   0.7 s after power-on, as "held through start-up"; the keys are not scanned earlier.)
+4. A last app that faults or trips the watchdog during start-up is not auto-loaded on the next boot. (Built:
+   `/ENAGA/LAST.TXT` holds the last app's folder and STARTING until it has run 2 s, then RUNNING; a boot that
+   finds STARTING opens the menu with "<NAME> DID NOT START", every boot until an app chosen there settles. A
+   record of an app no longer installed is ignored.)
 
 Switching apps while on:
 
@@ -66,6 +74,13 @@ POWER first and then F1 does nothing; while the menu was opened by the chord, ke
 not start the one-second power-off. When the menu opens the app receives an F1 release (or an
 input-cancel event) and is paused. A plain short POWER press is reserved for Enaga and unused for now.
 POWER held one second with F1 up switches off.
+
+As built: the paused app's audio goes on (no fade) and it gets no events, `update` or `draw`; it is told of the
+release of every key and pad press it was given when the menu opens, and of none it was not. The menu lists the
+folders under `/ENAGA/APPS`, then STATUS (Enaga's status page); UP / DOWN or VALUE move, OK chooses (the running
+app resumes, another replaces it through steps 1-5 above), CLR or F1 + POWER resume. With no app running (a crash,
+a failed load, a card without apps) Enaga shows the status page, and OK there opens the menu. Not yet: a fade
+when switching, a time budget for `stop()`, settings, app icons or display names.
 
 ## Memory
 
@@ -273,10 +288,14 @@ GCC alone (every feature on: sync, ring, chorus, eight voices). The file service
 the command; hardware.md "SD card"); the CHECK app measured the card on a unit; streams (playback and recording
 from `audio()`) and WAV headers are in, with multi-block SD transfers (on a unit: reads 7,600 KiB/s, writes about 2,000).
 
+E3 has begun: the Enaga menu on F1 + POWER, F1 at power-on, the boot policy (last app, only app, or the menu) with
+a start-up record, and switching apps without a reboot, on the emulator; its exit, switching between two apps
+repeatedly on the unit, is the next unit session's.
+
 ## Open items
 
-- On the unit: F1 sampled during the power-key hold; the bootloader passes control normally with F1
-  held; F1 + POWER mid-run; power-key bounce; bounce of keys other than STEP 1 (STEP 1 settles within 784 µs,
+- On the unit: the bootloader passes control normally with F1 held (Enaga reads F1 when start-up ends);
+  F1 + POWER mid-run and app switching (E3's exit); power-key bounce; bounce of keys other than STEP 1 (STEP 1 settles within 784 µs,
   smpltrek session M1, well inside the 6 ms sampling and two-sample release).
 - LED map: 53 addresses known only from the code, 24 seen on another channel of their LED (docs/hardware.md
   "LED map"; smpltrek session L1); the level-to-brightness steps. Whether the unit has a hardware MIDI port;
@@ -1032,4 +1051,23 @@ On the unit (same Toshiba 3.6 GB FAT32 card): probe `W1 OK 3MS`, `W7 OK 6MS`, so
 runs: WRITE 2382 / 2367 / 1837 KiB/s (was 170), READ 7613 / 7585 / 7585 KiB/s (was 2,860), SCATTER 2085 / 2077 /
 2115 KiB/s (521 / 519 / 528 reads/s; was 447). That is room for about 39 playback streams of 16-bit stereo at
 48 kHz by reading, or about 9 recordings at the slowest write run, on this card.
+
+### The Enaga menu and app switching, E3 step 1 (2026-11-18)
+
+- `kernel/menu.c`: the app list and STATUS ("Boot and app switching" has the behaviour). `main.c` routes every
+  input through `deliver`, which gives it to the menu while open, and otherwise to the app, keeping a record of
+  the keys and pads the app saw pressed: opening the menu sends their releases, and a release the app never saw
+  pressed is not sent. F1 + POWER opens and closes the menu on the POWER press; holding POWER after the chord does
+  not switch off.
+- `apps.c`: `apps_scan`, `apps_start(folder)` (stops the app running, then loads the new one into the same window:
+  its memory is simply overwritten), `apps_boot` (decision 2 and the start-up record `/ENAGA/LAST.TXT`) and
+  `apps_service` (marks the record RUNNING after 2 s). `apps_load_first` is gone.
+- A bug found on the way: after an app hung while handling a key press (here, OK choosing an app that hangs in
+  `init`), the debouncer still had the key down when the kernel loop restarted, so the press was delivered again
+  (opening the menu over the crash screen). The loop now resets the key state after a drop.
+- `tests/test_menu.py`: TONE and CXXCHECK switched ten times from the menu; STEP 1 pressed in the menu does not
+  reach the paused TONE, and does once it resumes; the record reads `TONE RUNNING` and the next boot starts TONE;
+  F1 held at power-on opens the menu; a record of a removed app is ignored. An app that hangs in `init` (HANG)
+  leaves the status page with APP NOT RESPONDING, OK opens the menu, and the next two boots open the menu with
+  `HANG DID NOT START`. 48 tests pass; dry run 141/141.
 

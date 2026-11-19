@@ -54,7 +54,18 @@ extern char app_status[32];
 extern char app_name[ENAGA_NAME_BYTES];
 void apps_mount(void);                        /* mounts the card; app_status says what happened */
 void apps_card_status(void);                  /* app_status from the card's state after files mounted it or not */
-int  apps_load_first(void);                   /* the first /ENAGA/APPS/<dir>/APP.ENA; 0 = running */
+#define APPS_FOLDER 32                       /* bytes for an app's folder name under /ENAGA/APPS, with the NUL */
+int  apps_scan(char (*names)[APPS_FOLDER], int max);   /* the installed apps' folders; count, or -1: no /ENAGA/APPS */
+int  apps_start(const char *folder);          /* stops the running app, starts /ENAGA/APPS/<folder>; 0 = running */
+int  apps_boot(int menu_requested, char *message, unsigned size);   /* the boot policy; 1 = open the menu */
+void apps_service(u32 ms);                    /* each pass: the boot record once the app has settled */
+extern char app_folder[APPS_FOLDER];          /* the running (or last started) app's folder */
+extern int menu_active;                       /* the Enaga menu (menu.c) has the screen and inputs */
+extern int menu_status;                       /* ... and shows the status page */
+void menu_open(const char *message);          /* message: a line under the title, or 0 */
+void menu_close(void);                        /* back to the running app (none: stays) */
+void menu_event(const enaga_event_t *event);
+void menu_draw(void);
 void apps_unload(void);
 void apps_event(const enaga_event_t *event);
 void apps_drop(const char *reason);           /* forget a failed app; returns */

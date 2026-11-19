@@ -129,25 +129,134 @@ static int load_path(const char *path)
     return 0;
 }
 
-int apps_load_first(void)
+/* The installed apps: folders under /ENAGA/APPS (each should hold APP.ENA), in directory order. */
+int apps_scan(char (*names)[APPS_FOLDER], int max)
 {
     DIR dir;
     FILINFO info;
-    char path[48];
-    if (!files_mounted()) return -1;
-    if (f_opendir(&dir, APPS_DIR) != FR_OK) { set_status("NO /ENAGA/APPS"); return -1; }
-    for (;;) {
-        unsigned n = 0, i;
-        if (f_readdir(&dir, &info) != FR_OK || !info.fname[0]) { f_closedir(&dir); set_status("NO APPS"); return -1; }
+    int count = 0;
+    unsigned i;
+    if (!files_mounted() || f_opendir(&dir, APPS_DIR) != FR_OK) return -1;
+    while (count < max && f_readdir(&dir, &info) == FR_OK && info.fname[0]) {
         if (!(info.fattrib & AM_DIR) || info.fname[0] == '.') continue;
-        for (i = 0; APPS_DIR[i]; i++) path[n++] = APPS_DIR[i];
-        path[n++] = '/';
-        for (i = 0; info.fname[i] && n < sizeof path - 10; i++) path[n++] = info.fname[i];
-        for (i = 0; "/APP.ENA"[i]; i++) path[n++] = "/APP.ENA"[i];
-        path[n] = 0;
-        f_closedir(&dir);
-        return load_path(path);
+        for (i = 0; info.fname[i] && i < APPS_FOLDER - 1; i++) names[count][i] = info.fname[i];
+        names[count][i] = 0;
+        if (!info.fname[i]) count++;          /* a name too long to keep is left out */
     }
+    f_closedir(&dir);
+    return count;
+}
+
+/* The boot record, /ENAGA/LAST.TXT: the last app's folder, then STARTING until it has run APPS_SETTLED_MS, then
+ * RUNNING. An app that never got to RUNNING failed at start-up and is not loaded at the next boot (design.md
+ * "Boot and app switching"). */
+#define RECORD "/ENAGA/LAST.TXT"
+#define APPS_SETTLED_MS 2000u
+char app_folder[APPS_FOLDER];
+static int settled;
+static u32 started_ms;
+
+static void record(const char *folder, const char *state)
+{
+    static FIL f;
+    UINT put;
+    char text[APPS_FOLDER + 16];
+    unsigned n = 0, i;
+    for (i = 0; folder[i]; i++) text[n++] = folder[i];
+    text[n++] = '\n';
+    for (i = 0; state[i]; i++) text[n++] = state[i];
+    text[n++] = '\n';
+    if (f_open(&f, RECORD, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK) return;
+    f_write(&f, text, n, &put);
+    f_close(&f);
+}
+
+static int read_record(char folder[APPS_FOLDER], int *starting)   /* 0 = a record was read */
+{
+    static FIL f;
+    char text[APPS_FOLDER + 16];
+    UINT got;
+    unsigned i, n;
+    if (f_open(&f, RECORD, FA_READ) != FR_OK) return -1;
+    if (f_read(&f, text, sizeof text - 1, &got) != FR_OK) got = 0;
+    f_close(&f);
+    text[got] = 0;
+    for (n = 0; n < got && text[n] != '\n' && n < APPS_FOLDER - 1; n++) folder[n] = text[n];
+    folder[n] = 0;
+    if (!n || n == got || text[n] != '\n') return -1;
+    for (i = 0; "STARTING"[i] && text[n + 1 + i] == "STARTING"[i]; i++) {}
+    *starting = "STARTING"[i] == 0;
+    return 0;
+}
+
+static void package_path(char *path, const char *folder)     /* /ENAGA/APPS/<folder>/APP.ENA */
+{
+    unsigned n = 0, i;
+    for (i = 0; APPS_DIR[i]; i++) path[n++] = APPS_DIR[i];
+    path[n++] = '/';
+    for (i = 0; folder[i]; i++) path[n++] = folder[i];
+    for (i = 0; "/APP.ENA"[i]; i++) path[n++] = "/APP.ENA"[i];
+    path[n] = 0;
+}
+
+static int installed(const char *folder)
+{
+    char path[APPS_FOLDER + 24];
+    package_path(path, folder);
+    return f_stat(path, 0) == FR_OK;
+}
+
+/* Stops the app running (if any) and starts /ENAGA/APPS/<folder>/APP.ENA; 0 = running. */
+int apps_start(const char *folder)
+{
+    char path[APPS_FOLDER + 24];
+    if (!files_mounted()) return -1;
+    package_path(path, folder);
+    if (f_stat(path, 0) != FR_OK) { set_status("APP OPEN FAILED"); return -1; }
+    if (app_current) apps_unload();
+    copy_text(app_folder, sizeof app_folder, folder);
+    settled = 0;
+    record(folder, "STARTING");
+    if (load_path(path) != 0) { app_folder[0] = 0; return -1; }
+    started_ms = timer_ms();
+    return 0;
+}
+
+void apps_service(u32 ms)                     /* each pass: the boot record once the app has settled */
+{
+    if (app_current && !settled && ms - started_ms >= APPS_SETTLED_MS) {
+        settled = 1;
+        record(app_folder, "RUNNING");
+    }
+}
+
+/* Power-on (decision 2): the last app, unless it failed at start-up; else the only one installed; else the menu.
+ * Returns 1 when the menu should open, with a message for it in `message` (or empty). */
+int apps_boot(int menu_requested, char *message, unsigned size)
+{
+    static char names[2][APPS_FOLDER];
+    char last[APPS_FOLDER];
+    int starting = 0, count;
+    message[0] = 0;
+    if (!files_mounted()) return 0;           /* the status page says why */
+    count = apps_scan(names, 2);
+    if (count < 0) { set_status("NO /ENAGA/APPS"); return 0; }
+    if (count == 0) { set_status("NO APPS"); return 0; }
+    if (menu_requested) { copy_text(message, size, "F1 HELD: MENU"); return 1; }
+    if (read_record(last, &starting) == 0 && installed(last)) {   /* a record of an app since removed: ignored */
+        if (starting) {
+            unsigned n = 0, i;
+            for (i = 0; last[i] && n + 1 < size; i++) message[n++] = last[i];
+            for (i = 0; " DID NOT START"[i] && n + 1 < size; i++) message[n++] = " DID NOT START"[i];
+            message[n] = 0;
+            return 1;                          /* until an app chosen from the menu runs APPS_SETTLED_MS */
+        }
+        if (apps_start(last) == 0) return 0;
+        copy_text(message, size, app_status);  /* why it did not load (gone, damaged): the menu */
+        return 1;
+    }
+    if (count == 1) return apps_start(names[0]) == 0 ? 0 : 1;
+    return 1;
 }
 
 void apps_unload(void)

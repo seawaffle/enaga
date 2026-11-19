@@ -396,4 +396,13 @@ listen on headphones or the line output. Report each result with what the screen
     and any crackle or dropout. Note how the pads feel: whether soft hits
     sound and hard hits are loud (velocity thresholds are provisional, "Pads").
 
+13. **Menu and switching (E3's exit):** with CHECK and SYNTH both on the card (copy `synth/ENAGA/APPS/SYNTH` into
+    the card's `ENAGA/APPS`), switch on. Expected: the last app (CHECK), or the menu if none is recorded. Hold F1 and
+    press POWER: the menu (the apps, then STATUS; `*` marks the running one). DOWN to SYNTH, OK: the synth starts.
+    F1 + POWER, UP to CHECK, OK: CHECK starts again. Switch back and forth at least ten times, playing a note in the
+    synth each time; report any hang, crash screen, wrong app, or sound that stays after switching. Then: F1 + POWER
+    with a synth note held (the note should stop when the menu opens, F1 + POWER again to resume); switch off and on
+    (the last app comes back); hold F1 while switching on (the menu, `F1 HELD: MENU`; note whether the bootloader
+    still starts normally with F1 held).
+
 Afterwards the official update restores the unit ("Installing and recovery").
