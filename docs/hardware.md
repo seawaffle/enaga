@@ -344,8 +344,8 @@ tick, and measures no time with it.
 Things only a unit can settle, in the order of a session. `python3 -B tools/unit_card.py` stages the files in
 `build/unit-card/` and prints their SHA-256; `python3 -B tools/unit_dry_run.py` walks this list on the emulator
 first (from the simulated cache hand-over) and saves the screen at each step in `build/unit-dry-run/`. The CHECK app is `tests/unit/check` (its header lists every
-control); hold F4 (HOME) for one second to go to its next page. The speaker stays muted (GP2[9] low, GP2[8] high), so
-listen on headphones or the line output. Report each result with what the screen showed.
+control); hold F4 (HOME) for one second to go to its next page. Images from E3's speaker change on play the speaker
+unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it muted. Report each result with what the screen showed.
 
 1. **Install.** A card with only `install/SmplTrek.bin` at its root; F4 (HOME) held while switching on, SYSTEM UPDATE,
    restart. Expected: the ENAGA splash with MCU, AUDIO and CARD, then Enaga's status page with `NO /ENAGA/APPS`.
