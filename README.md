@@ -1,6 +1,8 @@
 # Enaga
 
-Enaga is replacement firmware for the **Sonicware SmplTrek** that turns it into a platform for apps. An app
+Enaga is replacement firmware for the **Sonicware SmplTrek** that turns it into a platform for apps. The
+**Lofi-12 XT** and **CyDrums** are the same board with differently printed panels, and the build makes an update
+file for each, but Enaga has only run on a SmplTrek so far (below, "Installing"). An app
 is a whole instrument written in C++: Enaga starts it from the SD card, hands it the pads, keys, encoders,
 display and a real-time audio callback, and recovers cleanly if it crashes.
 
@@ -113,11 +115,16 @@ python3 -B firmware/build.py                    # -> build/firmware/ENAGA_0_1_0.
 
 ## Installing
 
-For developers and testers: 0.1.0 runs on a unit, but it is early software (docs/design.md "Open items").
+For developers and testers: 0.1.0 runs on a SmplTrek, but it is early software (docs/design.md "Open items").
+The Lofi-12 XT and CyDrums files are **untested**: their update format is checked against official releases,
+but nobody has installed Enaga on one, and what their own bootloaders leave behind is unknown. Only try one if
+you are prepared to restore it with its official update.
 
-1. Copy `build/firmware/ENAGA_<version>.bin` to the root of the SD card as `SmplTrek.bin`, and an app's
-   package to `/ENAGA/APPS/<NAME>/APP.ENA` (8.3 names).
-2. Hold **F4** (HOME on a SmplTrek) while switching on to reach BOOT MODE, and choose SYSTEM UPDATE.
+1. Copy the file for your device to the root of the SD card, keeping its name: `build/firmware/smpltrek/SmplTrek.bin`,
+   `build/firmware/lofi12xt/Lofi-12 XT.bin` or `build/firmware/cydrums/CyDrums.bin` (`ENAGA_<version>.bin` is
+   the SmplTrek's under the release name). Copy an app's package to `/ENAGA/APPS/<NAME>/APP.ENA` (8.3 names).
+2. Hold the fourth key of the upper function row (F4: HOME on a SmplTrek, PAD on a Lofi-12 XT or CyDrums) while
+   switching on to reach BOOT MODE, and choose SYSTEM UPDATE.
 
 Enaga starts the last app that ran (or the only one installed); **F1 + POWER** opens the Enaga menu, which lists
 the apps and switches between them and holds the settings (volume, brightness, pad sensitivity, auto-off, speaker, kept in
@@ -135,7 +142,7 @@ project. Point `ENAGA_EMULATOR` at its emulator directory (the one containing `c
 
 ```sh
 export ENAGA_EMULATOR=/path/to/emulator
-python3 -B -m unittest discover -s tests -v                           # 49 tests, about 5 minutes
+python3 -B -m unittest discover -s tests -v                           # 51 tests, about 5 minutes
 python3 -B tools/emulate.py examples/tone --key 32@300000000           # press STEP 1; writes build/emulate/
 ```
 
@@ -167,7 +174,7 @@ only `g++`. `tools/emulate.py` writes the last screen to
 | `loader/` | The package loader (freestanding C, used by the firmware and the tests) |
 | `firmware/` | Enaga itself: `hal/` drivers, `kernel/` (interrupts, audio engine, app host, menu, settings, exceptions, watchdog, main loop), `start.s`, `link.ld`, `build.py` |
 | `examples/` | `synth` (the virtual analogue synthesizer); `tone` (STEP 1-8 play 750 Hz x step); `cxxcheck` (exercises the C++ runtime) |
-| `tests/` | `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board; `test_check.py` and `unit/check`: the CHECK app for sessions on a unit; `test_synth.py`: the synth example; `test_files.py` and `apps/files`: the file service; `test_streams.py` and `apps/streams`: streams and WAV; `test_menu.py` and `apps/menu`: the Enaga menu, boot policy, app switching and settings; `test_dsp.py` and `dsp/`: the DSP library on the host |
+| `tests/` | `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board; `test_check.py` and `unit/check`: the CHECK app for sessions on a unit; `test_synth.py`: the synth example; `test_files.py` and `apps/files`: the file service; `test_streams.py` and `apps/streams`: streams and WAV; `test_menu.py` and `apps/menu`: the Enaga menu, boot policy, app switching and settings; `test_dsp.py` and `dsp/`: the DSP library on the host; `test_sysimage.py`: the update files for each device |
 | `tools/` | `build_app.py`, `emulate.py`, `panel.py` (apps live in the emulator's web panel), `card.py` (FAT and exFAT card images through Enaga's own FatFs), `unit_card.py` and `unit_dry_run.py` (files for a session on a unit, and the session walked on the emulator), `sysimage.py` (the update-file format), `paths.py`, toolchain build scripts |
 | `docs/` | `design.md` (decisions, architecture, plan, log), `hardware.md` (the hardware notes) |
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Build the Enaga firmware with GCC tic6x-elf and wrap it as a SmplTrek SYSTEM update.
+"""Build the Enaga firmware with GCC tic6x-elf and wrap it as a SYSTEM update for each device of the family.
 
-    python3 -B firmware/build.py        # build/firmware/{enaga.elf,enaga.map,enaga.dis,ENAGA_<version>.bin}
+    python3 -B firmware/build.py        # build/firmware/{enaga.elf,enaga.map,enaga.dis,ENAGA_<version>.bin,<device>/<card name>}
 
 Sources: start.s, link.ld, hal/*.c (drivers), kernel/*.c, the package loader (loader/) and FatFs. The loadable
 bytes (.text, .vectors, .rodata, .data, contiguous from 0xC0000000) become one section entered at `_start`,
@@ -75,10 +75,17 @@ def build(out=OUT):
     if sym["_start"] != LOAD:
         raise RuntimeError(f"entry {sym['_start']:#x} is not the load address")
     code = raw.read_bytes()
-    image = sysimage.wrap(VERSION, sym["_start"], [(LOAD, code)])
-    name = "ENAGA_" + "_".join(map(str, VERSION)) + ".bin"
-    (out / name).write_bytes(image)
-    return {"elf": elf, "map": mapfile, "image": image, "image_path": out / name, "symbols": sym, "code_size": len(code)}
+    # One image for the whole family; each device gets its own update file, named for the bootloader to find it.
+    images = {}
+    for device, d in sysimage.DEVICES.items():
+        folder = out / device
+        folder.mkdir(exist_ok=True)
+        images[device] = folder / d["card_name"]
+        images[device].write_bytes(sysimage.wrap(VERSION, sym["_start"], [(LOAD, code)], device))
+    name = "ENAGA_" + "_".join(map(str, VERSION)) + ".bin"           # the SmplTrek's, under the release name
+    (out / name).write_bytes(images["smpltrek"].read_bytes())
+    return {"elf": elf, "map": mapfile, "image": (out / name).read_bytes(), "image_path": out / name,
+            "images": images, "symbols": sym, "code_size": len(code)}
 
 
 def main(argv=None):
@@ -90,6 +97,9 @@ def main(argv=None):
         return 2
     b = build()
     print(f"wrote {b['image_path']}: {len(b['image'])} bytes, SHA-256 {hashlib.sha256(b['image']).hexdigest()}")
+    for device, path in b["images"].items():
+        print(f"  {sysimage.DEVICES[device]['label']:10}  {path.relative_to(ENAGA)}  "
+              f"SHA-256 {hashlib.sha256(path.read_bytes()).hexdigest()[:16]}")
     print(f"code {b['code_size']} bytes at {LOAD:#x}, ELF {b['elf']}")
     return 0
 

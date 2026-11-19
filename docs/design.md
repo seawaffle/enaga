@@ -333,6 +333,9 @@ too little. App icons are left for E4.
 
 ## Open items
 
+- Lofi-12 XT and CyDrums: the build makes their update files (docs/hardware.md "Installing and recovery"), but
+  Enaga has never been installed on either. A first session on one would follow "Checks on a unit" steps 1-11,
+  ready to restore it with its official update.
 - AUTO OFF on the unit: set to 5 MIN, it reads OFF again after leaving the SETTINGS page, and after a restart; the
   other settings keep their values. The emulator keeps it through the same steps and a reboot (the file holds
   `AUTO OFF=5 MIN`), so the cause is unit-only and not yet found. Saving now logs `SETTINGS SAVED` or
@@ -1160,3 +1163,14 @@ headphones, 0 with a plug in any other jack (inputs or outputs), so `jack()` bec
 `headphones`, status page `H`). PADS made only a small difference. AUTO OFF set to 5 MIN read OFF again after
 leaving the SETTINGS page and after a restart, while the other settings were kept; the emulator does not show
 it (open items).
+
+### Update files for the Lofi-12 XT and CyDrums (2026-11-19)
+
+The three devices are one board, so one firmware image serves all of them; only the update container differs
+(family word, two CRC seeds, the file name on the card). `tools/sysimage.py` gained a device table (values from
+smpltrek's `tools/palette_swap.py`), and `firmware/build.py` writes `build/firmware/<device>/<card name>` for
+each, plus `ENAGA_<version>.bin` (the SmplTrek's, byte-identical to before: image 63a110a1 either way).
+The family words and both CRCs were checked against the official Lofi-12 XT 1.2.179 / 1.5.205 and CyDrums 1.1.84
+files. `tests/test_sysimage.py` (host) pins the SmplTrek bytes and checks each file verifies only as its own
+device. Untested on either device; the firmware does not yet know which device it runs on (key names, LED
+meanings and audio parts that differ would need it).

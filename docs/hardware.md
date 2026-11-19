@@ -79,6 +79,14 @@ the measured state.
   verifies it and asks for a restart.
 - **Recovery:** the same procedure with an official SmplTrek system update restores the original firmware.
   Because Enaga never touches the bootloader or the sound content in flash, that one step is enough.
+- **Lofi-12 XT and CyDrums:** the same board (smpltrek README: C6748 mezzanine, panel MCU, key matrix; panels
+  physically the same, printed differently). Their update files differ in the family word (SmplTrek 5,
+  Lofi-12 XT 12, CyDrums 8), the two CRC seeds and the name on the card (`Lofi-12 XT.bin`, `CyDrums.bin`);
+  `tools/sysimage.py` holds them, checked against the official Lofi-12 XT 1.2.179 / 1.5.205 and CyDrums 1.1.84
+  files (family word, both CRCs). The update chord is the same key, printed PAD on both (CyDrums manual: PAD +
+  power). **Never installed on either.** Unknown until one is: what their bootloaders (not dumped) leave set up
+  (PLL and DDR clocks, cache, where the bootloader itself sits; Enaga loads at `0xC0000000`), whether their panel
+  MCU firmware scales pads the same way, and which audio parts (speaker, microphone, jacks) they have.
 
 ## Power
 
