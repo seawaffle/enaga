@@ -982,3 +982,9 @@ like sequence 0, so the controller holds a write command until its FIFO has data
 - hardware.md "SD card" records the write rule. Next on the unit: the CARD page (step 11) and synth patch saving
   (step 12). 44 tests pass; dry run 141/141.
 
+Ninth try, the CARD page twice on a Toshiba microSD (about 3.6 GB, FAT32) in a PNY adapter: WRITE 173 / 170 KiB/s,
+READ 2856 / 2878 KiB/s, SCATTER 1787 / 1793 KiB/s (446 / 448 reads/s), STREAMS 15. No failures. Synth patch
+saving works: U1 saved and came back after switching off and on. Writes are about 3 ms a sector, one CMD24 each
+with its programming wait, so recording needs multi-block writes (CMD25) before it streams; reading is enough for
+15 streams as it is.
+
