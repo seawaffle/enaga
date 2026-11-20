@@ -3,7 +3,7 @@
 /* Which device of the family Enaga runs on (docs/hardware.md "Installing and recovery"). The SmplTrek, Lofi-12 XT
  * and CyDrums are one board; only their bootloaders differ, and each opens its own update file by name. The
  * bootloader is still in DDR at the hand-over (BOOT 1.0.17: loaded at 0xC7074628-0xC70AEA60, "SmplTrek.bin" at
- * 0xC70A8BA0, from the smpltrek project's flash dump), and nothing overwrites it until Enaga loads an app, so
+ * 0xC70A8BA0, from the smpltrek-re project's flash dump), and nothing overwrites it until Enaga loads an app, so
  * main() looks for the file names once, before that. The other bootloaders were never dumped, but are built from
  * the same code base: the search covers 2 MiB around where BOOT 1.0.17 sits, word-aligned (the name is a constant
  * string), and takes the first name found. About 50 ms on the emulator when no name is there (16 MiB took 0.4 s). */

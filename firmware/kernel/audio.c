@@ -10,7 +10,7 @@
  *     and converts its output into the transmit buffer that has just finished playing. That buffer plays
  *     again one block later, so the callback's deadline is one block (1.33 ms, AUDIO_BUDGET_CYCLES).
  *   - The rings keep the original firmware's one-word-short first transfer (127 words here), which puts even
- *     buffer words in slot 1, the left channel (confirmed on headphones by smpltrek session M1).
+ *     buffer words in slot 1, the left channel (confirmed on headphones by smpltrek-re session M1).
  *     Even words carry L, odd words R; samples are left-aligned 32-bit words, full scale +-2^31.
  *   - Buffers live in DDR behind the caches: the receive block is invalidated before it is read and the
  *     transmit block written back after it is filled.
@@ -21,7 +21,7 @@
  *
  * Speaker: GP2[8] (active-high mute) is released when the SPEAKER setting is ON and the app has not muted it
  * (audio_speaker_apply). Plugging in headphones cuts the speaker in hardware, as in the original firmware (a
- * switched jack: smpltrek HW-15, confirmed on the unit in session 3). Switching it fades the output around it.
+ * switched jack: smpltrek-re HW-15, confirmed on the unit in session 3). Switching it fades the output around it.
  *
  * Cost accounting: cycles from interrupt entry to exit per block (audio_cycles_last/peak) against
  * AUDIO_BUDGET_CYCLES; a block that took longer than its budget counts as an overrun. */

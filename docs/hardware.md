@@ -7,6 +7,11 @@ been checked directly on a unit. TI documents cited: the C6748 data sheet (SPRS5
 technical reference manual (SPRUH79), the C674x CPU and megamodule guides (SPRUFE8, SPRUFK5) and the
 TLV320AIC3106 data sheet (SLAS509).
 
+Most of what is known about the board comes from the SmplTrek reverse-engineering project,
+[smpltrek-re](https://github.com/seawaffle/smpltrek-re). References to it name its bench sessions (M1, D1, ...: `experiments/sessions/` there), its
+claims (HW-15, XF-21, ...: `claims.json`) and its documents (`docs/01-platform-map.md`,
+`docs/04-hardware-access.md`, ...).
+
 ## Processor and memory
 
 - **CPU:** TI TMS320C6748 (C674x DSP, floating point) at **372 MHz** (PLL0 SYSCLK1). Peripherals on the
@@ -20,7 +25,7 @@ TLV320AIC3106 data sheet (SLAS509).
   4 MiB the system image; the rest holds the original firmware's sounds and settings. Enaga does not write
   either chip, and does not read them yet. The original firmware and bootloader read them by EDMA (code reading,
   "Boot"); if Enaga does too, it must invalidate the destination range before the CPU reads it, since the DMA
-  writes DDR behind the caches. Both chips answer JEDEC ID `C2 20 18` (Macronix, 16 MiB; smpltrek session M1, 2026-11-16, measured).
+  writes DDR behind the caches. Both chips answer JEDEC ID `C2 20 18` (Macronix, 16 MiB; smpltrek-re session M1, 2026-11-16, measured).
   Chip 0 reads status `0x0C` and configuration `0x0F`: status bits 2-3 set, block protect on Macronix parts
   (inference), so writes to chip 0 are refused until they are cleared, which would be a deliberate, risky step.
   Chip 1 reads status `0x00`, configuration `0x07`.
@@ -47,7 +52,7 @@ from `0xC7020000`-`0xC70B0000` while loading, so an image must not load there; t
 from `0xC0000000`, which is where Enaga loads too. A system image that never takes over leaves the unit on,
 showing the logo, with the power key dead: remove the batteries or power to recover, then use BOOT MODE.
 
-**Cache state at entry (measured on a unit, smpltrek session M1, 2026-11-16; it matches the earlier static trace
+**Cache state at entry (measured on a unit, smpltrek-re session M1, 2026-11-16; it matches the earlier static trace
 and simulation of BOOT 1.0.17's cache start-up).** At the jump L2CFG = 0 (L2 all RAM, no L2 cache), L1PCFG = 4 (32 KiB
 L1P cache), L1DCFG = 3 (16 KiB L1D cache, 16 KiB L1D RAM at `0x11F00000`), and MAR 17, 128, 192-195 and 199
 cacheable, MAR 196-198 (`0xC4000000`-`0xC6FFFFFF`) not. The bootloader does not write back or invalidate any
@@ -55,7 +60,7 @@ cache before branching, and it uses neither L2 nor L1D as RAM (its code, data an
 `0xC7xxxxxx`). The original firmware's configuration under "Processor and memory" is set by its own start-up,
 not by the bootloader.
 
-**How the image reaches DDR (code reading, smpltrek).** The flash is read by EDMA, not by the CPU: receive on
+**How the image reaches DDR (code reading, smpltrek-re).** The flash is read by EDMA, not by the CPU: receive on
 event 14 from SPIBUF, transmit on event 15 into SPIDAT1, SPIINT0 DMAREQEN, completion interrupt on the receive
 channel; the SPI driver does no cache maintenance. So the system image is written to DDR without passing through
 the CPU's caches, and with no L2 cache at the jump nothing of it is held in L2: Enaga's image is in DDR when it
@@ -80,7 +85,7 @@ the measured state.
   verifies it and asks for a restart.
 - **Recovery:** the same procedure with an official SmplTrek system update restores the original firmware.
   Because Enaga never touches the bootloader or the sound content in flash, that one step is enough.
-- **Lofi-12 XT and CyDrums:** the same board (smpltrek README: C6748 mezzanine, panel MCU, key matrix; panels
+- **Lofi-12 XT and CyDrums:** the same board (smpltrek-re README: C6748 mezzanine, panel MCU, key matrix; panels
   physically the same, printed differently). Their update files differ in the family word (SmplTrek 5,
   Lofi-12 XT 12, CyDrums 8), the two CRC seeds and the name on the card (`Lofi-12 XT.bin`, `CyDrums.bin`);
   `tools/sysimage.py` holds them, checked against the official Lofi-12 XT 1.2.179 / 1.5.205 and CyDrums 1.1.84
@@ -88,14 +93,14 @@ the measured state.
   power). **Never installed on either.** Unknown until one is: what their bootloaders (not dumped) leave set up
   (PLL and DDR clocks, cache, where the bootloader itself sits; Enaga loads at `0xC0000000`), whether their panel
   MCU firmware scales pads the same way (the stock code drives the same audio pins on all three, below).
-- **Hardware use is the same in every product** (smpltrek platform-map.md "Hardware use per product", XF-20 to
+- **Hardware use is the same in every product** (smpltrek-re `docs/01-platform-map.md` "Hardware use per product", XF-20 to
   XF-25, all 13 stock releases): no release of any of the three uses a pin, codec register, panel command or
   peripheral beyond what SmplTrek 3.2.174 uses. GP3[8] is the only jack detect, with no input or line-out
   detection anywhere; the headphone / speaker split is mechanical. Differences are product code: the block size
   (Lofi and CyDrums 48 frames against 64), the input-source model, pad pressure (Lofi), and AUTO POWER OFF's
   first step (20 min in Lofi and CyDrums 2.0.97).
 - **Which device Enaga runs on:** each bootloader opens its update file by name, so the name is a constant string
-  in it. BOOT 1.0.17 is still in DDR at the hand-over, with `SmplTrek.bin` at `0xC70A8BA0` (smpltrek flash dump,
+  in it. BOOT 1.0.17 is still in DDR at the hand-over, with `SmplTrek.bin` at `0xC70A8BA0` (smpltrek-re flash dump,
   section loaded at `0xC70A6BC0`; in flash at boot-area offset `0x345E0`). Enaga looks for the three names in
   `0xC7000000`-`0xC7200000` before it loads an app (`firmware/kernel/device.c`). The family word is not a stored
   value there: the parser compares it as an immediate (`cmpeq 5,b4,b0` at `0xC7090CEC`), so it can't simply be
@@ -137,8 +142,8 @@ number = row x 8 + column, forming a 48-bit switch word:
 
 Bits 5-7 and 10-15 have no switch. Enaga names the 2 x 4 function block left of OK / CLR F1-F8 in reading
 order, because its printed labels differ between products on the same panel (SmplTrek labels in brackets above;
-Lofi-12 XT and CyDrums print PTN, COPY, PAD, REC, Play, MIX, MUTE there, see smpltrek
-`sdk/docs/cross-flash-button-map.md`):
+Lofi-12 XT and CyDrums print PTN, COPY, PAD, REC, Play, MIX, MUTE there, see smpltrek-re
+`docs/10-cross-flash-button-map.md`):
 
 | | 1st | 2nd | 3rd | 4th |
 |---|---|---|---|---|
@@ -148,8 +153,8 @@ Lofi-12 XT and CyDrums print PTN, COPY, PAD, REC, Play, MIX, MUTE there, see smp
 F1 is func on all three products, and F4 is the key the SmplTrek bootloader tests for BOOT MODE. The names come from the original firmware's factory test page, which
 draws the panel and fills in each button whose bit is set, matched to the manual's layout; they are still
 to be confirmed key by key on a unit. The switches are not debounced in hardware. Bounce was measured on STEP 1
-only (smpltrek session M1: 20 presses sampled every 10 µs): presses gave one edge, releases up to 7 edges over
-175 µs, the longest settle time 784 µs, no glitches; a two-sample release filter at 6 ms is ample. Enaga follows the original firmware (`hal/keys.c`; smpltrek claim HW-51): each key is sampled every
+only (smpltrek-re session M1: 20 presses sampled every 10 µs): presses gave one edge, releases up to 7 edges over
+175 µs, the longest settle time 784 µs, no glitches; a two-sample release filter at 6 ms is ample. Enaga follows the original firmware (`hal/keys.c`; smpltrek-re claim HW-51): each key is sampled every
 6 ms, a press is taken on the first closed sample and a release on the second consecutive open one, so a
 one-sample opening while a key is held is ignored. The original filters releases so only for bits 0-31; its
 STEP keys release on the first open sample, so a one-sample opening gives a release and a new press. Enaga
@@ -165,7 +170,7 @@ count per detent.
 
 A separate microcontroller scans the 15 pressure pads and the battery voltage and drives the LEDs. It talks
 to the DSP over **UART1** at 465,000 baud, 8N1 (186 MHz / 16 / 25). The MCU sends continuously, touched or
-not: about 4,192 `Bn` messages a second, all 16 channels at about 262 each, every 3.69-3.97 ms (smpltrek session
+not: about 4,192 `Bn` messages a second, all 16 channels at about 262 each, every 3.69-3.97 ms (smpltrek-re session
 M1, measured). That is about 12,600 bytes a second, so the 16-byte receive FIFO fills in about 1.3 ms; M1's
 image, which polled, lost bytes to FIFO overruns. Enaga takes them by the receive interrupt (CPU interrupt 6 <-
 event 46) into a ring that the main loop parses, and the interrupt may nest in the app's audio callback;
@@ -187,17 +192,17 @@ from session 1's readings; the release threshold is still provisional.
 
 The 15 pads sit in two staggered rows, 7 above (TRK 1-7) and 8 below (TRK 8-10, GLOBAL 1-3, USB AUDIO, EXT SRC),
 and their channels run left to right alternating lower and upper row: even channels 0-14 are the lower row,
-odd channels 1-13 the upper (smpltrek session D1; the positions come from the panel drawings). The rows lie like
+odd channels 1-13 the upper (smpltrek-re session D1, `D1-hello.md`; the positions come from the panel drawings). The rows lie like
 a piano's white and black keys, which the synth example uses: lower row C to C, upper row C#, D#, -, F#, G#, A#, -.
 
 ### LED map
 
-From the original firmware (the smpltrek notes, `sdk/docs/hardware-access.md` "Panel LEDs"; the graded table of
-all 144 addresses is printed by `sdk/analysis/led_table.py` there). It drives 115 addresses; the other 29 are
+From the original firmware (smpltrek-re `docs/04-hardware-access.md` "Panel LEDs"; the graded table of
+all 144 addresses is printed by `analysis/led_table.py` there). It drives 115 addresses; the other 29 are
 never written, by it or by Enaga: (0,0,6-7), (1,0,6-7), (2,0,6-7), (0,1,7), (1,1,7), (2,1,7) and (2,3,0) to
 (2,5,3). Confirmation on a unit, per LED: **device** = every channel's address seen lighting it; **partly** =
-the LED seen on one channel, the others inferred; **static** = from the code only. Unit session L1 (planned in
-smpltrek) is to check the rest and the brightness steps.
+the LED seen on one channel, the others inferred; **static** = from the code only. smpltrek-re's session L1, planned
+to check the rest and the brightness steps, has not been run.
 
 Pads, indexed by MCU pad channel (the id of a pad event); red, green and blue are v1, v2 and v3 of the original
 firmware's `pad_rgb_set`:
@@ -297,17 +302,17 @@ the block. Details in docs/design.md, "First unit session: results".
   the finished ping-pong buffer is the one the channel's PaRAM set does not point into (SRC for transmit,
   DST for receive), not the parity of a completion count. That rests on the EDMA3 documentation (the link
   reload happens when the last transfer request is issued, before IPR is set); **code reading**, not checked
-  on a unit. Found in smpltrek's bring-up firmware (commit cdd968f), where a 7 ms display frame let 96 blocks
+  on a unit. Found in an early bring-up firmware of the smpltrek-re project (not in its published repository), where a 7 ms display frame let 96 blocks
   complete against 77 counted.
 - **Channels:** with the original firmware's one-word-short first transfer, even buffer words land in slot
-  1, the **left** channel: confirmed by ear on headphones (smpltrek session M1, image 0.3.1, which uses the same
+  1, the **left** channel: confirmed by ear on headphones (smpltrek-re session M1, image 0.3.1, which uses the same
   scheme with 256-word buffers): even words left only, odd words right only, both at the same level. The receive
   side follows the same order (INPUT L in IN L, INPUT R in IN R: Enaga session 1); the line outputs are not yet
   checked. With nothing connected, 0.3.1's input peak sat around 2 in 32,768.
 - **Speaker:** plays with GP2[8] (speaker mute) driven low and headphones unplugged (M1). Enaga releases it unless
   the SPEAKER setting is OFF or the app mutes it (docs/design.md "Settings"). Headphones cut it in hardware (unit
-  session 3, E3 check; no code involved, as smpltrek HW-15 inferred). GP3[8] is the only jack-sensing input the stock
-  firmware reads (smpltrek hardware-access.md); it mixes the input into the monitor only while GP3[8] reads high,
+  session 3, E3 check; no code involved, as smpltrek-re HW-15 inferred). GP3[8] is the only jack-sensing input the stock
+  firmware reads (smpltrek-re `docs/04-hardware-access.md`); it mixes the input into the monitor only while GP3[8] reads high,
   i.e. with headphones in, which keeps the speaker from feeding back.
 - **Audio GPIOs:**
 
@@ -330,8 +335,8 @@ the block. Details in docs/design.md, "First unit session: results".
 for identification, then 23 MHz with a 4-bit bus. SDSC and SDHC cards are handled (`hal/mmcsd.c`).
 MMCST0 clears on read, and an error (TOUTRD, TOUTRS, CRCWR, CRCRD, CRCRS) can come in the same read as
 the DATDNE, DRRDY or DXRDY being waited for, so a data-phase wait fails when any error bit came with its flag;
-otherwise a write the card rejected looks like a success (found in smpltrek's bring-up firmware, commit
-cdd968f; the emulator injects no SD errors, so this path is untested).
+otherwise a write the card rejected looks like a success (found in an early bring-up firmware of the smpltrek-re project, not in its published
+repository; the emulator injects no SD errors, so this path is untested).
 
 **Writes without DMA (unit session 2):** put 64 bytes in the FIFO (write direction, 64-byte level) *before*
 CMD24, send CMD24 **without DCLR**, then 64 bytes at each DXRDY (waiting for MMCST1 FIFOEMP works too); Linux's

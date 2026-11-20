@@ -27,7 +27,7 @@ BOOT = 300_000_000          # past card, app load and audio start
 STEP1 = 32
 BLOCK_CYCLES = 64 * 372_000_000 // 48_000
 MS = 372_000
-CACHE_LOG = "CACHE 043 8F>444 FF"   # the bootloader's hand-over as measured (smpltrek M1), then after set-up
+CACHE_LOG = "CACHE 043 8F>444 FF"   # the bootloader's hand-over as measured (smpltrek-re session M1), then after set-up
 
 
 def samples(emu):
@@ -76,7 +76,7 @@ class E1(unittest.TestCase):
             self.assertGreater(report["oled"]["complete_frames"], 0)
 
     def test_cache_set_up_from_the_bootloaders_hand_over(self):
-        # BOOT 1.0.17's state at the jump, from smpltrek's static trace and simulation (docs/hardware.md "Boot").
+        # BOOT 1.0.17's state at the jump, from smpltrek-re's static trace and simulation (docs/hardware.md "Boot").
         cacheable = {17, 128, 192, 193, 194, 195, 199}
         with Emulation() as emu:
             put = lambda address, value: emu.cpu.write(address, value.to_bytes(4, "little"))
@@ -383,7 +383,7 @@ class E1(unittest.TestCase):
             pads = [line for line in emu.report()["log"] if line[:1] == "P"]
             self.assertEqual(pads[-1], "P12 1")
 
-    # Panel LED addresses (a, b, c), transcribed from the smpltrek notes (docs/hardware.md "Panel MCU"):
+    # Panel LED addresses (a, b, c), transcribed from the smpltrek-re notes (docs/hardware.md "Panel MCU"):
     # pads by MCU channel as (red, green, blue); STEP and button LEDs as their green address (red at c + 1).
     LED_PADS = [((2, 1, 5), (2, 1, 4), (2, 1, 6)), ((2, 1, 2), (2, 1, 1), (2, 1, 3)), ((0, 1, 5), (0, 1, 4), (0, 1, 6)),
                 ((0, 1, 2), (0, 1, 1), (0, 1, 3)), ((1, 1, 5), (1, 1, 4), (1, 1, 6)), ((1, 1, 2), (1, 1, 1), (1, 1, 3)),

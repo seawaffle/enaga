@@ -109,7 +109,7 @@ changed.
 
 The speaker, as in the original firmware: it plays unless the user has switched it off, the app has muted it
 (`speaker(false)`, e.g. while monitoring the built-in microphone, where the original firmware mutes it against
-feedback), or headphones are plugged in, which cuts it in hardware (a switched jack: smpltrek HW-15, confirmed on
+feedback), or headphones are plugged in, which cuts it in hardware (a switched jack: smpltrek-re HW-15, confirmed on
 the unit in session 3). Switching it fades the output around the change. Apps can read whether headphones are plugged in
 (`headphones()`, GP3[8]: 1 with a plug in PHONES, unaffected by the other jacks, confirmed on the unit); the
 status page shows it as `H`.
@@ -200,7 +200,7 @@ Proposal, grouped by service. Names are illustrative until each service exists.
   changes. The emulator is a separate open-source project (README.md, "Testing without a unit").
 - Release hygiene: Enaga installs as a normal system update and never writes the bootloader; the original
   firmware can always be restored through BOOT MODE, documented prominently. No Sonicware code or branding.
-  Licence: **open** (Apache-2.0 or MIT; FatFs's BSD-style licence fits either).
+  Licence: MIT (decided 2026-11-20; FatFs's BSD-style licence fits it).
 
 ## Files (E2 design, 2026-11-18)
 
@@ -350,7 +350,7 @@ The other two are untested. Next is E4 (open items: input selection, pad pressur
 - Input selection for apps (E4). Model it on Lofi-12 XT and CyDrums: a (source, level) pair, sources built-in mic,
   Hi-Z L, dynamic mic R, stereo line, mono line (USB and resample later), levels 0-2, which maps one-to-one onto
   the SmplTrek's REC SRC routes: codec routing plus the pins GP1[2] (mic switch), GP7[14] / GP7[15] (INPUT L front
-  end, +10 dB), GP5[11] (INPUT R mic stage) and GP1[3] (line pad). Table: smpltrek `sdk/docs/platform-map.md`
+  end, +10 dB), GP5[11] (INPUT R mic stage) and GP1[3] (line pad). Table: smpltrek-re `docs/01-platform-map.md`
   "Hardware use per product", Audio (XF-21). Keep the stock rule in Enaga, not in apps: the built-in mic is used
   or monitored only while headphones are in (GP3[8] high), in every product, against speaker feedback. The pin
   roles come from the stock code and still want a unit check per route.
@@ -364,13 +364,13 @@ The other two are untested. Next is E4 (open items: input selection, pad pressur
   2 PPQN with a 15 ms pulse.
 - Whether AUTO OFF should apply on USB power too (it does now; `power_on_batteries` could limit it).
 - On the unit: power-key bounce; bounce of keys other than STEP 1 (STEP 1 settles within 784 µs,
-  smpltrek session M1, well inside the 6 ms sampling and two-sample release).
+  smpltrek-re session M1, well inside the 6 ms sampling and two-sample release).
 - LED map: 53 addresses known only from the code, 24 seen on another channel of their LED (docs/hardware.md
-  "LED map"; smpltrek session L1); the level-to-brightness steps. Whether the unit has a hardware MIDI port;
+  "LED map"; smpltrek-re session L1); the level-to-brightness steps. Whether the unit has a hardware MIDI port;
   left/right on the line outputs (headphones confirmed in M1, the inputs in session 1).
 - The L2 split between cache and RAM.
 - The SDK should give apps unaligned-safe load/store helpers for packed formats (misaligned LDW/STW/LDDW round
-  the address down without a fault) and say that a null read returns garbage rather than trapping (smpltrek
+  the address down without a fault) and say that a null read returns garbage rather than trapping (smpltrek-re
   session M1; docs/hardware.md "Processor and memory"). A debug-build null check is worth considering.
 - Pad velocity (session 1 found none): now the higher of the first two reports over the PADS threshold, 127 at 3,300 (light
   press about 1,500, hard about 3,400 on the unit). To check by playing on a unit; recorded press curves would
@@ -400,9 +400,12 @@ The other two are untested. Next is E4 (open items: input selection, pad pressur
 - Interrupt stack gap (firmware/start.s): GCC code is held to 16 KiB frames by the build; libgcc (prebuilt, small
   frames) and cl6x-built code are not checked. cl6x is not known to release frames early. An app that needs a
   bigger local array puts it in a static or on the heap.
-- Licence.
 
 ## Development log
+
+Entries name the SmplTrek reverse-engineering project, now published as [smpltrek-re](https://github.com/seawaffle/smpltrek-re), as "smpltrek-re".
+Its commits and working-tree states cited here (bcce9b3, cdd968f, "not yet committed") are from its history
+before publication, which the public repository does not contain.
 
 ### E0 (2026-11-15)
 
@@ -471,7 +474,7 @@ The other two are untested. Next is E4 (open items: input selection, pad pressur
 
 ### E1 key debouncing (2026-11-15)
 
-- `hal/keys.c` `keys_poll` follows the original firmware's timing (smpltrek claim HW-51, "Key timing and
+- `hal/keys.c` `keys_poll` follows the original firmware's timing (smpltrek-re claim HW-51, "Key timing and
   debounce"): the matrix is sampled every 6 ms, the spacing at which the original samples each key; a press is
   taken on the first closed sample (0-6 ms), a release on the second consecutive open sample (6-12 ms), so a
   one-sample opening while a key is held is ignored. The original applies that release filter only to bits 0-31,
@@ -490,7 +493,7 @@ The other two are untested. Next is E4 (open items: input selection, pad pressur
 
 ### Panel LED API (2026-11-15)
 
-- The LED map from the smpltrek notes (`sdk/docs/hardware-access.md` "Panel LEDs", `led_table.py`), restated in
+- The LED map from the smpltrek-re notes (`docs/04-hardware-access.md` "Panel LEDs", `analysis/led_table.py`), restated in
   docs/hardware.md "LED map" with each LED's confirmation on a unit. ABI: `enaga_led` numbers (pads by MCU
   channel; VOL L, VOL R, microphone, VALUE; every key with an LED as `ENAGA_LED_KEY` + its `enaga_key`) and one
   host function, `led(led, red, green, blue)`; a colour an LED lacks is ignored and levels are clamped to 10.
@@ -505,18 +508,18 @@ The other two are untested. Next is E4 (open items: input selection, pad pressur
   `led_table.py`, compares all 144 addresses after each step; clamping, the ignored audio-context call and the
   switch-off on a drop are checked too.
 - GCC compiled the brightest-of-three into `MAXU4`, which the emulator lacked; MAXU4 and MINU4 were added there
-  with a test (smpltrek working tree, not yet committed). The C++20 header needed `int(ENAGA_LED_KEY)`, since
+  with a test (smpltrek-re working tree, not yet committed). The C++20 header needed `int(ENAGA_LED_KEY)`, since
   arithmetic between two enum types is deprecated.
 
 ### E1 cache configuration (2026-11-15)
 
-- Enaga had relied on the bootloader having configured the caches. smpltrek's trace and simulation of BOOT 1.0.17
+- Enaga had relied on the bootloader having configured the caches. smpltrek-re's trace and simulation of BOOT 1.0.17
   (docs/hardware.md "Boot") show otherwise: it leaves L2 all RAM, L1D half cache, MAR 196-198 (48 MiB of the app
   heap) uncached, and does no cache maintenance before branching. The original firmware's configuration comes
   from its own SYS/BIOS start-up.
 - The first instructions of `start.s` record the cache registers (into `.data`, since bss is cleared later), write
   back and invalidate L1D and invalidate L1P, so nothing cached from before the jump is relied on. The image
-  itself is in DDR at entry: smpltrek's code reading shows the bootloader reads flash by EDMA, behind the caches,
+  itself is in DDR at entry: smpltrek-re's code reading shows the bootloader reads flash by EDMA, behind the caches,
   with no L2 cache (docs/hardware.md "Boot").
 - `cache_setup()` (`hal/cache.c`), right after bss is cleared: L1D and L2 written back again, L2, L1P and L1D all
   cache (mode 4 each, read back), and every writable MAR (16-255) set: cacheable for DDR only. L1D is all cache
@@ -560,7 +563,7 @@ The other two are untested. Next is E4 (open items: input selection, pad pressur
 
 ### SD error flags and merged audio completions (2026-11-16)
 
-Two bugs reported from smpltrek's bring-up firmware (commit cdd968f) had the same pattern in Enaga.
+Two bugs reported from smpltrek-re's bring-up firmware (commit cdd968f) had the same pattern in Enaga.
 - `hal/mmcsd.c`: the data-phase waits checked only the wanted flag, so a CRC error or time-out in the same
   MMCST0 read as DATDNE, DRRDY or DXRDY passed. They now fail on any error bit (`data_ok`). The emulator
   cannot inject SD errors, so this is a code fix without a test.
@@ -573,12 +576,12 @@ Two bugs reported from smpltrek's bring-up firmware (commit cdd968f) had the sam
   played block came out half old, half new.
 - Enaga's audio runs from the completion interrupt, not a poll, so merging needs interrupts held off for more
   than a block (a callback overrunning, or a long section with GIE clear); the PaRAM choice holds either way.
-  The smpltrek note about reading EDMA registers before its power module is on does not apply: the interrupt
+  The smpltrek-re note about reading EDMA registers before its power module is on does not apply: the interrupt
   is enabled only after audio set-up.
 
 ### Session M1 results (2026-11-16)
 
-smpltrek's bench session M1 measured on the unit what Enaga had assumed (docs/hardware.md now marks each
+smpltrek-re's bench session M1 measured on the unit what Enaga had assumed (docs/hardware.md now marks each
 as measured):
 - The bootloader's cache hand-over matches the simulation, so the unit check's `CACHE 043 8F>444 FF` stands.
 - STEP 1 bounces for at most 784 µs: the 6 ms two-sample release filter is ample.
@@ -632,9 +635,9 @@ pad layout and a new STEP velocity).
 The rework crashed the synth on the emulator: a value bar's fill ran 22 KB past the canvas and wiped kernel
 data. Traced to the emulator, not Enaga or GCC: libgcc's `__c6xabi_divi` issues `[a1] addkpc ..., b3, 4` in the
 delay slots of its call to `__c6xabi_divu`, relying on ADDKPC's NOP cycles happening even when the predicate is
-false (as BNOP's do). The emulator (smpltrek bcce9b3, `core/core.cpp`) drops them for a false predicate, so with
+false (as BNOP's do). The emulator (smpltrek-re bcce9b3, `core/core.cpp`) drops them for a false predicate, so with
 both operands non-negative divi falls into the next packet's `b b5` and returns twice; the caller's loop then
-runs with two branches in flight. smpltrek's emulator now has the two-line fix (in its working tree after
+runs with two branches in flight. smpltrek-re's emulator now has the two-line fix (in its working tree after
 bcce9b3, not yet committed there), and all 31 tests pass against it; emulators without it fail `test_synth.py`.
 
 ### cl6x for apps' inner loops (2026-11-17)
@@ -757,7 +760,7 @@ A four-way interleave for GCC and -O3 did not help. 32 tests pass.
 
 ### No float division in the library's C code; the emulator agent's GCC notes (2026-11-17)
 
-From smpltrek's emulator work: GCC 13.3 for tic6x divides floats by a reciprocal estimate (RCPSP, refined
+From smpltrek-re's emulator work: GCC 13.3 for tic6x divides floats by a reciprocal estimate (RCPSP, refined
 twice), not exactly, so its quotients can be a unit in the last place off the host's, and cl6x's exact
 `__c6xabi_divf`; the estimate's bits are not yet checked on hardware either. `-fno-reciprocal-math` would make
 GCC exact at a cost. The library's C code (built by either compiler) no longer divides: the biquad design, the
@@ -767,7 +770,7 @@ division helper (only `__c6xabi_fixfu`, an exact conversion). Apps' own C++ stil
 both builds. The same note: `_smpyh`, `_smpyhl` and `_smpylh` from GCC's `c6x_intrinsics.h` emit plain SMPY
 (wrong halves); Enaga uses none, and should write half selection in C, `(x >> 16) * (y >> 16)`. And the emulator
 gains about 30 instructions GCC can emit (MPYH and family, saturating arithmetic, the packed ADD2 / SUB2 / ADD4 /
-MAX2 / SWAP4) in smpltrek's working tree, not yet committed: rebuild the emulator and rerun the tests after that
+MAX2 / SWAP4) in smpltrek-re's working tree, not yet committed: rebuild the emulator and rerun the tests after that
 commit. 32 tests pass.
 
 ### Synth: chorus, unison, hard sync, ring modulation, LFO fade-in (2026-11-17)
@@ -815,13 +818,13 @@ the first, branchy sync loop took cl6x to 35 %). 34 tests pass.
 ### GPIO enabled at start-up; a GCC stack hazard under interrupts (2026-11-17)
 
 Enaga now enables GPIO (PSC1 module 3) itself, before the power hold, as the original firmware's board set-up
-does. The bootloader leaves it on (smpltrek's own firmware, which never enables it, drove the power hold and
+does. The bootloader leaves it on (smpltrek-re's own firmware, which never enables it, drove the power hold and
 read keys on a unit in session M1), so on a unit nothing changes; it lets Enaga start from the power-on state the
 emulator's panel (`stock_ui.py`) uses, so the panel runs Enaga with no wrapper:
 `stock_ui.py --firmware build/firmware/ENAGA_0_1_0.bin --card <card with /ENAGA/APPS/...>`. It runs at about
 0.5-0.6x real time on the development host, so its sound breaks up.
 
-The smpltrek emulator work found that tic6x GCC 13.3 at -O2/-O3/-Os can raise SP (release the frame) a few
+The smpltrek-re emulator work found that tic6x GCC 13.3 at -O2/-O3/-Os can raise SP (release the frame) a few
 cycles before a function's last reads of a local array; an interrupt there, pushing onto the interrupted stack,
 overwrites the array. Reproduced in Enaga: `tests/apps/stack` calls such a function (`addk 72, b15` in the same
 packet as the last store, two loads after) 2 million times under audio interrupts: 6 wrong results. Their
@@ -848,7 +851,7 @@ power draw. `update` is no longer called flat out: background work in it gets at
 ### tools/panel.py (2026-11-17)
 
 `tools/panel.py [app_dir ...] [-- panel options]` builds the firmware and apps (examples/synth by default), writes
-them to a fresh 64 MiB card image and starts the smpltrek emulator's web panel (`stock_ui.py`) on Enaga's update
+them to a fresh 64 MiB card image and starts the smpltrek-re emulator's web panel (`stock_ui.py`) on Enaga's update
 file, so apps can be played live with the display, controls and sound. Panel options go after `--` (some take
 paths, so they can't be told from app directories otherwise). Tried with the synth and the tone app.
 
@@ -1182,7 +1185,7 @@ it (open items).
 
 The three devices are one board, so one firmware image serves all of them; only the update container differs
 (family word, two CRC seeds, the file name on the card). `tools/sysimage.py` gained a device table (values from
-smpltrek's `tools/palette_swap.py`), and `firmware/build.py` writes `build/firmware/<device>/<card name>` for
+smpltrek-re's `tools/palette_swap.py`), and `firmware/build.py` writes `build/firmware/<device>/<card name>` for
 each, plus `ENAGA_<version>.bin` (the SmplTrek's, byte-identical to before: image 63a110a1 either way).
 The family words and both CRCs were checked against the official Lofi-12 XT 1.2.179 / 1.5.205 and CyDrums 1.1.84
 files. `tests/test_sysimage.py` (host) pins the SmplTrek bytes and checks each file verifies only as its own

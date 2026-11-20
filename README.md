@@ -11,7 +11,8 @@ card, the synth example and the Enaga menu with app switching have all run on a 
 docs/hardware.md "Checks on a unit"); everything is also tested on an emulator. The app interface
 (`include/enaga/abi.h`) is provisional until 1.0.
 The app interface is documented in [docs/api.md](docs/api.md); the design and plan are in
-[docs/design.md](docs/design.md); the hardware facts Enaga relies on are in [docs/hardware.md](docs/hardware.md).
+[docs/design.md](docs/design.md); the hardware facts Enaga relies on are in [docs/hardware.md](docs/hardware.md),
+most of them established by [smpltrek-re](https://github.com/seawaffle/smpltrek-re).
 
 ## Writing an app
 
@@ -140,11 +141,12 @@ recovery".
 ## Testing without a unit
 
 Enaga's tests and `tools/emulate.py` run the real firmware and apps on the **SmplTrek emulator**, a
-cycle-level C674x and board emulator published as part of the separate SmplTrek reverse-engineering
-project. Point `ENAGA_EMULATOR` at its emulator directory (the one containing `cpu.py`):
+cycle-level C674x and board emulator from the separate SmplTrek reverse-engineering project,
+[smpltrek-re](https://github.com/seawaffle/smpltrek-re). Clone it and point `ENAGA_EMULATOR` at its `emulator/`
+directory (the one containing `cpu.py`); it builds its core into its own `work/` folder on first use:
 
 ```sh
-export ENAGA_EMULATOR=/path/to/emulator
+export ENAGA_EMULATOR=/path/to/smpltrek-re/emulator
 python3 -B -m unittest discover -s tests -v                           # 54 tests, about 5 minutes
 python3 -B tools/emulate.py examples/tone --key 32@300000000           # press STEP 1; writes build/emulate/
 ```
@@ -184,5 +186,6 @@ only `g++`, and `test_sysimage.py` and `test_api_docs.py` need nothing. `tools/e
 
 ## Licence
 
-Not yet chosen (see docs/design.md). FatFs (`firmware/third_party/fatfs`) is © ChaN under its own BSD-style
-licence. Enaga contains no Sonicware code.
+Enaga is released under the [MIT licence](LICENSE). FatFs (`firmware/third_party/fatfs`) is © ChaN under its own
+BSD-style licence. `tools/patches/` holds a patch to GNU binutils, which falls under binutils' own licence (GPL).
+Enaga contains no Sonicware code.

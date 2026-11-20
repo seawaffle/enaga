@@ -101,7 +101,7 @@ def turn(emu, encoder, detents):
 
 
 def mcu_traffic(emu, ms, pressed=None):
-    """The panel MCU's continuous stream: every channel in turn, 4,192 messages a second (smpltrek M1)."""
+    """The panel MCU's continuous stream: every channel in turn, 4,192 messages a second (smpltrek-re session M1)."""
     pressed = pressed or {}
     for i in range(ms * 4192 // 1000):
         channel = i % 16

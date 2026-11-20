@@ -10,7 +10,7 @@
 ; 16 KiB below the interrupted stack pointer. GCC 13.3 at -O2 can release a function's frame (raise SP) a few
 ; cycles before the function's last reads of a local array in it (tests/apps/stack); an interrupt there would
 ; write over the array. Building GCC code with -Werror=frame-larger-than=16384 (no VLAs or alloca) keeps every
-; frame inside the gap. Found by the smpltrek emulator work, 2026-11-17.
+; frame inside the gap. Found by the smpltrek-re emulator work, 2026-11-17.
 ;
 ; Each maskable vector then pushes B0/B1, loads the interrupt number into B1 and branches to isr_common, which
 ; saves every register the C calling convention lets enaga_irq clobber (A0-A9, A16-A31, B0-B9, B16-B31) plus

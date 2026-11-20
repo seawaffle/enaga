@@ -17,9 +17,9 @@ padded to at least 4 KiB (the updater checks the first 4 KiB of flash as one blo
 import struct
 import zlib
 
-# The SmplTrek, Lofi-12 XT and CyDrums are one board (smpltrek README). Their update files differ only in the
+# The SmplTrek, Lofi-12 XT and CyDrums are one board (smpltrek-re README). Their update files differ only in the
 # family word, the two CRC seeds and the file name the bootloader looks for at the card's root. Family words and
-# seeds from the smpltrek project (tools/palette_swap.py DEVICES): validated against 8 SmplTrek, 3 Lofi-12 XT and 2
+# seeds from the smpltrek-re project (its tools/palette_swap.py): validated against 8 SmplTrek, 3 Lofi-12 XT and 2
 # CyDrums official releases. Only the SmplTrek has installed a file made this way.
 DEVICES = {
     "smpltrek": {"label": "SmplTrek", "family": 5, "cmtd": 0x6D2DCD30, "mmtd": 0x1FC67D2F, "card_name": "SmplTrek.bin"},

@@ -4,7 +4,7 @@
  * PINMUX4 nibbles 6 and 7 = UART1 RXD/TXD, MDR = 0 (16x), DLL = 25, DLH = 0 (186 MHz / 16 / 25 = 465,000),
  * LCR = 3 (8N1), FCR = 7 then 1 (FIFOs reset, trigger 1), then the two enables PWREMU_MGMT = 0x2001 and
  * 0x6001. The MCU sends all 16 analogue channels continuously, about 4,200 messages (12,600 bytes) a second
- * whether or not a pad is touched (smpltrek session M1, measured), so the 16-byte FIFO fills in about 1.3 ms.
+ * whether or not a pad is touched (smpltrek-re session M1, measured), so the 16-byte FIFO fills in about 1.3 ms.
  * Start-up polls; from uart1_irq_start on, the receive interrupt (IER = 1, trigger level 1) moves every byte
  * into a ring that uart1_poll parses in the main loop. The original firmware also takes receive interrupts. */
 #define UART_RBR  0x00
