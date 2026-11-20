@@ -21,7 +21,7 @@
  *
  * Speaker: GP2[8] (active-high mute) is released when the SPEAKER setting is ON and the app has not muted it
  * (audio_speaker_apply). Plugging in headphones cuts the speaker in hardware, as in the original firmware (a
- * switched jack: smpltrek HW-15, an inference to confirm on the unit). Switching it fades the output around it.
+ * switched jack: smpltrek HW-15, confirmed on the unit in session 3). Switching it fades the output around it.
  *
  * Cost accounting: cycles from interrupt entry to exit per block (audio_cycles_last/peak) against
  * AUDIO_BUDGET_CYCLES; a block that took longer than its budget counts as an overrun. */

@@ -109,8 +109,8 @@ changed.
 
 The speaker, as in the original firmware: it plays unless the user has switched it off, the app has muted it
 (`speaker(false)`, e.g. while monitoring the built-in microphone, where the original firmware mutes it against
-feedback), or headphones are plugged in, which cuts it in hardware (a switched jack: smpltrek HW-15, to confirm on
-the unit). Switching it fades the output around the change. Apps can read whether headphones are plugged in
+feedback), or headphones are plugged in, which cuts it in hardware (a switched jack: smpltrek HW-15, confirmed on
+the unit in session 3). Switching it fades the output around the change. Apps can read whether headphones are plugged in
 (`headphones()`, GP3[8]: 1 with a plug in PHONES, unaffected by the other jacks, confirmed on the unit); the
 status page shows it as `H`.
 
@@ -123,7 +123,7 @@ DDR is 128 MiB at `0xC0000000`-`0xC7FFFFFF` (hardware.md "Memory").
 
 | Region | Size | Owner |
 |---|---|---|
-| Enaga code, data, stacks, DMA rings | 4 MiB at `0xC0000000`; 0.1.0 uses about 80 KB plus a 256 KB stack | Enaga |
+| Enaga code, data, stacks, DMA rings | 4 MiB at `0xC0000000`; 0.1.0 uses about 190 KB plus a 256 KB stack | Enaga |
 | App image (code, data, bss) | from `ENAGA_APP_BASE` = `0xC0400000`, as large as the app | app |
 | App heap | from the end of the image, rounded up to 4 KiB, to the end of DDR (`ENAGA_APP_LIMIT` = `0xC8000000`) | app (`new`, `malloc`, samples) |
 | L1P, L1D, L2 | all cache since E1 (Enaga sets it at start-up); part of L2 as RAM for audio-critical code and buffers stays **open** | to be measured on the unit |
@@ -134,7 +134,8 @@ app's directory. Enaga never writes the original sound content in the unit's SPI
 original firmware stays a single system update.
 
 The bootloader runs from `0xC7020000`-`0xC70B0000` only while it loads Enaga; apps are loaded by Enaga after
-the hand-over, so that range is ordinary app heap afterwards.
+the hand-over, so that range is ordinary app heap afterwards. Enaga reads it once at start-up, before any app,
+to tell which device it runs on (`kernel/device.c`; the log, "Update files for the Lofi-12 XT and CyDrums").
 
 ## What a developer gets (the 1.0 API surface)
 
@@ -166,11 +167,11 @@ Proposal, grouped by service. Names are illustrative until each service exists.
 ## Enaga itself
 
 - **Drivers:** McASP/EDMA, the codec over I2C, the OLED over SPI with frame DMA, key matrix, encoders, the
-  panel MCU link (UART), MMCSD, timers, power; SPI flash for settings and USB0 later.
+  panel MCU link (UART), MMCSD, timers, power; USB0 later. (Settings went to the card, not the SPI flash.)
 - **Services:** audio engine, event queue, asynchronous I/O, streaming, settings, launcher/menu, watchdog,
   exception handling (crash screen, return to menu).
 - **Enaga menu:** app list (name, icon), switch app, system settings (volume, pad sensitivity, MIDI channel,
-  brightness, auto-off), Diagnostics (keys, encoders, pads, LEDs, audio routing, card), CPU load, versions.
+  brightness, auto-off, speaker; built in E3 but for icons and MIDI channel), Diagnostics (keys, encoders, pads, LEDs, audio routing, card), CPU load, versions.
 - **No isolation guarantee:** the C6748 has no MMU. Apps are native code with full machine access; the goal
   is clean recovery (watchdog, exception handler, crash-loop protection), not sandboxing. Users are told so.
 
@@ -205,7 +206,7 @@ Proposal, grouped by service. Names are illustrative until each service exists.
 What E2's file service looks like to an app, and how Enaga runs it. The owner decided the write area, blocking
 calls and exFAT on 2026-11-18 (marked **decided**); the rest is the proposal they accepted.
 
-### What exists
+### What existed before E2
 
 FatFs (R0.15a, read-write, 8.3 names only, no exFAT, no clock) over `hal/mmcsd.c`: polled, one 512-byte block per
 command, 4-bit bus at 23 MHz, the CPU copying every word. Only the app loader uses it, in 32 KiB `f_read` calls
@@ -226,7 +227,9 @@ completion interrupt, freeing the CPU during transfers; the API does not change.
 
 ### What an app sees
 
-C functions in the host table, wrapped by C++ classes (`enaga::File`, `enaga::Folder`, `enaga::files`):
+C functions in the host table, wrapped by C++ classes. As built (`include/enaga/files.hpp`): `files::read_all` and
+`files::save` are the blocking calls below, `files::load`, `files::list` and `files::File` the asynchronous ones,
+and `files::Stream` the streams; there is no `Folder` class. The plan as written:
 
 - **Handles, not FatFs objects.** Enaga keeps the open files in its own memory (an app cannot corrupt them),
   at most 8 at a time per app (**proposal**); everything still open is closed, and every pending request is
@@ -301,9 +304,9 @@ room for dozens of playback streams (192 KiB/s each for 16-bit stereo at 48 kHz)
 | Phase | Content | Exit |
 |---|---|---|
 | **E0** | C++ toolchain; app-side C++ runtime; package format; loader that runs constructors | a C++ app with globals, virtuals and `new` runs from a package (done) |
-| **E1** | Kernel: audio callback, display DMA, event loop, exception handling and watchdog, cache/L2 set-up | device load test: measured audio headroom with caches on |
-| **E2** | Audio API and DSP library, asynchronous file I/O, sample loading and streaming | one real instrument app |
-| **E3** | Enaga menu, boot policy, F1 escape, app switching, settings | switch between two apps repeatedly on the unit |
+| **E1** | Kernel: audio callback, display DMA, event loop, exception handling and watchdog, cache/L2 set-up | device load test: measured audio headroom with caches on (done) |
+| **E2** | Audio API and DSP library, asynchronous file I/O, sample loading and streaming | one real instrument app (done) |
+| **E3** | Enaga menu, boot policy, F1 escape, app switching, settings | switch between two apps repeatedly on the unit (done) |
 | **E4** | UI toolkit, MIDI, SDK packaging and documentation | an outside developer builds the template app from the docs |
 | **E5 / 1.0** | USB (mass storage, MIDI), API freeze, release | public release |
 
@@ -314,22 +317,26 @@ and cache configuration ran on a unit in the first session (2026-11-18, results 
 its exit measurement, audio headroom with caches on, is taken: Enaga's own share is about 3 % of the audio
 budget, a computed voice costs about 1,870 cycles a block and one reading samples from DDR about 2,600-2,700.
 
-E2 has begun, driven by its exit app: pads as press / release with velocity, the start of
-the DSP library (`include/enaga/dsp`, tested on the host), and `examples/synth`, an eight-voice virtual analogue
+E2 is complete: its exit app, `examples/synth`, runs on a unit and keeps its patches on the card. E2 brought pads
+as press / release with velocity, the DSP library (`include/enaga/dsp`, tested on the host), and `examples/synth`, an eight-voice virtual analogue
 synthesizer (emulator-tested; on the unit: 8 % idle, 24 % with eight notes). The library's block functions, and apps' own `*.ti.c` files, are built with TI's
 cl6x when it is installed (GCC otherwise); the synth's worst case is 30 % of the audio budget that way and 65 % with
-GCC alone (every feature on: sync, ring, chorus, eight voices). The file service's first step is in (the
+GCC alone (every feature on: sync, ring, chorus, eight voices). The file service is in (the
 "Files" section), and the synth saves patches with it; SD writes work on a unit (polled, FIFO primed before
 the command; hardware.md "SD card"); the CHECK app measured the card on a unit; streams (playback and recording
 from `audio()`) and WAV headers are in, with multi-block SD transfers (on a unit: reads 7,600 KiB/s, writes about 2,000).
 
-E3 is built on the emulator: the Enaga menu on F1 + POWER (and `open_menu`), F1 at power-on, the boot policy
+E3 is complete: the Enaga menu on F1 + POWER (and `open_menu`), F1 at power-on, the boot policy
 (last app, only app, or the menu) with a start-up record, switching apps without a reboot with a fade and a 3 s limit
-on `stop()`, display names, the SETTINGS page (volume, brightness, pad sensitivity, auto-off) in
+on `stop()`, display names, the SETTINGS page (volume, brightness, pad sensitivity, auto-off, speaker) in
 `/ENAGA/SETTINGS.TXT`, and apps' own settings (`<enaga/settings.hpp>`). On the unit (session 3, 2026-11-19) its
 exit passed: switching, the menu, the boot policy, volume, brightness, the speaker and headphone detect behave as
 expected. Session 4 found AUTO OFF working (session 3 saw it revert; not reproduced) and set the PADS steps
 by feel to 1,600 / 1,000 / 600. App icons are left for E4.
+
+Since E3: one image serves the SmplTrek, Lofi-12 XT and CyDrums (the same board), and the build writes an update
+file for each; Enaga tells which it runs on from the bootloader's file name, confirmed on a SmplTrek in session 4.
+The other two are untested. Next is E4 (open items: input selection, pad pressure, MIDI).
 
 ## Open items
 
@@ -354,15 +361,12 @@ by feel to 1,600 / 1,000 / 600. App icons are left for E4.
   sample unfiltered (MIDI Channel Pressure, a flood): copy Lofi's change filter, not that.
 - MIDI (E4): send Song Position Pointer before CONTINUE, as Lofi-12 XT does (XF-24). The family keeps SYNC at
   2 PPQN with a 15 ms pulse.
-- On the unit: BRIGHTNESS (the contrast command is the one start-up sends, at other levels; the steps' look is
-  unchecked); whether AUTO OFF should apply on USB power too (it does now; `power_on_batteries` could limit it).
-- On the unit: the bootloader passes control normally with F1 held (Enaga reads F1 when start-up ends);
-  power-key bounce; bounce of keys other than STEP 1 (STEP 1 settles within 784 µs,
+- Whether AUTO OFF should apply on USB power too (it does now; `power_on_batteries` could limit it).
+- On the unit: power-key bounce; bounce of keys other than STEP 1 (STEP 1 settles within 784 µs,
   smpltrek session M1, well inside the 6 ms sampling and two-sample release).
 - LED map: 53 addresses known only from the code, 24 seen on another channel of their LED (docs/hardware.md
   "LED map"; smpltrek session L1); the level-to-brightness steps. Whether the unit has a hardware MIDI port;
-  left/right on the line outputs and the inputs (headphones confirmed, M1); real audio CPU headroom with caches; the key names, confirmed key by key
-  on a unit.
+  left/right on the line outputs (headphones confirmed in M1, the inputs in session 1).
 - The L2 split between cache and RAM.
 - The SDK should give apps unaligned-safe load/store helpers for packed formats (misaligned LDW/STW/LDDW round
   the address down without a fault) and say that a null read returns garbage rather than trapping (smpltrek
@@ -376,7 +380,7 @@ by feel to 1,600 / 1,000 / 600. App icons are left for E4.
   with velocity (press at the PADS threshold, 1,000 at MEDIUM, release under 3/4 of it, velocity as above). Still open: the release threshold, per-pad
   calibration.
 - Synth on the unit: measured 8 % idle, 10 % one note, 24 % eight notes (INIT), 25 % SUPERSAW two notes (eight
-  voices), no dropouts; the worst case (30 % on the emulator) not yet measured there. Saving patches waits for the file API; edits last until the app stops.
+  voices), no dropouts; the worst case (30 % on the emulator) not yet measured there.
 - DSP library: the SVF runs at 21 cycles a sample under cl6x (its recurrence), twice a biquad's 10; a faster
   form is worth trying. The synth's modulation is 6.4 % of the budget with cl6x, most of it the scalar part
   (matrix 1.5 %, LFOs 1.1 %, envelopes 0.7 %); GCC compiles the math-buffer loops poorly (about 80 cycles an
@@ -1200,3 +1204,10 @@ after 5 minutes. Session 3's revert did not recur; the settings code is the same
 log lines, so its cause is unknown (open items). PADS: the user chose 1,600 / 1,000 / 600 (LOW / MEDIUM / HIGH)
 from 1,100 / 800 / 500, which made little difference; MEDIUM, the default, now presses at 1,000 rather than the
 original firmware's 800.
+
+### Documentation pass (2026-11-20)
+
+README, design.md and hardware.md checked against the code and the unit sessions. E2 and E3 marked complete in
+Phases and Status; open items settled in sessions 1 and 3 removed (key names, inputs L/R, headroom with caches,
+F1 at power-on, brightness, patch saving); Enaga's size corrected to about 190 KB; the Files plan notes the API
+as built; per-device build output and device detection noted where the build and memory are described.

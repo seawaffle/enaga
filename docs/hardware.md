@@ -73,7 +73,8 @@ the measured state.
 ## Installing and recovery
 
 - An update file is a `cmtd` container holding one `mmtd` system image (format and CRC seeds in
-  `tools/sysimage.py`); `firmware/build.py` produces `build/firmware/ENAGA_<version>.bin`.
+  `tools/sysimage.py`); `firmware/build.py` produces `build/firmware/<device>/<card name>` for each device and
+  `build/firmware/ENAGA_<version>.bin` (the SmplTrek's).
 - **Install:** copy the file to the root of the SD card named `SmplTrek.bin`, hold **F4** (printed HOME on a SmplTrek)
   while switching on to reach BOOT MODE, and choose SYSTEM UPDATE. The bootloader checks the file, writes it to flash,
   verifies it and asks for a restart.
@@ -275,7 +276,8 @@ be sent whole. Enaga sends frames by EDMA (events 18 and 19, SPI1 receive and tr
 At rest every pad reads 1-2; a light press about 1,500 and a hard one about 3,400 (of the 14-bit range). Pressing a
 pad raises some other pads' readings slightly (pad 0 -> 4, 1 -> 5, 4 -> 2; 2 and 3 none): not neighbours on the
 panel, so probably in the sensing or the MCU's inputs. Readings rise over several 3.8 ms reports, so the first
-report over a threshold says little about how hard the pad was hit.
+report over a threshold says little about how hard the pad was hit. Enaga's press thresholds (the PADS setting,
+1,600 / 1,000 / 600) were set by feel in session 4.
 
 ## Audio load with caches (measured, Enaga session 1)
 
@@ -299,9 +301,9 @@ the block. Details in docs/design.md, "First unit session: results".
   complete against 77 counted.
 - **Channels:** with the original firmware's one-word-short first transfer, even buffer words land in slot
   1, the **left** channel: confirmed by ear on headphones (smpltrek session M1, image 0.3.1, which uses the same
-  scheme with 256-word buffers): even words left only, odd words right only, both at the same level. The line
-  outputs and the receive side (which input lands in which words) are not yet checked; with nothing connected,
-  0.3.1's input peak sat around 2 in 32,768.
+  scheme with 256-word buffers): even words left only, odd words right only, both at the same level. The receive
+  side follows the same order (INPUT L in IN L, INPUT R in IN R: Enaga session 1); the line outputs are not yet
+  checked. With nothing connected, 0.3.1's input peak sat around 2 in 32,768.
 - **Speaker:** plays with GP2[8] (speaker mute) driven low and headphones unplugged (M1). Enaga releases it unless
   the SPEAKER setting is OFF or the app mutes it (docs/design.md "Settings"). Headphones cut it in hardware (unit
   session 3, E3 check; no code involved, as smpltrek HW-15 inferred). GP3[8] is the only jack-sensing input the stock

@@ -7,7 +7,7 @@ is a whole instrument written in C++: Enaga starts it from the SD card, hands it
 display and a real-time audio callback, and recovers cleanly if it crashes.
 
 **Status: early development.** Enaga runs on a SmplTrek: the kernel, audio engine, display, keys, pads, SD
-card, the synth example and the Enaga menu with app switching have all run on a unit (three sessions so far,
+card, the synth example and the Enaga menu with app switching have all run on a unit (four sessions so far,
 docs/hardware.md "Checks on a unit"); everything is also tested on an emulator. The app interface
 (`include/enaga/abi.h`) is provisional until 1.0.
 The design and plan are in [docs/design.md](docs/design.md); the hardware facts Enaga relies on are in
@@ -111,7 +111,7 @@ into `build/dsplib/` and again when it changes. Then:
 
 ```sh
 python3 -B tools/build_app.py examples/tone     # -> build/apps/tone/APP.ENA
-python3 -B firmware/build.py                    # -> build/firmware/ENAGA_0_1_0.bin
+python3 -B firmware/build.py                    # -> build/firmware/<device>/<card name>, ENAGA_0_1_0.bin
 ```
 
 ## Installing
@@ -168,12 +168,13 @@ only `g++`. `tools/emulate.py` writes the last screen to
 | Path | What it is |
 |---|---|
 | `include/enaga/abi.h` | The C boundary between Enaga and an app: package header, host table, app table, events, key names |
-| `include/enaga/app.hpp` | The C++ layer: `enaga::App`, `enaga::Canvas`, `ENAGA_APP(Type)`, `enaga::log`, `enaga::fatal` |
+| `include/enaga/app.hpp` | The C++ layer: `enaga::App`, `enaga::Canvas`, `ENAGA_APP(Type)`, `enaga::log`, `enaga::fatal`, `enaga::system` |
 | `include/enaga/dsp.hpp`, `dsp.h`, `dsp/` | The DSP library: C++ classes over a C interface |
+| `include/enaga/files.hpp`, `wav.hpp`, `settings.hpp` | Files and streams, WAV headers, an app's own settings |
 | `runtime/dsp/` | The DSP library's block functions, built by cl6x or GCC into every app |
 | `runtime/` | Linked into every app: entry point, static constructors, heap, `new`/`delete`, C++ ABI hooks, `app.ld` |
 | `loader/` | The package loader (freestanding C, used by the firmware and the tests) |
-| `firmware/` | Enaga itself: `hal/` drivers, `kernel/` (interrupts, audio engine, app host, menu, settings, exceptions, watchdog, main loop), `start.s`, `link.ld`, `build.py` |
+| `firmware/` | Enaga itself: `hal/` drivers, `kernel/` (interrupts, audio engine, app host, menu, settings, device detection, exceptions, watchdog, main loop), `start.s`, `link.ld`, `build.py` |
 | `examples/` | `synth` (the virtual analogue synthesizer); `tone` (STEP 1-8 play 750 Hz x step); `cxxcheck` (exercises the C++ runtime) |
 | `tests/` | `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board; `test_check.py` and `unit/check`: the CHECK app for sessions on a unit; `test_synth.py`: the synth example; `test_files.py` and `apps/files`: the file service; `test_streams.py` and `apps/streams`: streams and WAV; `test_menu.py` and `apps/menu`: the Enaga menu, boot policy, app switching and settings; `test_dsp.py` and `dsp/`: the DSP library on the host; `test_sysimage.py`: the update files for each device |
 | `tools/` | `build_app.py`, `emulate.py`, `panel.py` (apps live in the emulator's web panel), `card.py` (FAT and exFAT card images through Enaga's own FatFs), `unit_card.py` and `unit_dry_run.py` (files for a session on a unit, and the session walked on the emulator), `sysimage.py` (the update-file format), `paths.py`, toolchain build scripts |
