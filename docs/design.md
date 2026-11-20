@@ -158,8 +158,8 @@ Proposal, grouped by service. Names are illustrative until each service exists.
 - **Storage:** an asynchronous file API with completion callbacks; long file names; directory listing; a
   per-app data directory; WAV load/save; streaming sample playback and streaming recording to WAV; a
   per-app key/value settings store. System settings are Enaga's; apps never see raw flash.
-- **Time and music:** tempo clock and transport, MIDI in/out with clock sync (USB first; hardware MIDI if
-  the unit has a port, **open**).
+- **Time and music:** tempo clock and transport, MIDI in/out with clock sync, on the DIN jacks and over USB
+  (both in E4), and the SYNC jacks.
 - **Runtime:** `new`/`delete`/`malloc` on the app heap, `printf` to the log, fast float math, a freestanding
   C++ standard library subset, `enaga::system::open_menu()`.
 - **System:** battery and power source, auto-off control (apps report "busy"), the crash screen.
@@ -300,6 +300,51 @@ room for dozens of playback streams (192 KiB/s each for 16-bit stereo at 48 kHz)
 3. (**Done** 2026-11-18, see the log.) The card-speed page in the CHECK app; the next unit session measures it.
 4. (**Done** 2026-11-18, see the log.) Streams and WAV, and multi-block SD transfers for recording.
 
+## E4 plan (2026-11-20)
+
+Scope, as agreed: full MIDI on the DIN jacks and over USB (USB MIDI moves here from E5; mass storage and USB audio
+stay in E5), and a UI toolkit that starts small. Steps in order; each ends tested on the emulator where it can be,
+and the ones that need the unit collect into a session.
+
+1. **Pad pressure.** An `ENAGA_EVENT_PAD_PRESSURE` beside press / release. Derived on the DSP from the normal pad
+   stream, as Lofi-12 XT does (XF-23): a press starts a 40-sample countdown and at 1 the raw value becomes the
+   baseline; raw > baseline + 200 enables pressure until release; pressure is the mean of the last 9 raw readings
+   passed through a steep curve (Lofi's runs 800, 1277, 1401 ... 3200), scaled to 0-127, and sent only when it
+   moves by more than 1/127. Use our own curve fitted to that shape rather than Lofi's table. CyDrums sends every
+   sample unfiltered (MIDI Channel Pressure, a flood): copy Lofi's change filter, not that.
+2. **Input selection.** Model it on Lofi-12 XT and CyDrums: a (source, level) pair, sources built-in mic, Hi-Z L,
+   dynamic mic R, stereo line, mono line (USB and resample later), levels 0-2, which maps one-to-one onto the
+   SmplTrek's REC SRC routes: codec routing plus the pins GP1[2] (mic switch), GP7[14] / GP7[15] (INPUT L front
+   end, +10 dB), GP5[11] (INPUT R mic stage) and GP1[3] (line pad). Table: smpltrek-re `docs/01-platform-map.md`
+   "Hardware use per product", Audio (XF-21). Keep the stock rule in Enaga, not in apps: the built-in mic is used
+   or monitored only while headphones are in (GP3[8] high), in every product, against speaker feedback. The pin
+   roles come from the stock code and want a unit check per route (the next unit session, with the PADS check).
+3. **MIDI on DIN.** UART0 at 31,250 baud 8N1 (smpltrek-re HW-11: PSC0 module 9, PINMUX3 nibbles 4-5 = 2, divisor 372 at
+   186 MHz), interrupt-driven receive and transmit rings. A parser for the whole protocol: running status,
+   real-time bytes inside other messages, SysEx of any length (delivered in chunks), system common. Apps get
+   messages as events with their port, and send through `<enaga/midi.hpp>` (channel messages, SysEx, real-time);
+   THRU (input copied to output) and the MIDI channel as Enaga settings, the channel also in the menu. The stock
+   MIDI CONFIG rows (IN FROM / OUT TO DIN, USB or both; clock out; active sensing) are the model for which
+   settings Enaga owns. Testing: the emulator's UART0 model, or one added there (smpltrek-re, with the user's
+   go-ahead); then a loop through a cable and an outside instrument on the unit.
+4. **Clock, transport and SYNC.** An Enaga tempo clock that apps follow or drive: internal tempo, or MIDI clock
+   in (24 PPQN, tempo derived), or SYNC IN (GP7[8] edges, 2 PPQN); START / STOP / CONTINUE, and Song Position
+   Pointer sent before CONTINUE, as Lofi-12 XT does (XF-24). SYNC OUT on GP7[9]: 2 PPQN, 15 ms pulses, polarity
+   settings as stock (HW-27). Clock source and clock out as settings.
+5. **MIDI over USB.** A USB device stack for USB0 (a Mentor MUSB controller, full speed as stock: HW-12), class
+   compliant USB MIDI (bulk endpoints, 64 bytes), same messages and routing as DIN. Built so mass storage and
+   audio can join it in E5 as a composite device. The stack is a decision at this step: a TinyUSB port (MIT; it
+   has a MUSB driver for other TI parts) or StarterWare usblib as the stock firmware uses (LIB-1; licence to
+   check). The emulator would need a USB model or a host-side shim; the unit and a computer test it for real.
+6. **UI toolkit, first cut.** Small: a list menu, a parameter page (name / value rows on the encoders), a
+   confirmation dialog and text entry (patch names), drawn with the existing fonts on `Canvas`, driven from the
+   app's events. Then app icons in the Enaga menu (an optional `ICON` in the package). File browser, waveform
+   view and anything larger wait for real uses.
+7. **SDK.** A project template and a build tool that work outside this repository; unaligned-safe load/store
+   helpers; the null-read note; the DSP library prebuilt if TI's licence allows (check that cl6x code calls none
+   of TI's run-time library). Getting-started docs from an empty folder to an app on the card.
+8. **Exit.** Someone who has not worked on Enaga builds the template app from the docs alone.
+
 ## Phases
 
 | Phase | Content | Exit |
@@ -308,8 +353,8 @@ room for dozens of playback streams (192 KiB/s each for 16-bit stereo at 48 kHz)
 | **E1** | Kernel: audio callback, display DMA, event loop, exception handling and watchdog, cache/L2 set-up | device load test: measured audio headroom with caches on (done) |
 | **E2** | Audio API and DSP library, asynchronous file I/O, sample loading and streaming | one real instrument app (done) |
 | **E3** | Enaga menu, boot policy, F1 escape, app switching, settings | switch between two apps repeatedly on the unit (done) |
-| **E4** | UI toolkit, MIDI, SDK packaging and documentation | an outside developer builds the template app from the docs |
-| **E5 / 1.0** | USB (mass storage, MIDI), API freeze, release | public release |
+| **E4** | Input selection, pad pressure, MIDI on DIN and USB, clock and SYNC, a first UI toolkit, SDK packaging and documentation | an outside developer builds the template app from the docs |
+| **E5 / 1.0** | USB mass storage and audio, API freeze, release | public release |
 
 ## Status
 
@@ -337,7 +382,7 @@ by feel to 1,600 / 1,000 / 600. App icons are left for E4.
 
 Since E3: one image serves the SmplTrek, Lofi-12 XT and CyDrums (the same board), and the build writes an update
 file for each; Enaga tells which it runs on from the bootloader's file name, confirmed on a SmplTrek in session 4.
-The other two are untested. Next is E4 (open items: input selection, pad pressure, MIDI).
+The other two are untested. Next is E4 ("E4 plan" above).
 
 ## Open items
 
@@ -347,27 +392,11 @@ The other two are untested. Next is E4 (open items: input selection, pad pressur
 - AUTO OFF: session 3 saw 5 MIN revert to OFF; session 4 could not reproduce it (kept, saved, and switched the
   unit off after 5 minutes), with no change to the settings code between the two images but the save log lines.
   If it comes back, note the status page's `SETTINGS SAVED` / `NOT SAVED` line and `/ENAGA/SETTINGS.TXT`.
-- Input selection for apps (E4). Model it on Lofi-12 XT and CyDrums: a (source, level) pair, sources built-in mic,
-  Hi-Z L, dynamic mic R, stereo line, mono line (USB and resample later), levels 0-2, which maps one-to-one onto
-  the SmplTrek's REC SRC routes: codec routing plus the pins GP1[2] (mic switch), GP7[14] / GP7[15] (INPUT L front
-  end, +10 dB), GP5[11] (INPUT R mic stage) and GP1[3] (line pad). Table: smpltrek-re `docs/01-platform-map.md`
-  "Hardware use per product", Audio (XF-21). Keep the stock rule in Enaga, not in apps: the built-in mic is used
-  or monitored only while headphones are in (GP3[8] high), in every product, against speaker feedback. The pin
-  roles come from the stock code and still want a unit check per route.
-- Pad pressure (E4, an `ENAGA_EVENT_PAD_PRESSURE` beside press / release). Derived on the DSP from the normal pad
-  stream, as Lofi-12 XT does (XF-23): a press starts a 40-sample countdown and at 1 the raw value becomes the
-  baseline; raw > baseline + 200 enables pressure until release; pressure is the mean of the last 9 raw readings
-  passed through a steep curve (Lofi's runs 800, 1277, 1401 ... 3200), scaled to 0-127, and sent only when it
-  moves by more than 1/127. Use our own curve fitted to that shape rather than Lofi's table. CyDrums sends every
-  sample unfiltered (MIDI Channel Pressure, a flood): copy Lofi's change filter, not that.
-- MIDI (E4): send Song Position Pointer before CONTINUE, as Lofi-12 XT does (XF-24). The family keeps SYNC at
-  2 PPQN with a 15 ms pulse.
 - Whether AUTO OFF should apply on USB power too (it does now; `power_on_batteries` could limit it).
 - On the unit: power-key bounce; bounce of keys other than STEP 1 (STEP 1 settles within 784 µs,
   smpltrek-re session M1, well inside the 6 ms sampling and two-sample release).
 - LED map: 53 addresses known only from the code, 24 seen on another channel of their LED (docs/hardware.md
-  "LED map"; smpltrek-re session L1); the level-to-brightness steps. Whether the unit has a hardware MIDI port;
-  left/right on the line outputs (headphones confirmed in M1, the inputs in session 1).
+  "LED map"; smpltrek-re session L1); the level-to-brightness steps. Left/right on the line outputs (headphones confirmed in M1, the inputs in session 1).
 - The L2 split between cache and RAM.
 - The SDK should give apps unaligned-safe load/store helpers for packed formats (misaligned LDW/STW/LDDW round
   the address down without a fault) and say that a null read returns garbage rather than trapping (smpltrek-re
