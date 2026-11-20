@@ -69,9 +69,9 @@ enum enaga_event_type {
     ENAGA_EVENT_KEY = 1,                    /* id: key bit; value: 1 down, 0 up */
     ENAGA_EVENT_ENCODER = 2,                /* id: 0-3 = A-D, 4 = VALUE; value: signed detents */
     ENAGA_EVENT_PAD = 3,                    /* id: pad 0-14; value: 14-bit pressure reading, every reading (raw) */
-    /* Pads as notes, before the raw reading that caused them. Thresholds are provisional until measured on a unit
-     * (docs/hardware.md "Panel MCU"): a press at 800, the original firmware's, a release below 600. */
-    ENAGA_EVENT_PAD_PRESS = 4,              /* id: pad 0-14; value: velocity 1-127, from the first reading over 800 */
+    /* Pads as notes, before the raw reading that caused them. The PADS setting sets the threshold: a press at
+     * 1,600 / 1,000 / 600 (LOW / MEDIUM / HIGH), a release below 3/4 of that. */
+    ENAGA_EVENT_PAD_PRESS = 4,              /* id: pad 0-14; value: velocity 1-127, from the readings over the threshold */
     ENAGA_EVENT_PAD_RELEASE = 5,            /* id: pad 0-14 */
     ENAGA_EVENT_CARD = 6                    /* value: 1 a card was inserted and mounted, 0 the card was removed,
                                              * or a negative enaga_file_error when an inserted card cannot be used */

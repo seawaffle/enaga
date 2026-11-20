@@ -103,7 +103,7 @@ changed.
 |---|---|---|
 | VOLUME | 0-10 (10) | output gain in the audio engine, 3 dB a step, 0 silent; ramps like the fade |
 | BRIGHTNESS | 1-10 (10) | the display controller's contrast command (0x81), 55 to 255 |
-| PADS | LOW, MEDIUM, HIGH (MEDIUM) | pad sensitivity: a press from 1,100 / 800 / 500, released below 3/4 of that |
+| PADS | LOW, MEDIUM, HIGH (MEDIUM) | pad sensitivity: a press from 1,600 / 1,000 / 600, released below 3/4 of that |
 | AUTO OFF | OFF, 5, 10, 30, 60 MIN (OFF) | switch off (stopping the app normally) after that long with no key, knob, pad press or POWER, unless the app has called `set_busy` |
 | SPEAKER | ON, OFF (ON) | the built-in speaker's mute, GP2[8], as the original firmware's SPEAKER MUTE |
 
@@ -328,20 +328,17 @@ E3 is built on the emulator: the Enaga menu on F1 + POWER (and `open_menu`), F1 
 on `stop()`, display names, the SETTINGS page (volume, brightness, pad sensitivity, auto-off) in
 `/ENAGA/SETTINGS.TXT`, and apps' own settings (`<enaga/settings.hpp>`). On the unit (session 3, 2026-11-19) its
 exit passed: switching, the menu, the boot policy, volume, brightness, the speaker and headphone detect behave as
-expected. Open from that session: AUTO OFF does not keep its value on the unit (below), and the PADS steps differ
-too little. App icons are left for E4.
+expected. Session 4 found AUTO OFF working (session 3 saw it revert; not reproduced) and set the PADS steps
+by feel to 1,600 / 1,000 / 600. App icons are left for E4.
 
 ## Open items
 
 - Lofi-12 XT and CyDrums: the build makes their update files (docs/hardware.md "Installing and recovery"), but
   Enaga has never been installed on either. A first session on one would follow "Checks on a unit" steps 1-11,
   ready to restore it with its official update.
-- AUTO OFF on the unit: set to 5 MIN, it reads OFF again after leaving the SETTINGS page, and after a restart; the
-  other settings keep their values. The emulator keeps it through the same steps and a reboot (the file holds
-  `AUTO OFF=5 MIN`), so the cause is unit-only and not yet found. Saving now logs `SETTINGS SAVED` or
-  `SETTINGS NOT SAVED` on the status page to narrow it down.
-- PADS: LOW / MEDIUM / HIGH (press 1,100 / 800 / 500) made very little difference on the unit; the steps need to
-  be wider, against the pad readings measured in session 1.
+- AUTO OFF: session 3 saw 5 MIN revert to OFF; session 4 could not reproduce it (kept, saved, and switched the
+  unit off after 5 minutes), with no change to the settings code between the two images but the save log lines.
+  If it comes back, note the status page's `SETTINGS SAVED` / `NOT SAVED` line and `/ENAGA/SETTINGS.TXT`.
 - Input selection for apps (E4). Model it on Lofi-12 XT and CyDrums: a (source, level) pair, sources built-in mic,
   Hi-Z L, dynamic mic R, stereo line, mono line (USB and resample later), levels 0-2, which maps one-to-one onto
   the SmplTrek's REC SRC routes: codec routing plus the pins GP1[2] (mic switch), GP7[14] / GP7[15] (INPUT L front
@@ -370,13 +367,13 @@ too little. App icons are left for E4.
 - The SDK should give apps unaligned-safe load/store helpers for packed formats (misaligned LDW/STW/LDDW round
   the address down without a fault) and say that a null read returns garbage rather than trapping (smpltrek
   session M1; docs/hardware.md "Processor and memory"). A debug-build null check is worth considering.
-- Pad velocity (session 1 found none): now the higher of the first two reports over 800, 127 at 3,300 (light
+- Pad velocity (session 1 found none): now the higher of the first two reports over the PADS threshold, 127 at 3,300 (light
   press about 1,500, hard about 3,400 on the unit). To check by playing on a unit; recorded press curves would
   show whether two reports catch the peak of a hard, fast hit.
 - Pad crosstalk (session 1): pressing a pad raises some other pad's reading slightly (0 -> 4, 1 -> 5, 4 -> 2; 2 and 3
   none), never to a press in the synth. Size not measured.
 - Pad events: Enaga passes every MCU message on, about 3,930 raw pad events a second at rest, and press / release
-  with velocity (press 800, release under 600, velocity as above). Still open: the release threshold, per-pad
+  with velocity (press at the PADS threshold, 1,000 at MEDIUM, release under 3/4 of it, velocity as above). Still open: the release threshold, per-pad
   calibration.
 - Synth on the unit: measured 8 % idle, 10 % one note, 24 % eight notes (INIT), 25 % SUPERSAW two notes (eight
   voices), no dropouts; the worst case (30 % on the emulator) not yet measured there. Saving patches waits for the file API; edits last until the app stops.
@@ -1194,3 +1191,12 @@ but the bootloader compares it as an instruction immediate, not a stored word. A
 0.4 s on the emulator when nothing was found, so it covers 2 MiB (about 30 M cycles). The emulator writes the name
 where BOOT 1.0.17 has it (`tools/emulate.py`, `bootloader_file`); `tests/test_e1.py` covers each name, none, and a
 near miss.
+
+### Unit session 4: device detection, AUTO OFF, PADS (2026-11-20)
+
+Image 9bcbb5be (branch `devices`). The status page's third line read `SMPLTREK`; app switching still worked.
+AUTO OFF set to 5 MIN was kept, logged `SETTINGS SAVED`, was in `/ENAGA/SETTINGS.TXT`, and switched the unit off
+after 5 minutes. Session 3's revert did not recur; the settings code is the same in both images apart from the save
+log lines, so its cause is unknown (open items). PADS: the user chose 1,600 / 1,000 / 600 (LOW / MEDIUM / HIGH)
+from 1,100 / 800 / 500, which made little difference; MEDIUM, the default, now presses at 1,000 rather than the
+original firmware's 800.

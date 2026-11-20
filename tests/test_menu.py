@@ -210,7 +210,7 @@ class Menu(unittest.TestCase):
                 self.press(emu, LEFT)
                 self.press(emu, DOWN)
                 self.press(emu, RIGHT)
-                self.assertEqual(emu.word("pad_press_level"), 500)
+                self.assertEqual(emu.word("pad_press_level"), 600)
                 self.press(emu, DOWN)
                 self.press(emu, RIGHT)
                 self.assertEqual(emu.word("settings_auto_off_ms"), 300_000)
@@ -228,7 +228,7 @@ class Menu(unittest.TestCase):
                              b"STARTS=1\nNOTE=SAVED BY MENU-TEST\n")
             with self.boot(image) as emu:              # read back at power-on; AUTO OFF without the app busy
                 self.assertAlmostEqual(self.number(emu, "audio_volume"), 0.251, places=3)
-                self.assertEqual((emu.word("pad_press_level"), emu.word("pad_release_level")), (500, 375))
+                self.assertEqual((emu.word("pad_press_level"), emu.word("pad_release_level")), (600, 450))
                 self.assertEqual(self.speaker_muted(emu), 1)
                 self.assertEqual(self.state(emu)["name"], "TONE")
                 emu.cpu.write(emu.names["settings_auto_off_ms"], (300).to_bytes(4, "little"))

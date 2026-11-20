@@ -8,7 +8,7 @@
  *
  *   VOLUME      0-10      output level, 3 dB a step, 0 silent (audio.c)
  *   BRIGHTNESS  1-10      the display's contrast command (0x81)
- *   PADS        LOW MEDIUM HIGH   sensitivity: a press from 1,100 / 800 / 500, released below 3/4 of that
+ *   PADS        LOW MEDIUM HIGH   sensitivity: a press from 1,600 / 1,000 / 600, released below 3/4 of that
  *   AUTO OFF    OFF 5-60 MIN      switch off after that long without input, unless the app is busy (set_busy)
  *   SPEAKER     ON OFF            the built-in speaker (headphones cut it in any case); an app can also mute it
  *
@@ -37,13 +37,13 @@ static const setting_t table[SETTINGS_COUNT] = {
 static int settings_value[SETTINGS_COUNT], settings_saved[SETTINGS_COUNT];
 static int settings_cursor;
 
-u32 pad_press_level = 800, pad_release_level = 600;
+u32 pad_press_level = 1000, pad_release_level = 750;
 u32 settings_auto_off_ms;
 
 static void apply(int which)
 {
     static const float gain[11] = { 0.0f, 0.0447f, 0.0631f, 0.0891f, 0.126f, 0.178f, 0.251f, 0.355f, 0.501f, 0.708f, 1.0f };
-    static const u16 press[3] = { 1100, 800, 500 };
+    static const u16 press[3] = { 1600, 1000, 600 };
     static const u32 minutes[5] = { 0, 5, 10, 30, 60 };
     int v = settings_value[which];
     switch (which) {

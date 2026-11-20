@@ -371,15 +371,15 @@ class E1(unittest.TestCase):
             emu.run(4 * MS)                     # the MCU reads each pad about every 3.8 ms
         with Emulation(HERE / "apps" / "keys") as emu:
             self.assertIsNone(emu.run(BOOT)["error"])
-            # 800 starts a press, sent at the next report with velocity from the higher of the two:
-            # 1 + 126 (peak - 800) / 2500, 127 from 3300. Under 600 a release; a tap that falls under 600 at that
+            # 1000 (PADS MEDIUM) starts a press, sent at the next report with velocity from the higher of the two:
+            # 1 + 126 (peak - 1000) / 2300, 127 from 3300. Under 750 a release; a tap that falls under 750 at that
             # next report still gives its press first.
-            for value in (90, 799, 1000, 2050, 700, 610, 599, 300, 3000, 2000, 0, 1500, 0, 16383, 16383, 0):
+            for value in (90, 999, 1200, 2150, 900, 760, 749, 300, 3000, 2000, 0, 1500, 0, 16383, 16383, 0):
                 reading(3, value)
-            reading(12, 800)
+            reading(12, 1000)
             pads = [line for line in emu.report()["log"] if line[:1] == "P"]
-            self.assertEqual(pads, ["P3 64", "P3 0", "P3 111", "P3 0", "P3 36", "P3 0", "P3 127", "P3 0"])
-            reading(12, 800)
+            self.assertEqual(pads, ["P3 64", "P3 0", "P3 110", "P3 0", "P3 28", "P3 0", "P3 127", "P3 0"])
+            reading(12, 1000)
             pads = [line for line in emu.report()["log"] if line[:1] == "P"]
             self.assertEqual(pads[-1], "P12 1")
 

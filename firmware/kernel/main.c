@@ -63,8 +63,9 @@ static void poll_for(u32 ms)                  /* a pause in the MCU start messag
     while (timer_ms() - start < ms) uart1_poll();
 }
 
-/* Pads. A press starts at the original firmware's 800 and ends below 600 (the PADS setting moves both). A pad's reading rises over several of
- * the MCU's reports (each pad every 3.8 ms), so the first report over 800 says little about how hard it was hit
+/* Pads. A press starts at 1,000 and ends below 750 (PADS MEDIUM; the setting moves both; the original firmware
+ * presses at 800). A pad's reading rises over several of
+ * the MCU's reports (each pad every 3.8 ms), so the first report over the level says little about how hard it was hit
  * (on the unit it was nearly always just over 800: session 1, docs/hardware.md "Pad readings"). The press is
  * therefore sent at the next report, with velocity from the higher of the two, 127 at PAD_FULL or more: at most
  * one report (3.8 ms) later. A pad released before that still gives its press, then the release. Measured on the
