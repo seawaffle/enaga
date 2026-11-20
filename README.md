@@ -10,8 +10,8 @@ display and a real-time audio callback, and recovers cleanly if it crashes.
 card, the synth example and the Enaga menu with app switching have all run on a unit (four sessions so far,
 docs/hardware.md "Checks on a unit"); everything is also tested on an emulator. The app interface
 (`include/enaga/abi.h`) is provisional until 1.0.
-The design and plan are in [docs/design.md](docs/design.md); the hardware facts Enaga relies on are in
-[docs/hardware.md](docs/hardware.md).
+The app interface is documented in [docs/api.md](docs/api.md); the design and plan are in
+[docs/design.md](docs/design.md); the hardware facts Enaga relies on are in [docs/hardware.md](docs/hardware.md).
 
 ## Writing an app
 
@@ -37,6 +37,8 @@ private:
 
 ENAGA_APP(Beep)
 ```
+
+The points below are the overview; [docs/api.md](docs/api.md) is the full reference, header by header.
 
 - `init`, `update(ms)`, `draw(canvas)`, `stop`, `on_key`, `on_encoder`, `on_pad_press(pad, velocity)`,
   `on_pad_release`, `on_pad` (every raw pressure reading) run in Enaga's main loop, which sleeps between
@@ -143,7 +145,7 @@ project. Point `ENAGA_EMULATOR` at its emulator directory (the one containing `c
 
 ```sh
 export ENAGA_EMULATOR=/path/to/emulator
-python3 -B -m unittest discover -s tests -v                           # 52 tests, about 5 minutes
+python3 -B -m unittest discover -s tests -v                           # 54 tests, about 5 minutes
 python3 -B tools/emulate.py examples/tone --key 32@300000000           # press STEP 1; writes build/emulate/
 ```
 
@@ -160,7 +162,7 @@ on Enaga's update file; Ctrl-C stops it. The emulator runs the synth at about 0.
 heavy patches break up.
 
 Without `ENAGA_EMULATOR` the emulator tests are skipped; `tests/test_dsp.py` (the DSP library on the host) needs
-only `g++`. `tools/emulate.py` writes the last screen to
+only `g++`, and `test_sysimage.py` and `test_api_docs.py` need nothing. `tools/emulate.py` writes the last screen to
 `build/emulate/frame.png`, the captured output to `build/emulate/audio.wav`, and a JSON report.
 
 ## Layout
@@ -176,9 +178,9 @@ only `g++`. `tools/emulate.py` writes the last screen to
 | `loader/` | The package loader (freestanding C, used by the firmware and the tests) |
 | `firmware/` | Enaga itself: `hal/` drivers, `kernel/` (interrupts, audio engine, app host, menu, settings, device detection, exceptions, watchdog, main loop), `start.s`, `link.ld`, `build.py` |
 | `examples/` | `synth` (the virtual analogue synthesizer); `tone` (STEP 1-8 play 750 Hz x step); `cxxcheck` (exercises the C++ runtime) |
-| `tests/` | `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board; `test_check.py` and `unit/check`: the CHECK app for sessions on a unit; `test_synth.py`: the synth example; `test_files.py` and `apps/files`: the file service; `test_streams.py` and `apps/streams`: streams and WAV; `test_menu.py` and `apps/menu`: the Enaga menu, boot policy, app switching and settings; `test_dsp.py` and `dsp/`: the DSP library on the host; `test_sysimage.py`: the update files for each device |
+| `tests/` | `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board; `test_check.py` and `unit/check`: the CHECK app for sessions on a unit; `test_synth.py`: the synth example; `test_files.py` and `apps/files`: the file service; `test_streams.py` and `apps/streams`: streams and WAV; `test_menu.py` and `apps/menu`: the Enaga menu, boot policy, app switching and settings; `test_dsp.py` and `dsp/`: the DSP library on the host; `test_sysimage.py`: the update files for each device; `test_api_docs.py`: every public name is in docs/api.md |
 | `tools/` | `build_app.py`, `emulate.py`, `panel.py` (apps live in the emulator's web panel), `card.py` (FAT and exFAT card images through Enaga's own FatFs), `unit_card.py` and `unit_dry_run.py` (files for a session on a unit, and the session walked on the emulator), `sysimage.py` (the update-file format), `paths.py`, toolchain build scripts |
-| `docs/` | `design.md` (decisions, architecture, plan, log), `hardware.md` (the hardware notes) |
+| `docs/` | `api.md` (the app interface reference), `design.md` (decisions, architecture, plan, log), `hardware.md` (the hardware notes) |
 
 ## Licence
 

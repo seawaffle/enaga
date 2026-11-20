@@ -192,7 +192,8 @@ Proposal, grouped by service. Names are illustrative until each service exists.
 
 - Toolchain: GCC 13.3 `tic6x-elf` with C and C++ and a freestanding libstdc++ (`tools/build_tic6x_*.sh`).
   Prebuilt for Linux, macOS and Windows (Docker first) by 1.0.
-- A project template and build tool, example apps (synth, sampler, step sequencer), an API reference.
+- A project template and build tool, example apps (synth, sampler, step sequencer), an API reference (started:
+  docs/api.md, kept complete by `tests/test_api_docs.py`).
 - Testing at three levels: a host-native app lab for fast UI work (planned), the SmplTrek emulator running
   Enaga and the app with exact audio, frame and card output, and hardware. Every Enaga service gets
   emulator coverage when it is added; scripted scenarios (press keys, assert samples and frames) gate
@@ -1211,3 +1212,12 @@ README, design.md and hardware.md checked against the code and the unit sessions
 Phases and Status; open items settled in sessions 1 and 3 removed (key names, inputs L/R, headroom with caches,
 F1 at power-on, brightness, patch saving); Enaga's size corrected to about 190 KB; the Files plan notes the API
 as built; per-device build output and device detection noted where the build and memory are described.
+
+### API reference (2026-11-20)
+
+docs/api.md documents the app interface header by header: the app's callbacks and contexts, audio, input,
+display, LEDs, system calls, files, streams, WAV, app settings, the DSP library, the C interface and the language
+runtime. `tests/test_api_docs.py` (host-only) gathers the public names from `include/enaga/` with regular
+expressions (C names, host-table functions, C++ classes, enums, functions, members and constants, without
+`namespace detail` and `private:` sections) and fails when one is not mentioned in api.md: 395 names now.
+`<enaga/dsp.hpp>`'s summary gained what it had left out (biquads, FIR, wavetables, sync, chorus, Memory).

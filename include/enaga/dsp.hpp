@@ -6,11 +6,13 @@
 // (render_add, process, render) are its block functions, which the app build compiles with TI's cl6x when it is
 // installed. Process in blocks; per-sample step() calls are for code that needs them.
 //
-//   math.hpp        exp2, semitones, sin_turns, tan_pi, soft_clip, Random: fast, no libm, no division
-//   oscillator.hpp  PolyBLEP saw and pulse, triangle, sine
-//   filter.hpp      state-variable filter (low, band, high) and a two-stage cascade, one-pole
+//   math.hpp        exp2, semitones, sin_turns, tan_pi, soft_clip, Random, Memory: fast, no libm, no division
+//   oscillator.hpp  PolyBLEP saw and pulse, triangle, sine, hard sync; wavetables and a morph between two
+//   filter.hpp      state-variable filter (low, band, high) and a two-stage cascade, one-pole, biquads, FIR
 //   modulation.hpp  ADSR envelope, LFO
-//   effects.hpp     delay line, stereo delay, reverb (buffers on the app heap)
+//   effects.hpp     delay line, stereo delay, chorus, reverb (buffers on the app heap)
+//
+// docs/api.md, "DSP library", is the reference.
 #pragma once
 
 #include <enaga/dsp/effects.hpp>
