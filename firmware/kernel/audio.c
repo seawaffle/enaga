@@ -258,6 +258,65 @@ void audio_speaker_apply(void)               /* main context: the speaker as the
 
 int audio_headphones(void) { return (int)(gpio_read_bank16(PHONES_BANK) >> PHONES_PIN) & 1; }
 
+/* Input selection: Lofi-12 XT's (source, level) pairs, each landing on the codec, pin and slot state of one of the
+ * original SmplTrek's REC SRC routes (smpltrek-re XF-21, HW-17, HW-28, HW-29; docs/hardware.md "Audio").
+ *   codec: 15 / 16 left / right ADC PGA (0.5 dB steps), 17 / 18 MIC3 into the left / right ADC (0xF0: MIC3R at
+ *          0 dB), 19 LINE1L -> left ADC and 22 LINE1R -> right ADC (0x84: differential, 0 dB, ADC powered; 0xF8 not
+ *          connected and the ADC off; 0xFC not connected, ADC on), 21 / 24 the cross paths (0xF8: not connected).
+ *   pins:  GP1[2] built-in mic switch, GP7[14] INPUT L line front end (low for Hi-Z), GP7[15] INPUT L +10 dB
+ *          stage, GP5[11] INPUT R mic preamplifier, GP1[3] line PAD (low = on).
+ *   slots: which ADC feeds the app's two channels (even words are the left ADC). A one-ADC source goes to both.
+ * The built-in mic is heard only while headphones are in (GP3[8]), as in every original firmware. The input is
+ * held silent while the codec is rewritten and for INPUT_QUIET_BLOCKS after, to hide the switching. */
+enum { SLOTS_STEREO, SLOTS_LEFT, SLOTS_RIGHT };
+#define INPUT_QUIET_BLOCKS 8u
+#define INPUT_QUIET_HOLD   0xFFFFFFFFu
+static volatile u32 input_quiet;             /* blocks of silence left; INPUT_QUIET_HOLD while switching */
+static volatile u8 input_slots = SLOTS_STEREO, input_mic;
+static u8 input_source = ENAGA_INPUT_LINE_STEREO, input_level = ENAGA_INPUT_NORMAL;
+
+static void pin(unsigned bank, unsigned number, int high)
+{
+    if (high) gpio_set(bank, number); else gpio_clr(bank, number);
+}
+
+int audio_input(unsigned source, unsigned level)   /* main context */
+{
+    u8 left = 0x84, right = 0x84, pga_left = 0, pga_right = 0, mic = 0xFF, slots = SLOTS_LEFT;
+    int mic_switch = 0, line_front = 1, hiz_stage = 0, mic_stage = 0, pad = 0, failed = 0;
+    if (source > ENAGA_INPUT_LINE_MONO || level > ENAGA_INPUT_HIGH) return -1;
+    switch (source) {
+    case ENAGA_INPUT_MIC:                     /* REC SRC 0 */
+        mic = 0xF0; left = 0xFC; right = 0xF8; mic_switch = 1; break;
+    case ENAGA_INPUT_HIZ:                     /* REC SRC 1-3 */
+        right = 0xF8; line_front = 0; hiz_stage = level != ENAGA_INPUT_LOW;
+        pga_left = level == ENAGA_INPUT_HIGH ? 20 : 0; break;
+    case ENAGA_INPUT_DYNAMIC_MIC:             /* REC SRC 4-6 */
+        left = 0xF8; mic_stage = level != ENAGA_INPUT_LOW; slots = SLOTS_RIGHT;
+        pga_right = level == ENAGA_INPUT_HIGH ? 42 : 0; break;
+    case ENAGA_INPUT_LINE_STEREO:             /* REC SRC 7, 8 (PAD) */
+        pad = level == ENAGA_INPUT_LOW; slots = SLOTS_STEREO; break;
+    default:                                  /* LINE_MONO: REC SRC 9, 10 (PAD) */
+        right = 0xF8; pad = level == ENAGA_INPUT_LOW; break;
+    }
+    input_quiet = INPUT_QUIET_HOLD;
+    failed |= i2c0_write(15, pga_left) | i2c0_write(16, pga_right);
+    failed |= i2c0_write(17, mic) | i2c0_write(18, 0xFF) | i2c0_write(21, 0xF8) | i2c0_write(24, 0xF8);
+    failed |= i2c0_write(19, left) | i2c0_write(22, right);
+    pin(1, 2, mic_switch); pin(7, 14, line_front); pin(7, 15, hiz_stage); pin(5, 11, mic_stage); pin(1, 3, !pad);
+    input_slots = slots;
+    input_mic = source == ENAGA_INPUT_MIC;
+    input_source = (u8)source; input_level = (u8)level;
+    input_quiet = INPUT_QUIET_BLOCKS;
+    return failed ? -2 : 0;
+}
+
+void audio_input_reset(void)                  /* main context: the default for the next app, if it changed */
+{
+    if (input_source != ENAGA_INPUT_LINE_STEREO || input_level != ENAGA_INPUT_NORMAL)
+        audio_input(ENAGA_INPUT_LINE_STEREO, ENAGA_INPUT_NORMAL);
+}
+
 void audio_mute(void)
 {
     gpio_set(SPK_MUTE_BANK, SPK_MUTE_PIN);
@@ -284,10 +343,16 @@ void audio_isr(void)
          * the unit): the other one has finished. */
         u32 *tx;
         audio_callback_t fn = callback;
-        if (rx_done) {
+        if (input_quiet && input_quiet != INPUT_QUIET_HOLD) input_quiet--;
+        if (rx_done && !input_quiet && !(input_mic && !audio_headphones())) {
             const u32 *rx = in_buffer(REG32(PARAM(0) + 0x0C), rx_c) ? rx_d : rx_c;
+            const u32 slots = input_slots;
             cache_inv((void *)rx, WORDS * 4);
-            for (i = 0; i < WORDS; i++) in_block[i] = (float)(int)rx[i] * (1.0f / 2147483648.0f);
+            if (slots == SLOTS_STEREO)
+                for (i = 0; i < WORDS; i++) in_block[i] = (float)(int)rx[i] * (1.0f / 2147483648.0f);
+            else
+                for (i = 0; i < WORDS; i += 2)
+                    in_block[i] = in_block[i + 1] = (float)(int)rx[i + (slots == SLOTS_RIGHT)] * (1.0f / 2147483648.0f);
         } else {
             for (i = 0; i < WORDS; i++) in_block[i] = 0.0f;
         }

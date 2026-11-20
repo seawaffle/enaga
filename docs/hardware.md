@@ -329,6 +329,24 @@ the block. Details in docs/design.md, "First unit session: results".
 | GP4[13] | held high (role unknown) |
 | GP3[8] | headphone detect: 1 with a plug in PHONES, 0 otherwise; INPUT L / R and the outputs do not change it (unit, E3 check) |
 
+- **Input routes** (`audio_input` in `firmware/kernel/audio.c`; apps choose them with `enaga::system::input`).
+  They copy the original firmware's REC SRC end states (smpltrek-re HW-17, HW-28, HW-29), read from its code
+  and not yet checked on a unit route by route. Codec registers: 15 / 16 the ADC PGAs; 17 MIC3R into the left
+  ADC; 19 LINE1L into the left ADC; 22 LINE1R into the right ADC; 21 / 24 the cross paths, never used. Slots:
+  even words are the left ADC.
+
+| Source, level | Codec | Pins | The app hears |
+|---|---|---|---|
+| MIC | 17 = 0xF0, 19 = 0xFC (left ADC on, LINE1L off), 22 = 0xF8 (right ADC off) | GP1[2] high, GP7[14] high | left ADC in both channels, only while GP3[8] is high |
+| HIZ LOW / NORMAL / HIGH | 19 = 0x84, 22 = 0xF8; 15 = 0 / 0 / 20 (+10 dB) | GP7[14] low; GP7[15] low / high / high | left ADC in both |
+| DYNAMIC_MIC LOW / NORMAL / HIGH | 19 = 0xF8, 22 = 0x84; 16 = 0 / 0 / 42 (+21 dB) | GP5[11] low / high / high | right ADC in both |
+| LINE_STEREO LOW / NORMAL, HIGH | 19 = 22 = 0x84 | GP1[3] low (PAD) / high | left and right |
+| LINE_MONO LOW / NORMAL, HIGH | 19 = 0x84, 22 = 0xF8 | GP1[3] low (PAD) / high | left ADC in both |
+
+Pins not named are left in the line state: GP1[2] low, GP7[14] high, GP7[15] low, GP5[11] low, GP1[3] high.
+LINE_STEREO NORMAL is the start-up state. Stock LINE_MONO with the PAD powers both ADCs and reads both slots,
+an artefact of its PAD code. Enaga keeps it mono, as Lofi-12 XT's selector does.
+
 ## SD card
 
 **MMCSD0**, pins on PINMUX10; card detect on GP4[0] (low = card present); GP4[1] is driven low. 399 kHz
@@ -398,6 +416,18 @@ unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it mut
 7. **Input (AUDIO page):** a signal into INPUT L, then INPUT R (or the built-in microphone, if the input chain
    uses it) moves IN L / IN R (per mille of full scale). A swap means the receive side's channel belief ("Audio")
    is wrong. Report the readings with nothing connected, too.
+   **Input routes** ("Input routes" under "Audio"): STEP 9-13 choose the source, B its level. The line under the
+   meters shows the choice, and ERR if the codec did not answer. Report IN L / IN R for each:
+   - **STEP 9, MIC:** speak near the unit. With headphones in, both meters move. Unplug them: both read about 0.
+   - **STEP 10, HI-Z**, a guitar or a line signal into INPUT L. Both meters follow INPUT L; NORM reads louder
+     than LOW and HIGH louder again. INPUT R does nothing.
+   - **STEP 11, DYN MIC**, a dynamic mic (or a quiet line signal) into INPUT R. Both meters follow INPUT R; LOW,
+     NORM, HIGH rise as above, NORM by about 28 dB on the manual's figures. INPUT L does nothing.
+   - **STEP 12, LINE ST:** INPUT L moves IN L and INPUT R moves IN R. LOW (the PAD) is about 20 dB quieter than
+     NORM.
+   - **STEP 13, LINE MONO:** INPUT L moves both meters, and INPUT R does nothing. LOW is quieter, as above.
+   Any meter moving for the wrong jack, or a level step that changes nothing, means that route's pins differ
+   from the stock code's reading. Note which.
 8. **Audio load with caches (LOAD page), the E1 exit measurement:** STEP 1 (SYNTH), then STEP 5, 6, 7, 8 (16, 64,
    128, 256 voices); wait two seconds at each and note LOAD (percent of the block budget), CYC/VOICE and
    FIT AT 90%, and whether CAP appears.

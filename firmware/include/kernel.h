@@ -49,6 +49,8 @@ extern const char *device_name;
 void device_detect(void);
 
 int  audio_headphones(void);                  /* 1 while headphones are plugged in (GP3[8]) */
+int  audio_input(unsigned source, unsigned level);   /* enaga_input_source / _level: 0, -1 invalid, -2 codec; main */
+void audio_input_reset(void);                 /* back to LINE_STEREO, NORMAL (between apps) */
 void audio_silence_now(void);                 /* zero the transmit ring at once (crash paths) */
 void audio_irq_rearm(void);                   /* re-evaluate the EDMA interrupt (after leaving the ISR abnormally) */
 extern volatile u32 audio_blocks, audio_overruns, audio_cycles_last, audio_cycles_peak;

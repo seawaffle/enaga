@@ -65,6 +65,22 @@ enum enaga_device {
     ENAGA_DEVICE_UNKNOWN = 0, ENAGA_DEVICE_SMPLTREK = 1, ENAGA_DEVICE_LOFI12XT = 2, ENAGA_DEVICE_CYDRUMS = 3,
 };
 
+/* Audio inputs, as Lofi-12 XT and CyDrums choose them: a source and a level (enaga_host_t.input). */
+enum enaga_input_source {
+    ENAGA_INPUT_MIC = 0,                    /* the built-in microphone, in both channels; heard only while headphones
+                                             * are plugged in (silence otherwise, against feedback from the speaker) */
+    ENAGA_INPUT_HIZ = 1,                    /* INPUT L as a high-impedance instrument input (guitar), both channels */
+    ENAGA_INPUT_DYNAMIC_MIC = 2,            /* INPUT R through the microphone preamplifier, both channels */
+    ENAGA_INPUT_LINE_STEREO = 3,            /* INPUT L and R as a stereo line input (the default) */
+    ENAGA_INPUT_LINE_MONO = 4               /* INPUT L as a mono line input, both channels */
+};
+enum enaga_input_level {
+    ENAGA_INPUT_LOW = 0,                    /* Hi-Z and dynamic mic: no front-end gain; line: the -20 dB PAD */
+    ENAGA_INPUT_NORMAL = 1,                 /* Hi-Z: +10 dB stage; dynamic mic: preamplifier on; line: no PAD */
+    ENAGA_INPUT_HIGH = 2                    /* Hi-Z: +10 dB stage and +10 dB in the codec; dynamic mic: preamplifier
+                                             * and +21 dB in the codec; line: as NORMAL. The built-in mic has one level */
+};
+
 enum enaga_event_type {
     ENAGA_EVENT_KEY = 1,                    /* id: key bit; value: 1 down, 0 up */
     ENAGA_EVENT_ENCODER = 2,                /* id: 0-3 = A-D, 4 = VALUE; value: signed detents */
@@ -223,6 +239,10 @@ typedef struct enaga_host {
     /* Which device of the family this is (enaga_device), from its bootloader: ENAGA_DEVICE_UNKNOWN when none of
      * the known ones was recognised. The board and its use are the same; the printed labels differ. */
     uint32_t (*device)(void);
+    /* Chooses the audio input (enaga_input_source, enaga_input_level): 0, or -1 for an unknown source or level,
+     * -2 if the codec did not answer. The input is silent for about 10 ms around the change. Main context; it
+     * takes a few milliseconds (codec writes). Reset to LINE_STEREO, NORMAL when the app stops. */
+    int32_t (*input)(uint32_t source, uint32_t level);
 } enaga_host_t;
 
 /* What the app gives Enaga. Every callback receives `context`; any callback may be 0. */

@@ -47,6 +47,12 @@ inline void set_busy(bool busy) { host().set_busy(busy ? 1u : 0u); }
 inline void speaker(bool on) { host().speaker(on ? 1u : 0u); }
 // True while headphones are plugged in (the speaker is then cut in hardware). Poll it, e.g. in update().
 inline bool headphones() { return host().headphones() != 0; }
+// Chooses the audio input: a source (ENAGA_INPUT_MIC, _HIZ, _DYNAMIC_MIC, _LINE_STEREO, _LINE_MONO) and a level
+// (ENAGA_INPUT_LOW, _NORMAL, _HIGH), enaga_input_source / enaga_input_level in abi.h. 0 on success, -1 for an unknown
+// source or level, -2 if the codec did not answer. One-input sources arrive in both channels; the built-in mic is
+// silent unless headphones are in. The input is quiet for about 10 ms around the change. Back to LINE_STEREO, NORMAL
+// when the app stops.
+inline int input(int source, int level = ENAGA_INPUT_NORMAL) { return host().input(uint32_t(source), uint32_t(level)); }
 // Which device Enaga runs on: ENAGA_DEVICE_SMPLTREK, _LOFI12XT, _CYDRUMS or _UNKNOWN (enaga_device in abi.h).
 // Same board and controls in the same places; use it for what differs, such as the labels printed on the panel.
 inline int device() { return int(host().device()); }

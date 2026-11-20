@@ -1,7 +1,8 @@
 """The Enaga menu and app switching on the emulator (docs/design.md decisions 2 and 3, "Boot and app switching"):
 F1 + POWER, switching between two apps repeatedly, the boot policy (last app, F1 held at power-on), an app
 that fails at start-up not being loaded again, display names, open_menu, the fade and the stop() limit on a
-switch, the SETTINGS page and its file, AUTO OFF and set_busy, and an app's own settings (enaga::Settings).
+switch, the SETTINGS page and its file, AUTO OFF and set_busy, an app's own settings (enaga::Settings), and
+the input selection reset between apps.
 
     ENAGA_EMULATOR=/path/to/emulator python3 -B -m unittest tests.test_menu
 """
@@ -22,7 +23,7 @@ import paths  # noqa: E402
 MS = 372_000
 F1, OK, DOWN, UP, LEFT, RIGHT, CLR, STEP1 = 19, 23, 25, 17, 24, 18, 30, 32
 APPS = {"TONE": ENAGA / "examples" / "tone", "CXXCHECK": ENAGA / "examples" / "cxxcheck", "HANG": HERE / "apps" / "hang",
-        "MENUAPP": HERE / "apps" / "menu"}
+        "MENUAPP": HERE / "apps" / "menu", "INPUT": HERE / "apps" / "input"}
 TITLES = {"MENUAPP": "MENU-TEST"}                     # display names that differ from the folder
 
 
@@ -126,6 +127,23 @@ class Menu(unittest.TestCase):
             with self.boot(image) as emu:              # the last app since removed: as with no record
                 s = self.state(emu)
                 self.assertEqual((s["menu"], s["running"], s["message"]), (1, False, ""), s)
+
+    def test_the_input_goes_back_to_stereo_line_when_an_app_stops(self):
+        with tempfile.TemporaryDirectory() as d:
+            image = self.card(d, ["INPUT", "TONE"])
+            with self.boot(image) as emu:
+                def route():                           # left / right PGA, LINE1L / LINE1R into their ADCs
+                    return tuple(emu.cpu.codec_register(0, r) for r in (15, 16, 19, 22))
+                self.press(emu, OK)
+                self.assertEqual(self.state(emu)["name"], "INPUT")
+                self.press(emu, STEP1 + 7)             # dynamic mic, HIGH
+                self.assertEqual(route(), (0, 42, 0xF8, 0x84))
+                self.chord(emu)
+                self.press(emu, DOWN)
+                self.press(emu, OK)
+                self.assertIsNone(emu.run(100 * MS)["error"])
+                self.assertEqual(self.state(emu)["name"], "TONE")
+                self.assertEqual(route(), (0, 0, 0x84, 0x84))
 
     def test_an_app_that_fails_at_start_up_is_not_loaded_again(self):
         with tempfile.TemporaryDirectory() as d:

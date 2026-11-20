@@ -132,8 +132,29 @@ full level.
 | `uint32_t enaga::audio_load()` | the last block's cost, per mille of its real-time budget (1000 = all of it) |
 | `uint32_t enaga::audio_load_peak()` | the highest since the app started |
 
-Enaga itself takes about 3 % of the budget. Which input reaches `in` (line, microphone, level) is not yet the
-app's choice (an E4 plan item).
+Enaga itself takes about 3 % of the budget.
+
+### The input: `enaga::system::input(source, level)`
+
+`in` carries the input the app chooses, as Lofi-12 XT and CyDrums choose theirs: a source and a level. Each
+pair sets the codec and the analogue front end the way the original SmplTrek firmware sets the matching REC SRC.
+Returns 0, -1 for an unknown source or level, or -2 if the codec did not answer. Main context; it takes a few
+milliseconds. `in` is silent for about 10 ms around the change, which hides the switching. When the app stops,
+the input goes back to stereo line, NORMAL, which is also what an app starts with.
+
+| Source | Input | `in` | LOW | NORMAL | HIGH |
+|---|---|---|---|---|---|
+| `ENAGA_INPUT_MIC` | the built-in microphone | both channels; silent unless headphones are plugged in | one level | | |
+| `ENAGA_INPUT_HIZ` | INPUT L, high impedance (guitar) | both channels | no front-end gain | +10 dB stage | +10 dB stage, +10 dB in the codec |
+| `ENAGA_INPUT_DYNAMIC_MIC` | INPUT R through the mic preamplifier | both channels | preamplifier off | preamplifier on | preamplifier, +21 dB in the codec |
+| `ENAGA_INPUT_LINE_STEREO` | INPUT L and R | left and right | -20 dB PAD | no PAD | as NORMAL |
+| `ENAGA_INPUT_LINE_MONO` | INPUT L | both channels | -20 dB PAD | no PAD | as NORMAL |
+
+The levels are `ENAGA_INPUT_LOW`, `ENAGA_INPUT_NORMAL` (the default argument) and `ENAGA_INPUT_HIGH`. The
+built-in microphone is heard only with headphones in, a rule every original firmware keeps against feedback
+from the speaker; Enaga applies it, so apps need not. The front-end gains are the original firmware's
+settings. The values in dB come from its manual and code and have not been measured; the PAD's -20 dB is the
+manual's figure.
 
 ## Input
 
@@ -233,6 +254,7 @@ In `<enaga/app.hpp>`. Main context.
 | `enaga::system::set_busy(bool)` | while `true`, the unit does not switch itself off for being idle (the AUTO OFF setting), e.g. while playing or recording unattended. Cleared when the app stops |
 | `enaga::system::speaker(bool on)` | `false` mutes the built-in speaker, e.g. while monitoring the built-in microphone (feedback). The user's SPEAKER setting still wins. Released when the app stops |
 | `enaga::system::headphones()` | `true` while headphones are plugged in; the speaker is cut in hardware meanwhile. Poll it, e.g. in `update` |
+| `enaga::system::input(source, level)` | chooses the audio input ([The input](#the-input-enagasysteminputsource-level)) |
 | `enaga::system::device()` | which device Enaga runs on: `ENAGA_DEVICE_SMPLTREK`, `ENAGA_DEVICE_LOFI12XT`, `ENAGA_DEVICE_CYDRUMS` or `ENAGA_DEVICE_UNKNOWN`. The three have the same board and controls in the same places; use it for what differs, such as labels printed on the panel |
 
 Volume, brightness, pad sensitivity, AUTO OFF and SPEAKER are the user's settings, in the Enaga menu; apps do
@@ -578,7 +600,8 @@ write `cond ? a : b` rather than `if`, and use the library's math, which never d
 app defines `const enaga_app_t *enaga_app_main(void)` (what `ENAGA_APP` writes) returning its callback table; the
 runtime calls it after the static constructors.
 
-Its types: the enums `enaga_key`, `enaga_led`, `enaga_device`, `enaga_event_type`, `enaga_file_error`,
+Its types: the enums `enaga_key`, `enaga_led`, `enaga_device`, `enaga_input_source`, `enaga_input_level`,
+`enaga_event_type`, `enaga_file_error`,
 `enaga_file_mode` and `enaga_stream_state`, and the structs `enaga_app_t`, `enaga_host_t`, `enaga_event_t`,
 `enaga_package_header_t`, `enaga_file_info_t` and `enaga_stream_status_t` (also by their tags, `struct
 enaga_app`, `enaga_host`, `enaga_event`, `enaga_package_header`, `enaga_file_info`, `enaga_stream_status`).
@@ -612,7 +635,7 @@ and the functions the C++ layer wraps:
 | `file_info`, `file_remove`, `file_make_folder`, `file_read_all`, `file_save`, `file_data_folder` | `files::info`, `remove`, `make_folder`, `read_all`, `save`, `data_folder` |
 | `file_load`, `file_list` | `files::load`, `list` |
 | `stream_open`, `stream_create`, `stream_read`, `stream_write`, `stream_status`, `stream_close` | `files::Stream` |
-| `open_menu`, `set_busy`, `speaker`, `headphones`, `device` | `enaga::system::` the same names |
+| `open_menu`, `set_busy`, `speaker`, `headphones`, `device`, `input` | `enaga::system::` the same names |
 
 **The package** on the card is an `enaga_package_header_t` (64 bytes: `magic` `ENAGA_PACKAGE_MAGIC`,
 `header_size`, `abi_version`, `load_address`, `load_size`, `bss_size`, `entry_offset`, `crc32`, `app_version`,

@@ -312,7 +312,7 @@ and the ones that need the unit collect into a session.
    passed through a steep curve (Lofi's runs 800, 1277, 1401 ... 3200), scaled to 0-127, and sent only when it
    moves by more than 1/127. Use our own curve fitted to that shape rather than Lofi's table. CyDrums sends every
    sample unfiltered (MIDI Channel Pressure, a flood): copy Lofi's change filter, not that.
-2. **Input selection.** Model it on Lofi-12 XT and CyDrums: a (source, level) pair, sources built-in mic, Hi-Z L,
+2. (**Done** 2026-11-20, see the log; each route to be checked on the unit.) **Input selection.** Model it on Lofi-12 XT and CyDrums: a (source, level) pair, sources built-in mic, Hi-Z L,
    dynamic mic R, stereo line, mono line (USB and resample later), levels 0-2, which maps one-to-one onto the
    SmplTrek's REC SRC routes: codec routing plus the pins GP1[2] (mic switch), GP7[14] / GP7[15] (INPUT L front
    end, +10 dB), GP5[11] (INPUT R mic stage) and GP1[3] (line pad). Table: smpltrek-re `docs/01-platform-map.md`
@@ -382,7 +382,7 @@ by feel to 1,600 / 1,000 / 600. App icons are left for E4.
 
 Since E3: one image serves the SmplTrek, Lofi-12 XT and CyDrums (the same board), and the build writes an update
 file for each; Enaga tells which it runs on from the bootloader's file name, confirmed on a SmplTrek in session 4.
-The other two are untested. E4 is under way ("E4 plan" above): pad pressure is done.
+The other two are untested. E4 is under way ("E4 plan" above): pad pressure and input selection are done; both await the unit.
 
 ## Open items
 
@@ -1284,4 +1284,30 @@ The emulator test (`test_pad_pressure_after_the_hit_settles`) checks:
 - nothing after the release.
 
 The CHECK app's PANEL page shows the last pad's VEL and PRS for the unit; checklist step 10 asks how it feels.
+
+### Input selection, E4 step 2 (2026-11-20)
+
+`enaga::system::input(source, level)` (host table `input`, appended): sources `ENAGA_INPUT_MIC`, `_HIZ`,
+`_DYNAMIC_MIC`, `_LINE_STEREO` and `_LINE_MONO`, levels `ENAGA_INPUT_LOW`, `_NORMAL` and `_HIGH`.
+- **The routes:** each pair writes the codec's ADC routing and PGAs and sets the front-end pins to the stock REC
+  SRC end state (docs/hardware.md "Input routes"). The ISR feeds a one-ADC source to both channels.
+- **Levels:** our own uniform scheme rather than Lofi's. LOW / NORMAL / HIGH are the stock three gain steps for
+  Hi-Z and the dynamic mic. For the lines, LOW is the PAD and NORMAL and HIGH are the same.
+- **Mono with the PAD:** stays mono (Lofi's behaviour), not the stock's both-slots artefact.
+- **Built-in mic rule:** applied in the ISR. The mic's input is zeroed while GP3[8] reads low.
+- **Switching:** the input is silenced while the codec is rewritten and for 8 blocks after.
+- **Between apps:** `apps_unload` puts LINE_STEREO NORMAL back, the start-up state, writing the codec only if
+  the input had changed.
+
+Tests:
+- `tests/test_input.py` checks every pair's codec registers, pins and what the app hears, with distinct levels
+  on the two ADC slots. It also checks the headphone rule and the quiet stretch.
+- `tests/test_menu.py` checks the reset on an app switch.
+
+On the emulator, the input stream's second word and the output capture's second word are the left channel
+(slot 1), as the ring's word order implies.
+
+CHECK's AUDIO page chooses the input (STEP 9-13, B for the level) for the route-by-route unit check
+(checklist step 7). The routes copy stock code and have not run on a unit; GP1[2]'s role in particular is
+inference.
 
