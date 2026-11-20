@@ -1,0 +1,63 @@
+# On a version tag (v0.1.0, ...): build the firmware and publish a GitHub release with one zip per device.
+# Each zip holds the update file under the name the bootloader looks for (spaces included, which GitHub would
+# rewrite in a bare asset name). The tag must match VERSION in firmware/build.py, which names the image.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  firmware:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag against firmware/build.py
+        run: |
+          version=$(python3 -B -c "import sys; sys.path.insert(0, 'firmware'); import build; print('.'.join(map(str, build.VERSION)))")
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match VERSION ${version} in firmware/build.py"
+            exit 1
+          fi
+
+      # The tic6x toolchain takes 20-30 minutes to build; it is rebuilt only when its scripts or patch change.
+      - name: Restore the toolchain
+        id: toolchain
+        uses: actions/cache@v4
+        with:
+          path: tools/tic6x
+          key: tic6x-ubuntu-24.04-${{ hashFiles('tools/build_tic6x_binutils.sh', 'tools/build_tic6x_gcc.sh', 'tools/patches/**') }}
+
+      - name: Build the toolchain
+        if: steps.toolchain.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flex bison
+          tools/build_tic6x_binutils.sh || { tail -50 tools/binutils-build/build/*.log; exit 1; }
+          tools/build_tic6x_gcc.sh || { tail -50 tools/gcc-build/build/*.log; exit 1; }
+
+      - name: Build the firmware
+        run: python3 -B firmware/build.py
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          for dir in build/firmware/*/; do
+            device=$(basename "$dir")
+            (cd "$dir" && python3 -m zipfile -c "$GITHUB_WORKSPACE/dist/enaga-${GITHUB_REF_NAME}-${device}.zip" *.bin)
+          done
+          (cd dist && sha256sum *.zip > SHA256SUMS)
+          cat dist/SHA256SUMS
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --title "Enaga ${GITHUB_REF_NAME}" --notes \
+            "Firmware update files for the SmplTrek, Lofi-12 XT and CyDrums (only the SmplTrek has been tested).
+          Unzip the file for your device and copy the .bin to the root of the SD card, keeping its name; then follow
+          \"Installing\" in the README."

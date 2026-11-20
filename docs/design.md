@@ -1224,3 +1224,13 @@ runtime. `tests/test_api_docs.py` (host-only) gathers the public names from `inc
 expressions (C names, host-table functions, C++ classes, enums, functions, members and constants, without
 `namespace detail` and `private:` sections) and fails when one is not mentioned in api.md: 395 names now.
 `<enaga/dsp.hpp>`'s summary gained what it had left out (biquads, FIR, wavetables, sync, chorus, Memory).
+
+### Release builds (2026-11-20)
+
+`.github/workflows/release.yml` runs on a pushed `v*` tag: it checks the tag against `VERSION` in
+`firmware/build.py`, restores the tic6x toolchain from the Actions cache (built by `tools/build_tic6x_*.sh` on a
+miss, 20-30 minutes; the key is the hash of those scripts and the patch), builds the firmware and creates a GitHub
+release with `enaga-<tag>-<device>.zip` for each device and `SHA256SUMS`. The zips keep the card names, spaces
+included, which GitHub would rewrite in a bare asset name. The firmware needs only GCC, so TI's tools are not
+involved; apps are not part of the release.
+

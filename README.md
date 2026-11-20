@@ -124,6 +124,9 @@ The Lofi-12 XT and CyDrums files are **untested**: their update format is checke
 but nobody has installed Enaga on one, and what their own bootloaders leave behind is unknown. Only try one if
 you are prepared to restore it with its official update.
 
+Each version tag (`v0.1.0`, ...) publishes the three update files on the repository's Releases page, one zip
+per device, built by `.github/workflows/release.yml` (the tag must match `VERSION` in `firmware/build.py`).
+
 1. Copy the file for your device to the root of the SD card, keeping its name: `build/firmware/smpltrek/SmplTrek.bin`,
    `build/firmware/lofi12xt/Lofi-12 XT.bin` or `build/firmware/cydrums/CyDrums.bin` (`ENAGA_<version>.bin` is
    the SmplTrek's under the release name). Copy an app's package to `/ENAGA/APPS/<NAME>/APP.ENA` (8.3 names).
