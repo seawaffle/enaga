@@ -106,6 +106,8 @@ changed.
 | PADS | LOW, MEDIUM, HIGH (MEDIUM) | pad sensitivity: a press from 1,600 / 1,000 / 600, released below 3/4 of that |
 | AUTO OFF | OFF, 5, 10, 30, 60 MIN (OFF) | switch off (stopping the app normally) after that long with no key, knob, pad press or POWER, unless the app has called `set_busy` |
 | SPEAKER | ON, OFF (ON) | the built-in speaker's mute, GP2[8], as the original firmware's SPEAKER MUTE |
+| MIDI CH | 1-16 (1) | the channel apps listen and send on by default (`enaga::midi::channel`) |
+| MIDI THRU | OFF, ON (OFF) | MIDI IN copied to MIDI OUT (SysEx excepted), merged with the app's own messages |
 
 The speaker, as in the original firmware: it plays unless the user has switched it off, the app has muted it
 (`speaker(false)`, e.g. while monitoring the built-in microphone, where the original firmware mutes it against
@@ -114,7 +116,8 @@ the unit in session 3). Switching it fades the output around the change. Apps ca
 (`headphones()`, GP3[8]: 1 with a plug in PHONES, unaffected by the other jacks, confirmed on the unit); the
 status page shows it as `H`.
 
-MIDI channel waits for MIDI (E4). An app's own settings are separate: `<enaga/settings.hpp>` gives it a key/value
+The routing rows of the stock MIDI CONFIG page (IN FROM / OUT TO: DIN, USB, both) come with USB MIDI (E4 step 5).
+An app's own settings are separate: `<enaga/settings.hpp>` gives it a key/value
 store in its data folder (`SETTINGS.TXT`, the same text format), built on the file API, with nothing new in Enaga.
 
 ## Memory
@@ -319,7 +322,7 @@ and the ones that need the unit collect into a session.
    "Hardware use per product", Audio (XF-21). Keep the stock rule in Enaga, not in apps: the built-in mic is used
    or monitored only while headphones are in (GP3[8] high), in every product, against speaker feedback. The pin
    roles come from the stock code and want a unit check per route (the next unit session, with the PADS check).
-3. **MIDI on DIN.** UART0 at 31,250 baud 8N1 (smpltrek-re HW-11: PSC0 module 9, PINMUX3 nibbles 4-5 = 2, divisor 372 at
+3. (**Done** on the emulator 2026-11-20, see the log; paced-input tests and the unit to come.) **MIDI on DIN.** UART0 at 31,250 baud 8N1 (smpltrek-re HW-11: PSC0 module 9, PINMUX3 nibbles 4-5 = 2, divisor 372 at
    186 MHz), interrupt-driven receive and transmit rings. A parser for the whole protocol: running status,
    real-time bytes inside other messages, SysEx of any length (delivered in chunks), system common. Apps get
    messages as events with their port, and send through `<enaga/midi.hpp>` (channel messages, SysEx, real-time);
@@ -382,7 +385,8 @@ by feel to 1,600 / 1,000 / 600. App icons are left for E4.
 
 Since E3: one image serves the SmplTrek, Lofi-12 XT and CyDrums (the same board), and the build writes an update
 file for each; Enaga tells which it runs on from the bootloader's file name, confirmed on a SmplTrek in session 4.
-The other two are untested. E4 is under way ("E4 plan" above): pad pressure and input selection are done; both await the unit.
+The other two are untested. E4 is under way ("E4 plan" above): pad pressure, input selection and MIDI on the DIN jacks are done on the
+emulator and await the unit.
 
 ## Open items
 
@@ -1310,4 +1314,33 @@ On the emulator, the input stream's second word and the output capture's second 
 CHECK's AUDIO page chooses the input (STEP 9-13, B for the level) for the route-by-route unit check
 (checklist step 7). The routes copy stock code and have not run on a unit; GP1[2]'s role in particular is
 inference.
+
+### MIDI on the DIN jacks, E4 step 3 (2026-11-20)
+
+UART0 driver `firmware/hal/uart0.c`, parser and sending `firmware/kernel/midi.c`; apps use `on_midi(MidiMessage)`,
+`on_midi_sysex` and `<enaga/midi.hpp>`. ABI additions:
+- `ENAGA_EVENT_MIDI`: id = port bit, value = the three bytes;
+- `enaga_midi_port`, `enaga_sysex_flags` and `ENAGA_SYSEX_CHUNK`;
+- host `midi_send` and `midi_channel`;
+- the app table's `midi_sysex`, called only when the app's `size` covers it.
+
+Choices:
+- **Transmit:** one byte per THRE interrupt, so a real-time byte from its own queue waits behind at most one
+  byte. A message queue of 2 KiB, all or nothing per call.
+- **Contexts:** the main loop and the audio callback may both send. Queuing turns interrupts off briefly.
+- **Delivery:** MIDI goes to the app while the menu is open, so notes from outside keep playing. It also counts as
+  activity for AUTO OFF.
+- **Normalising:** note on with velocity 0 arrives as note off. Active sensing is consumed: a gap of over 300 ms
+  gives CC 123 on every channel.
+- **THRU:** at the message level, through the same queue, so it never interleaves with the app's output. SysEx is
+  not forwarded, since a long one would block the app's messages while it passed.
+- **New settings:** MIDI CH and MIDI THRU. IN/OUT routing waits for USB.
+
+Tests:
+- `tests/test_midi.py` covers the parser cases, SysEx chunking and cutting, the sensing timeout, every send helper,
+  a clock byte going ahead of a 300-byte SysEx, and THRU.
+- They use the emulator's existing UART0 model with bursts of at most 16 bytes. Longer, paced streams and
+  transmit timestamps wait for the emulator work in progress (the brief of 2026-11-20).
+
+CHECK has a fifth page, MIDI, for checklist step 16.
 

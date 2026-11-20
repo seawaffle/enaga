@@ -94,7 +94,25 @@ enum enaga_event_type {
     /* Pad pressure, while a pad is held: once it is pressed 200 more than it settled at (about 150 ms after the
      * press), the mean of its last 9 readings on a cube curve from the threshold to 3,300, sent when it moves by
      * more than 1. Only between that pad's press and release. */
-    ENAGA_EVENT_PAD_PRESSURE = 7            /* id: pad 0-14; value: 0-127 */
+    ENAGA_EVENT_PAD_PRESSURE = 7,           /* id: pad 0-14; value: 0-127 */
+    /* One complete MIDI message other than SysEx (those go to enaga_app_t.midi_sysex): channel messages, system
+     * common and real-time. Running status is expanded; a note on with velocity 0 arrives as a note off (0x8n,
+     * velocity 0); active sensing is handled by Enaga (not delivered; when it stops, every channel gets All Notes
+     * Off, CC 123). Delivered whether or not the Enaga menu is open. */
+    ENAGA_EVENT_MIDI = 8                    /* id: enaga_midi_port it came from; value: status | data1 << 8 |
+                                             * data2 << 16 (unused data bytes 0) */
+};
+
+/* MIDI ports, as bits: a message's source (ENAGA_EVENT_MIDI's id), and where midi_send sends. */
+enum enaga_midi_port {
+    ENAGA_MIDI_DIN = 1,                     /* the MIDI IN / OUT jacks */
+    ENAGA_MIDI_USB = 2                      /* USB MIDI (not yet: E4 step 5) */
+};
+/* midi_sysex flags */
+enum enaga_sysex_flags {
+    ENAGA_SYSEX_START = 1,                  /* this chunk begins with F0 */
+    ENAGA_SYSEX_END = 2,                    /* the message ends with this chunk */
+    ENAGA_SYSEX_CUT = 4                     /* with END: it ended without F7 (another status byte arrived) */
 };
 
 typedef struct enaga_event {
@@ -243,6 +261,13 @@ typedef struct enaga_host {
      * -2 if the codec did not answer. The input is silent for about 10 ms around the change. Main context; it
      * takes a few milliseconds (codec writes). Reset to LINE_STEREO, NORMAL when the app stops. */
     int32_t (*input)(uint32_t source, uint32_t level);
+    /* MIDI. midi_send queues complete messages (one or several, SysEx included, each starting with its status
+     * byte; no running status) for `ports` (enaga_midi_port bits; 0 = where the user's settings send, now the DIN
+     * jack): 0 when queued whole, -1 when the queue lacks room (nothing is queued, so a
+     * message is never cut). A single real-time byte (F8-FF) goes ahead of anything queued. Main or audio
+     * context. midi_channel: the user's MIDI CH setting, 0-15, for an app to listen and send on. */
+    int32_t (*midi_send)(uint32_t ports, const uint8_t *data, uint32_t bytes);
+    uint32_t (*midi_channel)(void);
 } enaga_host_t;
 
 /* What the app gives Enaga. Every callback receives `context`; any callback may be 0. */
@@ -259,7 +284,13 @@ typedef struct enaga_app {
     /* Audio context (EDMA interrupt): `frames` interleaved stereo frames, L R L R, full scale +-1.0. `in` is
      * the codec input, `out` is written completely. No file access, drawing, allocation or blocking. */
     void (*audio)(void *context, const float *in, float *out, uint32_t frames);
+    /* MIDI System Exclusive, in chunks of up to ENAGA_SYSEX_CHUNK bytes as they arrive (enaga_sysex_flags): the
+     * first starts with F0, the last ends with F7 unless CUT. Real-time messages inside one arrive as events
+     * meanwhile. Main context. Enaga calls it only if `size` covers it. */
+    void (*midi_sysex)(void *context, uint32_t port, const uint8_t *data, uint32_t bytes, uint32_t flags);
 } enaga_app_t;
+
+#define ENAGA_SYSEX_CHUNK 256u
 
 typedef const enaga_app_t *(*enaga_entry_t)(const enaga_host_t *host);
 

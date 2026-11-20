@@ -47,6 +47,8 @@ static void host_speaker(uint32_t on) { audio_speaker_app = on != 0; audio_speak
 static int32_t host_headphones(void) { return audio_headphones(); }
 static uint32_t host_device(void) { return device_id; }
 static int32_t host_input(uint32_t source, uint32_t level) { return audio_input(source, level); }
+static int32_t host_midi_send(uint32_t ports, const uint8_t *data, uint32_t bytes) { return midi_send(ports, data, bytes); }
+static uint32_t host_midi_channel(void) { return (uint32_t)midi_channel_setting; }
 
 enaga_host_t app_host = {                     /* heap filled in per app by load_path */
     ENAGA_ABI_VERSION, sizeof(enaga_host_t), 0, 0,
@@ -56,7 +58,8 @@ enaga_host_t app_host = {                     /* heap filled in per app by load_
     files_read_all, files_save, files_read, files_write, files_load, files_list, files_data_folder,
     files_stream_open, files_stream_create, files_stream_read, files_stream_write, files_stream_status,
     files_stream_close,
-    host_open_menu, host_set_busy, host_speaker, host_headphones, host_device, host_input,
+    host_open_menu, host_set_busy, host_speaker, host_headphones, host_device, host_input, host_midi_send,
+    host_midi_channel,
 };
 
 static void cache_sync(uint32_t address, uint32_t bytes)   /* the loader calls this just before the app's entry */
@@ -332,6 +335,12 @@ void apps_unload(void)
 void apps_event(const enaga_event_t *event)
 {
     if (app_current && app_current->event) app_current->event(app_current->context, event);
+}
+
+void apps_sysex(int port, const u8 *data, u32 bytes, u32 flags)   /* only to an app whose table has the callback */
+{
+    const enaga_app_t *a = app_current;
+    if (a && a->size >= sizeof(enaga_app_t) && a->midi_sysex) a->midi_sysex(a->context, (u32)port, data, bytes, flags);
 }
 
 /* An app called fatal() (or failed in a way the runtime caught, or the watchdog found it hung): drop it and

@@ -29,9 +29,10 @@ What an app can use, header by header. This is the reference; the README's "Writ
 10. [Streams](#streams)
 11. [WAV headers](#wav-headers)
 12. [App settings](#app-settings)
-13. [DSP library](#dsp-library)
-14. [The C interface](#the-c-interface)
-15. [Language and runtime](#language-and-runtime)
+13. [MIDI](#midi)
+14. [DSP library](#dsp-library)
+15. [The C interface](#the-c-interface)
+16. [Language and runtime](#language-and-runtime)
 
 ## Building and installing an app
 
@@ -90,6 +91,8 @@ per app.
 | `void on_pad_press(int pad, int velocity)` | main | a pad pressed as a note: velocity 1-127 |
 | `void on_pad_release(int pad)` | main | that note released |
 | `void on_pad_pressure(int pad, int pressure)` | main | a held pad's pressure changed: 0-127 |
+| `void on_midi(const MidiMessage &message)` | main | a MIDI message arrived ([MIDI](#midi)) |
+| `void on_midi_sysex(int port, const uint8_t *data, uint32_t bytes, bool start, bool end)` | main | a chunk of System Exclusive arrived |
 | `void on_pad(int pad, unsigned pressure)` | main | every raw pad reading, 0-16383, about 3,930 a second in all |
 | `void on_card(bool usable)` | main | the SD card was inserted and mounted (`true`), or removed or unusable (`false`) |
 | `void audio(const float *in, float *out, uint32_t frames)` | audio | every block ([Audio](#audio)) |
@@ -427,6 +430,59 @@ void stop() override { settings.set("TEMPO", tempo); settings.save(); }
 Limits: `max_keys` (32) keys; keys up to `key_bytes` - 1 (23) bytes without `=` or a line break; text values up
 to `value_bytes` - 1 (31). Enaga's own settings are separate and not here.
 
+## MIDI
+
+The MIDI IN and OUT jacks (DIN). USB MIDI joins them in a later step, under the same calls. In
+`<enaga/app.hpp>` (receiving) and `<enaga/midi.hpp>` (sending).
+
+### Receiving: `on_midi(const MidiMessage &)` and `on_midi_sysex`
+
+Every message but System Exclusive comes to `on_midi`, whole, in the main context, also while the Enaga menu is
+open, so notes from outside keep playing. Enaga's parser follows the MIDI 1.0 specification:
+- **Running status:** expanded, so every message has its status byte.
+- **Real-time bytes:** messages of their own, even in the middle of another message or a SysEx.
+- **Note on with velocity 0:** arrives as a note off (status `0x8n`, velocity 0).
+- **Undefined bytes** (F4, F5, F9, FD) and data bytes without a status are dropped.
+- **Active sensing** (FE) is handled by Enaga and not delivered. Once it has been seen, a gap of over 300 ms gives
+  `on_midi` All Notes Off (CC 123) on all 16 channels, as the specification asks of a receiver.
+
+`MidiMessage` has `status`, `data1`, `data2` (unused ones 0) and `port` (`ENAGA_MIDI_DIN` or `ENAGA_MIDI_USB`),
+and readers for the common cases:
+
+| Member | Gives |
+|---|---|
+| `type()` | `MidiMessage::note_off`, `note_on`, `poly_pressure`, `control_change`, `program_change`, `channel_pressure`, `pitch_bend`, or `system` for F0-FF (then see `status`) |
+| `channel()` | 0-15 |
+| `note()`, `velocity()` | for notes; `pressure()` for poly and channel pressure |
+| `controller()`, `value()` | for control changes; `program()` for program changes |
+| `bend()` | for pitch bend, -8192 to 8191 |
+
+`on_midi_sysex(port, data, bytes, start, end)` gets System Exclusive in chunks of up to `ENAGA_SYSEX_CHUNK` (256)
+bytes as they arrive. The first chunk (`start`) begins with F0. The last (`end`) ends with F7, unless the message
+was cut short by another status byte. The data is valid only during the call.
+
+### Sending: `enaga::midi::`
+
+Each call queues one whole message for MIDI OUT and returns `true`. If the queue (2 KiB) is full it queues
+nothing and returns `false`: a message is never cut. Real-time messages (clock, start, continue, stop) go ahead
+of whatever is queued, behind at most the byte already being sent (0.32 ms). Main or audio context. Channels are
+0-15 and data bytes are masked to 7 bits.
+
+| Function | Sends |
+|---|---|
+| `note_on(ch, note, velocity)`, `note_off(ch, note, velocity = 0)` | notes |
+| `poly_pressure(ch, note, pressure)`, `channel_pressure(ch, pressure)` | aftertouch |
+| `control_change(ch, controller, value)`, `program_change(ch, program)` | controls and programs |
+| `pitch_bend(ch, bend)` | -8192 to 8191 |
+| `song_position(sixteenths)`, `song_select(song)` | system common |
+| `clock()`, `start()`, `continue_()`, `stop()`, `realtime(byte)` | real-time |
+| `sysex(data, bytes)` | a whole SysEx, F0 to F7 |
+| `send(data, bytes, ports = 0)` | raw bytes: one or more whole messages, each with its status byte; `ports` 0 means the user's routing, or `ENAGA_MIDI_DIN` / `ENAGA_MIDI_USB` bits |
+
+`enaga::midi::channel()` is the user's MIDI CH setting (0-15): the channel an app listens and sends on unless it
+has its own reason to use others. MIDI THRU (a setting, OFF by default) copies what arrives at MIDI IN to MIDI OUT,
+merged with the app's own messages without breaking either. SysEx is not copied.
+
 ## DSP library
 
 `<enaga/dsp.hpp>`, namespace `enaga::dsp`. Everything is float, at any sample rate. Each class wraps a plain C
@@ -601,6 +657,7 @@ app defines `const enaga_app_t *enaga_app_main(void)` (what `ENAGA_APP` writes) 
 runtime calls it after the static constructors.
 
 Its types: the enums `enaga_key`, `enaga_led`, `enaga_device`, `enaga_input_source`, `enaga_input_level`,
+`enaga_midi_port`, `enaga_sysex_flags` (`ENAGA_SYSEX_START`, `ENAGA_SYSEX_END`, `ENAGA_SYSEX_CUT`),
 `enaga_event_type`, `enaga_file_error`,
 `enaga_file_mode` and `enaga_stream_state`, and the structs `enaga_app_t`, `enaga_host_t`, `enaga_event_t`,
 `enaga_package_header_t`, `enaga_file_info_t` and `enaga_stream_status_t` (also by their tags, `struct
@@ -608,7 +665,8 @@ enaga_app`, `enaga_host`, `enaga_event`, `enaga_package_header`, `enaga_file_inf
 
 **`enaga_app_t`** (the app's table): `abi_version` (`ENAGA_ABI_VERSION`), `size` (`sizeof(enaga_app_t)`), `name`,
 `context` (passed to every callback), then `init` (0 on success), `update`, `draw` (the canvas as
-`uint8_t *`), `stop`, `event` and `audio`; any may be 0.
+`uint8_t *`), `stop`, `event`, `audio` and `midi_sysex` (port, data, bytes, `enaga_sysex_flags`; called only if
+`size` covers it); any may be 0.
 
 **`enaga_event_t`** (to `event`): `type`, `id`, `value`, `ms` (when Enaga read it).
 
@@ -621,6 +679,7 @@ enaga_app`, `enaga_host`, `enaga_event`, `enaga_package_header`, `enaga_file_inf
 | `ENAGA_EVENT_PAD_RELEASE` | pad | 0 |
 | `ENAGA_EVENT_CARD` | 0 | 1 inserted and mounted, 0 removed, or a negative `enaga_file_error` |
 | `ENAGA_EVENT_PAD_PRESSURE` | pad | pressure 0-127 |
+| `ENAGA_EVENT_MIDI` | `enaga_midi_port` | status \| data1 << 8 \| data2 << 16 |
 
 **`enaga_host_t`** (Enaga's table, `enaga::host()` in C++; valid until the app is unloaded): `abi_version`,
 `size`, `heap` and `heap_size` (the app's heap region, which the runtime manages), `sample_rate`, `block_frames`,
@@ -636,6 +695,7 @@ and the functions the C++ layer wraps:
 | `file_load`, `file_list` | `files::load`, `list` |
 | `stream_open`, `stream_create`, `stream_read`, `stream_write`, `stream_status`, `stream_close` | `files::Stream` |
 | `open_menu`, `set_busy`, `speaker`, `headphones`, `device`, `input` | `enaga::system::` the same names |
+| `midi_send(ports, data, bytes)` (0 queued, -1 no room), `midi_channel` | `enaga::midi::send` and the helpers, `channel` |
 
 **The package** on the card is an `enaga_package_header_t` (64 bytes: `magic` `ENAGA_PACKAGE_MAGIC`,
 `header_size`, `abi_version`, `load_address`, `load_size`, `bss_size`, `entry_offset`, `crc32`, `app_version`,

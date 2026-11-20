@@ -78,6 +78,26 @@ private:
 };
 [[noreturn]] void fatal(const char *reason);
 
+// A MIDI message as on_midi receives it (ENAGA_EVENT_MIDI): running status expanded, a note on with velocity 0
+// turned into a note off. Sending: <enaga/midi.hpp>.
+struct MidiMessage {
+    uint8_t status = 0, data1 = 0, data2 = 0;
+    int port = 0;                             // ENAGA_MIDI_DIN or ENAGA_MIDI_USB
+    enum Type : uint8_t {
+        note_off = 0x80, note_on = 0x90, poly_pressure = 0xA0, control_change = 0xB0, program_change = 0xC0,
+        channel_pressure = 0xD0, pitch_bend = 0xE0, system = 0xF0
+    };
+    Type type() const { return Type(status < 0xF0 ? status & 0xF0 : 0xF0); }
+    int channel() const { return status & 0x0F; }   // 0-15, for channel messages
+    int note() const { return data1; }
+    int velocity() const { return data2; }
+    int controller() const { return data1; }
+    int value() const { return data2; }
+    int program() const { return data1; }
+    int pressure() const { return type() == channel_pressure ? data1 : data2; }
+    int bend() const { return (data1 | data2 << 7) - 8192; }   // -8192..8191
+};
+
 class App {
 public:
     virtual ~App() = default;
@@ -91,6 +111,12 @@ public:
     virtual void on_pad_press(int pad, int velocity) { (void)pad; (void)velocity; }   // velocity 1-127
     virtual void on_pad_release(int pad) { (void)pad; }
     virtual void on_pad_pressure(int pad, int pressure) { (void)pad; (void)pressure; }   // 0-127, while held
+    // MIDI in (main context, also while the Enaga menu is open): every message but SysEx, which comes to
+    // on_midi_sysex in chunks (the first starts with F0; `end` on the last, which ends with F7 unless it was cut).
+    virtual void on_midi(const MidiMessage &message) { (void)message; }
+    virtual void on_midi_sysex(int port, const uint8_t *data, uint32_t bytes, bool start, bool end) {
+        (void)port; (void)data; (void)bytes; (void)start; (void)end;
+    }
     // The card: true when one was inserted and mounted, false when it was removed (or an inserted one cannot be
     // used). Open files from before a removal are dead: close them (<enaga/files.hpp>).
     virtual void on_card(bool usable) { (void)usable; }
@@ -118,6 +144,18 @@ inline void event(void *app, const enaga_event_t *e) {
     else if (e->type == ENAGA_EVENT_PAD_RELEASE) a->on_pad_release(e->id);
     else if (e->type == ENAGA_EVENT_PAD_PRESSURE) a->on_pad_pressure(e->id, e->value);
     else if (e->type == ENAGA_EVENT_CARD) a->on_card(e->value > 0);
+    else if (e->type == ENAGA_EVENT_MIDI) {
+        MidiMessage m;
+        m.status = uint8_t(e->value);
+        m.data1 = uint8_t(e->value >> 8);
+        m.data2 = uint8_t(e->value >> 16);
+        m.port = e->id;
+        a->on_midi(m);
+    }
+}
+inline void midi_sysex(void *app, uint32_t port, const uint8_t *data, uint32_t bytes, uint32_t flags) {
+    static_cast<App *>(app)->on_midi_sysex(int(port), data, bytes, (flags & ENAGA_SYSEX_START) != 0,
+                                           (flags & ENAGA_SYSEX_END) != 0);
 }
 inline void audio(void *app, const float *in, float *out, uint32_t frames) {
     static_cast<App *>(app)->audio(in, out, frames);
@@ -127,7 +165,7 @@ template <class T> const enaga_app_t *bind(const char *name) {
     static T instance;
     static const enaga_app_t table = {ENAGA_ABI_VERSION, sizeof(enaga_app_t), name, static_cast<App *>(&instance),
                                       &detail::init, &detail::update, &detail::draw, &detail::stop,
-                                      &detail::event, &detail::audio};
+                                      &detail::event, &detail::audio, &detail::midi_sysex};
     return &table;
 }
 }  // namespace detail

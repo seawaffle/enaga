@@ -21,8 +21,13 @@
 //          read). KiB/s for each, SCATTER's reads a second, and how many 48 kHz 16-bit stereo streams (187.5
 //          KiB/s each) READ's rate would feed. The file is removed afterwards; the results also go to the log.
 //          A failure stops the app, so that Enaga's status page shows the log with the SD driver's details.
+//   MIDI   the MIDI channel (SETTINGS, MIDI CH), messages in and out, the last four received (hex) and the last
+//          SysEx's length. STEP 1 plays key 60 while held (note on / off), STEP 2 sends CC 7 = 100, STEP 3 a
+//          SysEx identity request (F0 7E 7F 06 01 F7), STEP 4 starts or stops a MIDI clock at 120 BPM (START,
+//          24 clocks a beat, STOP).
 #include <enaga/app.hpp>
 #include <enaga/files.hpp>
+#include <enaga/midi.hpp>
 
 #include <cstdint>
 
@@ -32,7 +37,7 @@ constexpr int kTable = 64;
 constexpr uint32_t kBlockCycles = 496000;          // the 64-frame budget at 372 MHz; load is per mille of it
 constexpr uint32_t kBankSamples = 4u << 20;        // 8 MiB of 16-bit samples
 constexpr int kMaxVoices = 512;
-constexpr int kPageCount = 4;
+constexpr int kPageCount = 5;
 
 constexpr const char *kCardPath = "/RECORD/CHECK.BIN";
 constexpr uint32_t kCardBytes = 4u << 20;           // the test file
@@ -103,6 +108,10 @@ public:
             leds_off();
             page_ = (page_ + 1) % kPageCount;
         }
+        while (clock_on_ && ms - clock_last_ >= (clock_count_ + 1) * 125u / 6u) {   // 120 BPM: 24 a beat,
+            clock_count_++;                                                          // 125/6 ms apart
+            if (enaga::midi::clock()) midi_out_++;
+        }
         uint32_t load = enaga::audio_load();
         if (load > load_window_) load_window_ = load;
         if (ms - load_since_ >= 1000) {
@@ -135,6 +144,7 @@ public:
             events_++;
         }
         if (page_ == 2) enaga::button_led(key, 0, down ? ENAGA_LED_MAX : 0);
+        if (page_ == 4) midi_key(key, down);
         if (page_ == 0 && down && key >= ENAGA_KEY_STEP1 + 8 && key <= ENAGA_KEY_STEP1 + 12) {
             input_source_ = key - ENAGA_KEY_STEP1 - 8;
             input_result_ = enaga::system::input(input_source_, input_level_);
@@ -194,7 +204,7 @@ public:
     }
 
     void draw(enaga::Canvas &canvas) override {
-        static const char *const kPages[kPageCount] = {"AUDIO", "LOAD", "PANEL", "CARD"};
+        static const char *const kPages[kPageCount] = {"AUDIO", "LOAD", "PANEL", "CARD", "MIDI"};
         canvas.clear();
         canvas.text(0, 0, "CHECK");
         canvas.text(48, 0, kPages[page_], 10);
@@ -203,6 +213,19 @@ public:
         if (page_ == 1) draw_load(canvas);
         if (page_ == 2) draw_panel(canvas);
         if (page_ == 3) draw_card(canvas);
+        if (page_ == 4) draw_midi(canvas);
+    }
+
+    void on_midi(const enaga::MidiMessage &m) override {
+        midi_in_++;
+        if (m.status == 0xF8) return;                  // clocks are counted, not listed
+        for (int i = 3; i > 0; i--) midi_last_[i] = midi_last_[i - 1];
+        midi_last_[0] = uint32_t(m.status) | uint32_t(m.data1) << 8 | uint32_t(m.data2) << 16 | 1u << 24;
+    }
+    void on_midi_sysex(int port, const uint8_t *data, uint32_t bytes, bool start, bool end) override {
+        (void)port; (void)data;
+        sysex_bytes_ = start ? bytes : sysex_bytes_ + bytes;
+        if (end) sysex_shown_ = sysex_bytes_;
     }
 
 private:
@@ -308,6 +331,41 @@ private:
         canvas.text(0, 96, (Line() << "PAD MSG/S " << pads_per_second_).str(), 10);
         if (note_pad_ >= 0)
             canvas.text(0, 108, (Line() << "PAD " << note_pad_ << " VEL " << note_velocity_ << " PRS " << note_pressure_).str());
+    }
+
+    void midi_key(int key, bool down) {
+        int ch = enaga::midi::channel(), step = key - ENAGA_KEY_STEP1;
+        bool sent = false;
+        if (step == 0) sent = down ? enaga::midi::note_on(ch, 60, 100) : enaga::midi::note_off(ch, 60);
+        if (!down) { if (sent) midi_out_++; return; }
+        if (step == 1) sent = enaga::midi::control_change(ch, 7, 100);
+        if (step == 2) {
+            static const uint8_t identity[6] = {0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7};
+            sent = enaga::midi::sysex(identity, sizeof identity);
+        }
+        if (step == 3) {
+            clock_on_ = !clock_on_;
+            sent = clock_on_ ? enaga::midi::start() : enaga::midi::stop();
+            clock_last_ = enaga::ms();
+            clock_count_ = 0;
+        }
+        if (sent) midi_out_++;
+    }
+
+    void draw_midi(enaga::Canvas &canvas) {
+        static const char kHex[] = "0123456789ABCDEF";
+        canvas.text(0, 16, (Line() << "CH " << enaga::midi::channel() + 1 << (clock_on_ ? "  CLOCK" : "")).str());
+        canvas.text(0, 28, (Line() << "IN " << midi_in_ << " OUT " << midi_out_).str(), 10);
+        for (int i = 0; i < 4; i++) {
+            uint32_t m = midi_last_[i];
+            if (!(m >> 24)) break;
+            char text[9] = {kHex[m >> 4 & 15], kHex[m & 15], ' ', kHex[m >> 12 & 15], kHex[m >> 8 & 15], ' ',
+                            kHex[m >> 20 & 15], kHex[m >> 16 & 15], 0};
+            canvas.text(0, 40 + 10 * i, text, i ? 8 : 15);
+        }
+        canvas.text(0, 82, (Line() << "SYSEX " << sysex_shown_).str(), 10);
+        canvas.text(0, 96, "1 NOTE 2 CC 3 SYSEX", 6);
+        canvas.text(0, 105, "4 CLOCK START/STOP", 6);
     }
 
     // CARD: one stage after another, each moved on by its request callbacks.
@@ -420,6 +478,9 @@ private:
     int last_key_ = 0;
     bool last_down_ = false;
     uint32_t presses_[ENAGA_KEY_COUNT] = {}, events_ = 0;
+    uint32_t midi_in_ = 0, midi_out_ = 0, midi_last_[4] = {}, sysex_bytes_ = 0, sysex_shown_ = 0;
+    bool clock_on_ = false;
+    uint32_t clock_last_ = 0, clock_count_ = 0;
     int input_source_ = ENAGA_INPUT_LINE_STEREO, input_level_ = ENAGA_INPUT_NORMAL, input_result_ = 0;
     int note_pad_ = -1, note_velocity_ = 0, note_pressure_ = 0;
     uint32_t pad_raw_[15] = {}, pad_messages_ = 0, pad_messages_last_ = 0, pads_per_second_ = 0;

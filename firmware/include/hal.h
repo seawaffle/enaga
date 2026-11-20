@@ -40,6 +40,14 @@ int  oled_dma_poll(void);             /* 1 while a frame is in flight; completes
 void oled_dma_finish(void);           /* wait for a frame in flight (interrupts may be off) */
 extern u32 oled_dma_frames, oled_dma_timeouts;
 
+/* MIDI DIN on UART0 (uart0.c): bytes in and out through rings, moved by its interrupt. */
+void uart0_init(void);
+void uart0_isr(void);
+int  uart0_read(u8 *byte);            /* 1 and the next received byte, or 0 when none is waiting */
+u32  uart0_tx_free(void);             /* bytes the transmit queue can take */
+int  uart0_send(const u8 *data, u32 bytes);   /* all or nothing: 0, or -1 if the queue lacks room */
+int  uart0_send_realtime(u8 byte);    /* a real-time byte, ahead of the queue: 0, or -1 if its own queue is full */
+extern u32 uart0_rx_bytes, uart0_tx_bytes, uart0_overruns, uart0_ring_lost, uart0_line_errors;
 void uart1_init(void);
 void uart1_send(u8 byte);
 int  uart1_poll(void);                /* parses what the MCU sent; returns 1 when a message completed */

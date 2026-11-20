@@ -11,6 +11,8 @@
  *   PADS        LOW MEDIUM HIGH   sensitivity: a press from 1,600 / 1,000 / 600, released below 3/4 of that
  *   AUTO OFF    OFF 5-60 MIN      switch off after that long without input, unless the app is busy (set_busy)
  *   SPEAKER     ON OFF            the built-in speaker (headphones cut it in any case); an app can also mute it
+ *   MIDI CH     1-16              the channel apps listen and send on by default (enaga::midi::channel)
+ *   MIDI THRU   OFF ON            copy what arrives at MIDI IN to MIDI OUT (SysEx excepted), merged with the app's own
  *
  * The SPI flash is not used: it holds the original firmware's sound content, which Enaga never writes. */
 #define SETTINGS_FILE "/ENAGA/SETTINGS.TXT"
@@ -19,6 +21,9 @@ static const char *const numbers[] = { "0", "1", "2", "3", "4", "5", "6", "7", "
 static const char *const pads[] = { "LOW", "MEDIUM", "HIGH" };
 static const char *const off[] = { "OFF", "5 MIN", "10 MIN", "30 MIN", "60 MIN" };
 static const char *const on_off[] = { "ON", "OFF" };
+static const char *const off_on[] = { "OFF", "ON" };
+static const char *const channels[] = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14",
+                                        "15", "16" };
 
 typedef struct {
     const char *name;
@@ -26,13 +31,15 @@ typedef struct {
     int first, count, fallback;               /* labels[first .. first + count - 1]; the default's index */
 } setting_t;
 
-enum { VOLUME, BRIGHTNESS, PADS, AUTO_OFF, SPEAKER, SETTINGS_COUNT };
+enum { VOLUME, BRIGHTNESS, PADS, AUTO_OFF, SPEAKER, MIDI_CH, MIDI_THRU, SETTINGS_COUNT };
 static const setting_t table[SETTINGS_COUNT] = {
     { "VOLUME", numbers, 0, 11, 10 },
     { "BRIGHTNESS", numbers, 1, 10, 9 },
     { "PADS", pads, 0, 3, 1 },
     { "AUTO OFF", off, 0, 5, 0 },
     { "SPEAKER", on_off, 0, 2, 0 },
+    { "MIDI CH", channels, 0, 16, 0 },
+    { "MIDI THRU", off_on, 0, 2, 0 },
 };
 static int settings_value[SETTINGS_COUNT], settings_saved[SETTINGS_COUNT];
 static int settings_cursor;
@@ -52,6 +59,8 @@ static void apply(int which)
     case PADS: pad_press_level = press[v]; pad_release_level = press[v] * 3u / 4u; break;
     case AUTO_OFF: settings_auto_off_ms = minutes[v] * 60000u; break;
     case SPEAKER: audio_speaker_setting = v == 0; audio_speaker_apply(); break;
+    case MIDI_CH: midi_channel_setting = v; break;
+    case MIDI_THRU: midi_thru = v == 1; break;
     default: break;
     }
 }

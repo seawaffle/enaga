@@ -23,6 +23,7 @@ extern char _stack_top[];
 /* irq.c */
 #define IRQ_WATCHDOG 4                        /* CPU interrupt 4 <- event 4, T64P0_TINT12 (the highest maskable priority) */
 #define IRQ_UART1 6                           /* CPU interrupt 6 <- event 46, UART1_INT (the panel MCU's bytes) */
+#define IRQ_UART0 7                           /* CPU interrupt 7 <- event 38, UART0_INT (MIDI DIN) */
 #define IRQ_AUDIO 8                           /* CPU interrupt 8 <- event 8, EDMA3_0_CC0_INT1 (shadow region 1) */
 void irq_init(void);
 void irq_enable(u32 mask);                    /* IER |= mask, remembered for irq_unwind */
@@ -50,6 +51,11 @@ void device_detect(void);
 
 int  audio_headphones(void);                  /* 1 while headphones are plugged in (GP3[8]) */
 int  audio_input(unsigned source, unsigned level);   /* enaga_input_source / _level: 0, -1 invalid, -2 codec; main */
+int  midi_poll(u32 ms);                       /* main loop: parse MIDI input; returns the bytes taken */
+int  midi_send(u32 ports, const u8 *data, u32 bytes);   /* an app's midi_send (enaga_host_t) */
+extern int midi_channel_setting, midi_thru;   /* MIDI CH 0-15, MIDI THRU */
+extern u32 midi_messages_in, midi_messages_out, midi_sysex_in, midi_dropped_out;
+void apps_sysex(int port, const u8 *data, u32 bytes, u32 flags);
 void audio_input_reset(void);                 /* back to LINE_STEREO, NORMAL (between apps) */
 void audio_silence_now(void);                 /* zero the transmit ring at once (crash paths) */
 void audio_irq_rearm(void);                   /* re-evaluate the EDMA interrupt (after leaving the ISR abnormally) */

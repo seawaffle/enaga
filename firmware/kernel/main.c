@@ -268,6 +268,7 @@ static void poll_inputs(u32 ms)
             deliver(&e);
         }
     uart1_poll();                             /* pads arrive through on_pad */
+    if (midi_poll(ms)) last_input = ms;       /* MIDI goes to the app even while the menu is open */
     if (!mcu_replies && ms - a0_last_ms >= 2000) {   /* the MCU may have missed the first A0: ask again */
         a0_last_ms = ms;
         uart1_send(0xA0);
@@ -398,6 +399,8 @@ void main(void)
     boot_menu = (last_keys >> ENAGA_KEY_F1) & 1;   /* F1 held through start-up: the menu, no app */
     uart1_irq_start();                        /* the MCU's bytes by interrupt from here (start-up may have lost some) */
     irq_enable(1u << IRQ_UART1);
+    uart0_init();                             /* MIDI DIN */
+    irq_enable(1u << IRQ_UART0);
     irq_global_enable();                      /* audio blocks start being serviced (silence until an app) */
     log_line("ENAGA " ENAGA_VERSION);
     log_cache(cache_entry_config(), cache_config());   /* the second line: hardware.md "Checks on a unit" step 2 */

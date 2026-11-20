@@ -347,6 +347,21 @@ Pins not named are left in the line state: GP1[2] low, GP7[14] high, GP7[15] low
 LINE_STEREO NORMAL is the start-up state. Stock LINE_MONO with the PAD powers both ADCs and reads both slots,
 an artefact of its PAD code. Enaga keeps it mono, as Lofi-12 XT's selector does.
 
+## MIDI (DIN)
+
+UART0 at `0x01C42000`, set up as the original firmware does (smpltrek-re HW-11):
+- **Power and pins:** PSC0 module 9; PINMUX3 nibbles 4 and 5 = 2 (RXD, TXD).
+- **Format:** MDR = 0 (16x), divisor 372, so 186 MHz / 16 / 372 = 31,250 baud. LCR = 3 (8N1); FIFOs on, receive
+  trigger 1.
+- **Interrupt:** event 38 (UART0_INT) on CPU interrupt 7 (`firmware/hal/uart0.c`).
+
+The one interrupt drains the receive FIFO into a 2 KiB ring. It also sends one byte per THRE interrupt from a
+2 KiB queue, with a 16-byte real-time queue ahead of it. It may nest inside the app's audio callback, like UART1.
+Parsing is in the main loop (`firmware/kernel/midi.c`, docs/api.md "MIDI").
+
+Not yet on a unit: the jacks' wiring and the opto-isolator side are not visible to code, so the first loop through
+a cable is the check (checklist step 16).
+
 ## SD card
 
 **MMCSD0**, pins on PINMUX10; card detect on GP4[0] (low = card present); GP4[1] is driven low. 399 kHz
@@ -368,7 +383,8 @@ transfers (CMD18, CMD25, then CMD12) use the same sequence with MMCNBLK set; the
 
 The C674x interrupt controller routes events to CPU interrupts 4-15 through INTMUX1-3. Enaga uses CPU
 interrupt 4 for event 4 (TIMER64P0 TINT12, the watchdog tick; the original firmware's clock tick is the same
-event) and CPU interrupt 8 for event 8 (EDMA3 CC0 region 1 completion). Exceptions (internal and software) are enabled
+event), CPU interrupt 6 for event 46 (UART1, the panel MCU), CPU interrupt 7 for event 38 (UART0, MIDI) and CPU
+interrupt 8 for event 8 (EDMA3 CC0 region 1 completion). Exceptions (internal and software) are enabled
 with TSR.GEE and enter through the NMI vector; the EFR and IERR bit values follow TI's SYS/BIOS c64p
 exception module.
 
@@ -481,5 +497,18 @@ unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it mut
     speaker should stop and the headphones play. SETTINGS, SPEAKER OFF: the speaker stays silent unplugged; back to
     ON. Then open STATUS: `H` (right end of the AUDIO line) is 1 with headphones in and 0 without, whatever else
     is plugged in (first unit result: 0 / 1 / 0 for nothing, headphones, a plug in any other jack).
+16. **MIDI (CHECK, MIDI page, the fifth):** with a MIDI keyboard or interface:
+    - **In:** connect its MIDI OUT to the unit's MIDI IN. Play notes and turn a knob. IN counts up, and the last
+      messages show as hex (`90 3C 64` is note on, key 60, velocity 100; a release shows as `80 3C 00` even if the
+      keyboard sends a note on with velocity 0). A SysEx from it (a patch dump, say) shows its length on the
+      SYSEX line.
+    - **Out:** connect the unit's MIDI OUT to its MIDI IN, or to a computer's MIDI monitor. STEP 1 held is a note
+      (key 60) on the channel shown; STEP 2 sends CC 7 = 100; STEP 3 an identity request; STEP 4 starts a 120 BPM
+      clock (START, then 24 clocks a beat) and stops it (STOP). A synth set to follow MIDI clock should run at 120.
+    - **Loop:** a cable from the unit's MIDI OUT to its own MIDI IN. Each STEP 1-3 press counts on both IN and OUT,
+      and the messages list what was sent; the clock counts IN at about 48 a second.
+    - **Settings:** SETTINGS, MIDI CH to 2: CH on the MIDI page shows 2 and STEP 1 sends `91`. MIDI THRU ON, with
+      the keyboard into MIDI IN and MIDI OUT to a second instrument or monitor: what the keyboard plays comes out
+      too. Set both back.
 
 Afterwards the official update restores the unit ("Installing and recovery").

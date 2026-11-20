@@ -19,6 +19,7 @@ typedef unsigned long long u64;
 #define GPIO     0x01E26000u
 #define TIMER0   0x01C20000u          /* TIMER64P0 */
 #define SPI1     0x01F0E000u
+#define UART0    0x01C42000u          /* MIDI DIN */
 #define UART1    0x01D0C000u
 #define I2C0     0x01C22000u          /* the codec's control port; no PSC module, runs from the 24 MHz oscillator */
 #define MCASP0   0x01D00000u          /* control registers; the DMA port is MCASP0_DATA */
@@ -30,6 +31,7 @@ typedef unsigned long long u64;
 #define PSC1_SPI1   10
 #define PSC1_UART1  12
 #define PSC1_MCASP0 7
+#define PSC0_UART0  9
 #define PSC0_EDMA_CC 0
 #define PSC0_EDMA_TC0 1
 
