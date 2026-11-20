@@ -479,8 +479,12 @@ of whatever is queued, behind at most the byte already being sent (0.32 ms). Mai
 | `sysex(data, bytes)` | a whole SysEx, F0 to F7 |
 | `send(data, bytes, ports = 0)` | raw bytes: one or more whole messages, each with its status byte; `ports` 0 means the user's routing, or `ENAGA_MIDI_DIN` / `ENAGA_MIDI_USB` bits |
 
-`enaga::midi::channel()` is the user's MIDI CH setting (0-15): the channel an app listens and sends on unless it
-has its own reason to use others. MIDI THRU (a setting, OFF by default) copies what arrives at MIDI IN to MIDI OUT,
+**Channels.** An app receives and sends on all 16 channels: Enaga filters nothing, `message.channel()` says
+where a message came from, and every sending helper takes its channel. So one app can take several tracks from an
+outside sequencer (channel 1 to the drums, 2 to the bass) or play several synths. `enaga::midi::channel()` is the
+user's MIDI CH setting (0-15), only a default: the channel a single-voice app uses when it has no reason to choose.
+An app with several tracks keeps their channels in its own settings (`<enaga/settings.hpp>`), as the original
+firmware keeps a channel per track. MIDI THRU (a setting, OFF by default) copies what arrives at MIDI IN to MIDI OUT,
 merged with the app's own messages without breaking either. SysEx is not copied.
 
 ## DSP library

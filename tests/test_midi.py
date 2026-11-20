@@ -2,9 +2,9 @@
 system common, SysEx in chunks and cut short, active sensing), sending (every helper, a long SysEx with a clock
 byte going ahead of it), and MIDI THRU.
 
-Input goes in through the emulator's UART0 receive path. Bytes injected that way arrive at once, so they go in
-bursts of at most 16 (the receive FIFO), with time to drain between. A paced MIDI IN source is on its way in the
-emulator; long streams will use it.
+Short cases go in through the emulator's unpaced UART0 receive path, in bursts of at most 16 bytes (the receive
+FIFO). Long streams use its paced MIDI IN sender (`midi_in`: one byte per character time, as a real sender), the
+OUT-to-IN cable (`midi_loopback`) and the transmit timestamps (`uart_sent(..., cycles=True)`).
 
     ENAGA_EMULATOR=/path/to/emulator python3 -B -m unittest tests.test_midi
 """
@@ -21,6 +21,7 @@ import paths  # noqa: E402
 
 BOOT = 300_000_000
 MS = 372_000
+CHARACTER = 119_040                                  # cycles per byte at 31,250 baud 8N1
 STEP1 = 32
 
 
@@ -119,6 +120,59 @@ class Midi(unittest.TestCase):
         self.assertEqual(out.count(0xF8), 1)
         self.assertEqual(out.replace(b"\xf8", b""), bytes([0x90, 0x3C, 0x64, 0x90, 0x3C, 0x00, 0xB1, 0x07, 0x10]))
 
+
+    def paced(self, data, extra_ms=10):              # through the paced sender, then until it has all arrived
+        self.emu.cpu.midi_in(bytes(data))
+        self.assertIsNone(self.emu.run(len(data) * CHARACTER + extra_ms * MS)["error"])
+        self.assertEqual(self.emu.cpu.midi_state()["queued"], 0)
+
+    def assert_nothing_lost(self):
+        self.assertEqual(self.emu.cpu.midi_state()["overruns"], 0)
+        self.assertEqual(self.emu.word("uart0_overruns"), 0)
+        self.assertEqual(self.emu.word("uart0_ring_lost"), 0)
+
+    def test_a_long_sysex_dump_at_full_rate(self):
+        self.new_lines()
+        body = [(i * 7) & 0x7F for i in range(1000)]
+        self.paced([0xF0] + body + [0xF7])          # 1,002 bytes back to back, about 321 ms
+        self.assertEqual(self.new_lines(), ["S256 1", "S256 0", "S256 0", "S234 2"])
+        self.assert_nothing_lost()
+
+    def test_a_dense_stream_of_notes_at_full_rate(self):
+        before = self.emu.word("midi_messages_in")
+        stream = [0x90]
+        for i in range(200):                         # running status: 400 data bytes, 200 notes on and off
+            stream += [36 + i % 48, 100 if i % 2 == 0 else 0]
+        stream += [0xB0, 64, 127] * 50 + [0xF8] * 100
+        self.paced(stream)
+        self.assertEqual(self.emu.word("midi_messages_in") - before, 200 + 50 + 100)
+        self.assertEqual(self.new_lines()[-1], "MF8 00 00")
+        self.assert_nothing_lost()
+
+    def test_sent_bytes_go_back_to_back_and_a_clock_cuts_in(self):
+        self.press(2)                                # the 300-byte SysEx, then a clock byte
+        self.assertIsNone(self.emu.run(150 * MS)["error"])
+        data, total, cycles = self.emu.cpu.uart_sent(0, 0, cycles=True)
+        self.assertEqual(len(data), 301)
+        gaps = [b - a for a, b in zip(cycles, cycles[1:])]
+        self.assertEqual(max(gaps), CHARACTER)       # no idle time between bytes: the queue keeps the line busy
+        self.assertEqual(min(gaps), CHARACTER)
+        self.assertLessEqual(data.index(0xF8), 2)
+
+    def test_round_trip_through_a_cable(self):
+        self.emu.cpu.midi_loopback(True)
+        self.new_lines()
+        self.press(1)                                # note on, key 60
+        self.press(2)                                # the 300-byte SysEx and a clock byte
+        self.press(3)                                # every helper once
+        self.assertIsNone(self.emu.run(200 * MS)["error"])
+        lines = self.new_lines()
+        self.assertEqual(lines[0], "M90 3C 64")
+        self.assertEqual([x for x in lines if x[0] == "S"], ["S256 1", "S44 2"])
+        self.assertIn("MF8 00 00", lines)
+        self.assertEqual(lines[-8:], ["M80 3C 00", "MA0 3C 21", "MB0 07 64", "MC0 05 00", "MD0 2C 00", "ME0 00 00",
+                                      "MF2 2C 02", "MF3 03 00"])
+        self.assert_nothing_lost()
 
 if __name__ == "__main__":
     unittest.main()

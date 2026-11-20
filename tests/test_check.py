@@ -1,6 +1,6 @@
 """The CHECK app for sessions on a unit (tests/unit/check, docs/hardware.md "Checks on a unit") runs on the
-emulator: tones on the expected channels, the load page's voice cap, key LEDs on the panel page, and the card
-page's measurement running to the end.
+emulator: tones on the expected channels, the load page's voice cap, key LEDs on the panel page, the card
+page's measurement running to the end, and the MIDI page's messages and 120 BPM clock.
 
     ENAGA_EMULATOR=/path/to/emulator python3 -B -m unittest discover -s tests -p test_check.py -v
 """
@@ -120,6 +120,28 @@ class Check(unittest.TestCase):
                 image.write_bytes(emu.cpu.sd_read())
                 self.assertIsNone(card.get(image, "/RECORD/CHECK.BIN"))       # removed before stopping
 
+
+    def test_midi_page_sends_and_its_clock_keeps_tempo(self):
+        with Emulation(HERE / "unit" / "check", "CHECK") as emu:
+            self.assertIsNone(emu.run(BOOT)["error"])
+            for _ in range(4):                                       # F4 held a second, four times: MIDI
+                self.press(emu, F4, hold_ms=1100)
+            emu.cpu.midi_loopback(True)
+            self.press(emu, STEP1 + 1)                               # CC 7 = 100, back in through the cable
+            self.press(emu, STEP1 + 3)                               # START, then the clock
+            emu.run(1000 * MS)
+            self.press(emu, STEP1 + 3)                               # STOP
+            emu.run(20 * MS)
+            data, _, cycles = emu.cpu.uart_sent(0, 0, cycles=True)
+            self.assertEqual(data[:4], bytes([0xB0, 7, 100, 0xFA]))
+            self.assertEqual(data[-1], 0xFC)
+            clocks = [c for b, c in zip(data, cycles) if b == 0xF8]
+            self.assertTrue(47 <= len(clocks) <= 50, len(clocks))   # 48 a second at 120 BPM
+            gaps = [(b - a) / (372_000_000 / 1000) for a, b in zip(clocks, clocks[1:])]
+            self.assertTrue(all(19.0 < g < 23.0 for g in gaps), gaps)   # 20.8 ms, timed by the main loop
+            span = (clocks[-1] - clocks[0]) / 372_000_000 / (len(clocks) - 1)
+            self.assertAlmostEqual(span * 1000, 125 / 6, delta=0.3)  # no drift over the second
+            self.assertEqual(emu.cpu.midi_state()["overruns"], 0)
 
 if __name__ == "__main__":
     unittest.main()

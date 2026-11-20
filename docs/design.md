@@ -322,7 +322,7 @@ and the ones that need the unit collect into a session.
    "Hardware use per product", Audio (XF-21). Keep the stock rule in Enaga, not in apps: the built-in mic is used
    or monitored only while headphones are in (GP3[8] high), in every product, against speaker feedback. The pin
    roles come from the stock code and want a unit check per route (the next unit session, with the PADS check).
-3. (**Done** on the emulator 2026-11-20, see the log; paced-input tests and the unit to come.) **MIDI on DIN.** UART0 at 31,250 baud 8N1 (smpltrek-re HW-11: PSC0 module 9, PINMUX3 nibbles 4-5 = 2, divisor 372 at
+3. (**Done** on the emulator 2026-11-20, see the log; the unit to come.) **MIDI on DIN.** UART0 at 31,250 baud 8N1 (smpltrek-re HW-11: PSC0 module 9, PINMUX3 nibbles 4-5 = 2, divisor 372 at
    186 MHz), interrupt-driven receive and transmit rings. A parser for the whole protocol: running status,
    real-time bytes inside other messages, SysEx of any length (delivered in chunks), system common. Apps get
    messages as events with their port, and send through `<enaga/midi.hpp>` (channel messages, SysEx, real-time);
@@ -1324,6 +1324,8 @@ UART0 driver `firmware/hal/uart0.c`, parser and sending `firmware/kernel/midi.c`
 - host `midi_send` and `midi_channel`;
 - the app table's `midi_sysex`, called only when the app's `size` covers it.
 
+Channels: apps get and send all 16; MIDI CH is only a default (docs/api.md "MIDI").
+
 Choices:
 - **Transmit:** one byte per THRE interrupt, so a real-time byte from its own queue waits behind at most one
   byte. A message queue of 2 KiB, all or nothing per call.
@@ -1339,8 +1341,13 @@ Choices:
 Tests:
 - `tests/test_midi.py` covers the parser cases, SysEx chunking and cutting, the sensing timeout, every send helper,
   a clock byte going ahead of a 300-byte SysEx, and THRU.
-- They use the emulator's existing UART0 model with bursts of at most 16 bytes. Longer, paced streams and
-  transmit timestamps wait for the emulator work in progress (the brief of 2026-11-20).
+- Short cases use the emulator's unpaced UART0 path in bursts of at most 16 bytes.
+- With the emulator's MIDI additions of the same day (a paced MIDI IN sender, transmit timestamps, an OUT-to-IN
+  cable), the tests also cover:
+  - a 1,002-byte SysEx dump and 350 dense messages at the full 31,250 baud, with no byte lost;
+  - sent bytes going back to back, one character time (119,040 cycles) apart;
+  - a round trip through the cable;
+  - CHECK's 120 BPM clock (`tests/test_check.py`): 48 a second, each gap within 19-23 ms, no drift.
 
 CHECK has a fifth page, MIDI, for checklist step 16.
 
