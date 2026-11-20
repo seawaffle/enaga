@@ -413,7 +413,10 @@ unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it mut
     VALUE LED red, green, blue. PAD MSG/S should read about 3,930 with no pad touched (M1's rate without the
     battery channel); much less means bytes are lost. The PAD line shows the pad with the highest reading; each
     pad lights green by pressure. Note which pad lights for each (the "LED map" order), the RAW reading of
-    untouched pads (any pad glowing at rest shows it), and the RAW range when pressed hard.
+    untouched pads (any pad glowing at rest shows it), and the RAW range when pressed hard. The bottom line shows
+    the last pad pressed: VEL its velocity, PRS its pressure. Hit a pad and keep resting on it: PRS stays 0. Then
+    press harder and ease off: PRS should follow smoothly, reaching 127 only when pressed very hard. Report how
+    it feels (too stiff, too soft, jumpy).
 11. **Card speed (CARD page, the fourth):** STEP 1, then wait for DONE (a few seconds; the card needs 4 MiB free).
     Report WRITE, READ, SCATTER (KiB/s and READS/S) and STREAMS, the card's make, size and format (FAT32 or
     exFAT), and run it twice. These are the rates an app gets through Enaga's file service, and they size

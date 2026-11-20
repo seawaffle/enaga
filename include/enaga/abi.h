@@ -73,8 +73,12 @@ enum enaga_event_type {
      * 1,600 / 1,000 / 600 (LOW / MEDIUM / HIGH), a release below 3/4 of that. */
     ENAGA_EVENT_PAD_PRESS = 4,              /* id: pad 0-14; value: velocity 1-127, from the readings over the threshold */
     ENAGA_EVENT_PAD_RELEASE = 5,            /* id: pad 0-14 */
-    ENAGA_EVENT_CARD = 6                    /* value: 1 a card was inserted and mounted, 0 the card was removed,
+    ENAGA_EVENT_CARD = 6,                   /* value: 1 a card was inserted and mounted, 0 the card was removed,
                                              * or a negative enaga_file_error when an inserted card cannot be used */
+    /* Pad pressure, while a pad is held: once it is pressed 200 more than it settled at (about 150 ms after the
+     * press), the mean of its last 9 readings on a cube curve from the threshold to 3,300, sent when it moves by
+     * more than 1. Only between that pad's press and release. */
+    ENAGA_EVENT_PAD_PRESSURE = 7            /* id: pad 0-14; value: 0-127 */
 };
 
 typedef struct enaga_event {

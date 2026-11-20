@@ -383,6 +383,22 @@ class E1(unittest.TestCase):
             pads = [line for line in emu.report()["log"] if line[:1] == "P"]
             self.assertEqual(pads[-1], "P12 1")
 
+    def test_pad_pressure_after_the_hit_settles(self):
+        def reading(pad, value):
+            emu.cpu.uart_receive(1, bytes([0xB0 | pad, value & 0x7F, value >> 7]))
+            emu.run(4 * MS)
+        with Emulation(HERE / "apps" / "keys") as emu:
+            self.assertIsNone(emu.run(BOOT)["error"])
+            # A hit at 2000 settles at 1200: its 40th report (1200) is the baseline. 1350 is not 200 above it, so no
+            # pressure; 2500 turns it on. The cube curve (threshold 1000 to 3300) gives 0 for 1200 and 35 for 2500,
+            # so the mean of the last 9 climbs 35 k / 9 as 2500s replace 1200s; 2520 (36) moves it by only 1.
+            # No pressure after the release.
+            for value in [2000] + [1200] * 45 + [1350] * 3 + [2500] * 12 + [2520] * 3 + [0, 2500, 0]:
+                reading(5, value)
+            pads = [line for line in emu.report()["log"] if line[:1] in "PA"]
+            self.assertEqual(pads, ["P5 55"] + [f"A5 {35 * k // 9}" for k in range(1, 10)]
+                             + ["P5 0", "P5 83", "P5 0"])
+
     # Panel LED addresses (a, b, c), transcribed from the smpltrek-re notes (docs/hardware.md "Panel MCU"):
     # pads by MCU channel as (red, green, blue); STEP and button LEDs as their green address (red at c + 1).
     LED_PADS = [((2, 1, 5), (2, 1, 4), (2, 1, 6)), ((2, 1, 2), (2, 1, 1), (2, 1, 3)), ((0, 1, 5), (0, 1, 4), (0, 1, 6)),

@@ -11,7 +11,8 @@
 //          past 100 % the callback would take every cycle and the main loop, keys included, would stop.
 //   PANEL  the last key by name and bit with its press count (one press must count one: bounce), every encoder's
 //          position, the pad with the highest raw reading, and pad messages per second (the panel MCU sends
-//          every pad all the time, about 3,930 a second for the 15 pads). A held key lights its LED green; a pad lights green by
+//          every pad all the time, about 3,930 a second for the 15 pads), and the last pad pressed with its velocity
+//          and pressure (ENAGA_EVENT_PAD_PRESSURE, 0-127). A held key lights its LED green; a pad lights green by
 //          pressure; A, B and C set VOL L, VOL R and MIC (0-10); VALUE cycles the VALUE LED red, green, blue.
 //   CARD   STEP 1 measures the card through Enaga's file service, as an app gets it (queued in the main loop, 2 ms
 //          a pass): WRITE, a 4 MiB file to /RECORD/CHECK.BIN in 32 KiB writes, four queued at a time; READ, the
@@ -160,6 +161,9 @@ public:
         }
     }
 
+    void on_pad_press(int pad, int velocity) override { note_pad_ = pad; note_velocity_ = velocity; note_pressure_ = 0; }
+    void on_pad_pressure(int pad, int pressure) override { if (pad == note_pad_) note_pressure_ = pressure; }
+
     void on_pad(int pad, unsigned pressure) override {
         if (pad < 0 || pad >= 15) return;
         pad_raw_[pad] = pressure;
@@ -288,6 +292,8 @@ private:
             if (pad_raw_[pad] > pad_raw_[top]) top = pad;
         canvas.text(0, 84, (Line() << "PAD " << top << " RAW " << pad_raw_[top]).str());
         canvas.text(0, 96, (Line() << "PAD MSG/S " << pads_per_second_).str(), 10);
+        if (note_pad_ >= 0)
+            canvas.text(0, 108, (Line() << "PAD " << note_pad_ << " VEL " << note_velocity_ << " PRS " << note_pressure_).str());
     }
 
     // CARD: one stage after another, each moved on by its request callbacks.
@@ -400,6 +406,7 @@ private:
     int last_key_ = 0;
     bool last_down_ = false;
     uint32_t presses_[ENAGA_KEY_COUNT] = {}, events_ = 0;
+    int note_pad_ = -1, note_velocity_ = 0, note_pressure_ = 0;
     uint32_t pad_raw_[15] = {}, pad_messages_ = 0, pad_messages_last_ = 0, pads_per_second_ = 0;
     int position_[5] = {};
     enaga::files::File card_file_;

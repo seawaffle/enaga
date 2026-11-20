@@ -42,7 +42,7 @@ ENAGA_APP(Beep)
 The points below are the overview; [docs/api.md](docs/api.md) is the full reference, header by header.
 
 - `init`, `update(ms)`, `draw(canvas)`, `stop`, `on_key`, `on_encoder`, `on_pad_press(pad, velocity)`,
-  `on_pad_release`, `on_pad` (every raw pressure reading) run in Enaga's main loop, which sleeps between
+  `on_pad_release`, `on_pad_pressure` (aftertouch, 0-127), `on_pad` (every raw pressure reading) run in Enaga's main loop, which sleeps between
   interrupts: a pass, so `update`, runs at least 750 times a second (after every audio block), not flat out.
   `audio` runs in the audio interrupt every 64 frames (1.33 ms at 48 kHz) and must not block, allocate,
   draw or touch files.
@@ -150,7 +150,7 @@ directory (the one containing `cpu.py`); it builds its core into its own `work/`
 
 ```sh
 export ENAGA_EMULATOR=/path/to/smpltrek-re/emulator
-python3 -B -m unittest discover -s tests -v                           # 54 tests, about 5 minutes
+python3 -B -m unittest discover -s tests -v                           # 55 tests, about 5 minutes
 python3 -B tools/emulate.py examples/tone --key 32@300000000           # press STEP 1; writes build/emulate/
 ```
 

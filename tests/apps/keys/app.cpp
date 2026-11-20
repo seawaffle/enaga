@@ -1,4 +1,5 @@
-// Key test app: logs every key event as "K<key> <1 down | 0 up>", and pad notes as "P<pad> <velocity | 0 release>".
+// Key test app: logs every key event as "K<key> <1 down | 0 up>", pad notes as "P<pad> <velocity | 0 release>" and
+// pad pressure as "A<pad> <0-127>".
 #include <enaga/app.hpp>
 
 class Keys : public enaga::App {
@@ -15,10 +16,11 @@ public:
     }
     void on_pad_press(int pad, int velocity) override { pad_line(pad, velocity); }
     void on_pad_release(int pad) override { pad_line(pad, 0); }
+    void on_pad_pressure(int pad, int pressure) override { pad_line(pad, pressure, 'A'); }
 
 private:
-    static void pad_line(int pad, int value) {
-        char text[12] = {'P'};
+    static void pad_line(int pad, int value, char kind = 'P') {
+        char text[12] = {kind};
         int n = 1;
         if (pad >= 10) text[n++] = char('0' + pad / 10);
         text[n++] = char('0' + pad % 10);

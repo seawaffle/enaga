@@ -89,6 +89,7 @@ per app.
 | `void on_encoder(int encoder, int delta)` | main | an encoder turned: signed detents |
 | `void on_pad_press(int pad, int velocity)` | main | a pad pressed as a note: velocity 1-127 |
 | `void on_pad_release(int pad)` | main | that note released |
+| `void on_pad_pressure(int pad, int pressure)` | main | a held pad's pressure changed: 0-127 |
 | `void on_pad(int pad, unsigned pressure)` | main | every raw pad reading, 0-16383, about 3,930 a second in all |
 | `void on_card(bool usable)` | main | the SD card was inserted and mounted (`true`), or removed or unusable (`false`) |
 | `void audio(const float *in, float *out, uint32_t frames)` | audio | every block ([Audio](#audio)) |
@@ -166,10 +167,15 @@ Fifteen pads, numbered 0-14 as the panel controller reports them (docs/hardware.
   chooses (1,600 / 1,000 / 600 for LOW / MEDIUM / HIGH). It is sent one reading later (at most 3.8 ms), with
   velocity 1-127 from the higher of the two readings, 127 at 3,300 or more.
 - `on_pad_release(pad)`: the reading fell below 3/4 of the threshold. Every press gets its release.
-- `on_pad(pad, pressure)`: every raw reading, 0-16383, whatever the threshold, for continuous pressure. Untouched
-  pads read 1-2; a light press about 1,500, a hard one about 3,400.
+- `on_pad_pressure(pad, pressure)`: aftertouch, 0-127, between a press and its release. The hit is left to
+  settle for 40 readings (about 150 ms) and the reading then is the pad's baseline; pressure starts once the pad
+  is pressed more than 200 above it, so resting a finger on a pad after hitting it sends nothing. The value is the
+  mean of the last 9 readings put through a cube curve from the threshold to 3,300 (127 u³, as Lofi-12 XT's
+  shape: most of the range is in the firmer part of the press), sent only when it moves by more than 1.
+- `on_pad(pad, pressure)`: every raw reading, 0-16383, whatever the threshold, for an app's own pressure handling.
+  Untouched pads read 1-2; a light press about 1,500, a hard one about 3,400.
 
-The three are independent: an app can use notes, raw readings or both. A press or release comes just before the
+They are independent: an app can use notes, pressure, raw readings or any mix. A press or release comes just before the
 raw reading that caused it.
 
 ### The card: `on_card(bool usable)`
@@ -591,6 +597,7 @@ enaga_app`, `enaga_host`, `enaga_event`, `enaga_package_header`, `enaga_file_inf
 | `ENAGA_EVENT_PAD_PRESS` | pad | velocity 1-127 |
 | `ENAGA_EVENT_PAD_RELEASE` | pad | 0 |
 | `ENAGA_EVENT_CARD` | 0 | 1 inserted and mounted, 0 removed, or a negative `enaga_file_error` |
+| `ENAGA_EVENT_PAD_PRESSURE` | pad | pressure 0-127 |
 
 **`enaga_host_t`** (Enaga's table, `enaga::host()` in C++; valid until the app is unloaded): `abi_version`,
 `size`, `heap` and `heap_size` (the app's heap region, which the runtime manages), `sample_rate`, `block_frames`,

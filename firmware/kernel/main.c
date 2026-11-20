@@ -10,7 +10,7 @@
  * flight delays the next draw), and the power key held one second switches the unit off. With no app
  * (none found, or one that failed) Enaga shows its own status page. Each pass feeds the watchdog (watchdog.c).
  *
- * Pads are delivered raw and as press / release with velocity (on_pad). Keys are debounced in keys.c.
+ * Pads are delivered raw, as press / release with velocity, and as pressure while held (on_pad). Keys are debounced in keys.c.
  *
  * F1 + POWER opens the Enaga menu (menu.c) and closes it again; F1 held through start-up opens it instead of an
  * app. While the menu is open the app is paused: inputs go to the menu, and update and draw are not called. An
@@ -75,6 +75,19 @@ enum { PAD_UP, PAD_RISING, PAD_DOWN };
 static u8 pad_state[15];
 static u16 pad_peak[15];
 
+/* Pad pressure, after Lofi-12 XT's (smpltrek-re XF-23). A press starts a countdown of PRESSURE_SETTLE reports (about
+ * 150 ms, while the hit settles); the reading then becomes the baseline, and pressing more than PRESSURE_RISE above it
+ * turns pressure on until the release. Each report's reading goes through a cube curve, 127 u^3 with u running from
+ * the press level to PAD_FULL (the shape of Lofi's curve: steep at the top, a light touch near 0), and the pressure is
+ * the mean of the last PRESSURE_MEAN of those, sent when it moves by more than 1. */
+#define PRESSURE_SETTLE 40u
+#define PRESSURE_RISE   200u
+#define PRESSURE_MEAN   9u
+static u8 pressure_countdown[15], pressure_on[15], pressure_next[15];
+static u16 pressure_base[15];
+static short pressure_sent[15];
+static u8 pressure_history[15][PRESSURE_MEAN];
+
 /* An input event to the menu or the app. With no app and the menu closed (the status page), OK opens the menu. */
 static void deliver(const enaga_event_t *e)
 {
@@ -94,6 +107,8 @@ static void deliver(const enaga_event_t *e)
     } else if (e->type == ENAGA_EVENT_PAD_RELEASE) {
         if (!(app_pads & (1u << e->id))) return;
         app_pads &= (u16)~(1u << e->id);
+    } else if (e->type == ENAGA_EVENT_PAD_PRESSURE && !(app_pads & (1u << e->id))) {
+        return;                               /* only for a press the app was given */
     }
     apps_event(e);
 }
@@ -110,6 +125,43 @@ static void open_menu(const char *why)       /* the app first lets go of everyth
     app_keys = 0;
     app_pads = 0;
     menu_open(why);
+}
+
+static unsigned pressure_curve(unsigned value)
+{
+    unsigned u;
+    if (value <= pad_press_level) return 0;
+    if (value >= PAD_FULL) return 127;
+    u = 1024u * (value - pad_press_level) / (PAD_FULL - pad_press_level);
+    return (127u * ((u * u) >> 10) * u) >> 20;
+}
+
+static void pressure_start(int channel)
+{
+    u32 i;
+    pressure_countdown[channel] = PRESSURE_SETTLE;
+    pressure_on[channel] = 0;
+    pressure_next[channel] = 0;
+    pressure_sent[channel] = -1;
+    for (i = 0; i < PRESSURE_MEAN; i++) pressure_history[channel][i] = 0;
+}
+
+static void pressure_update(int channel, unsigned value, enaga_event_t *e)
+{
+    u32 i, sum = 0;
+    int p;
+    pressure_history[channel][pressure_next[channel]] = (u8)pressure_curve(value);
+    pressure_next[channel] = (u8)((pressure_next[channel] + 1) % PRESSURE_MEAN);
+    if (pressure_countdown[channel] && --pressure_countdown[channel] == 0) pressure_base[channel] = (u16)value;
+    if (!pressure_on[channel] && !pressure_countdown[channel] && value > pressure_base[channel] + PRESSURE_RISE)
+        pressure_on[channel] = 1;
+    if (!pressure_on[channel]) return;
+    for (i = 0; i < PRESSURE_MEAN; i++) sum += pressure_history[channel][i];
+    p = (int)(sum / PRESSURE_MEAN);
+    if (pressure_sent[channel] >= 0 && p - pressure_sent[channel] <= 1 && pressure_sent[channel] - p <= 1) return;
+    pressure_sent[channel] = (short)p;
+    e->type = ENAGA_EVENT_PAD_PRESSURE; e->value = p;
+    deliver(e);
 }
 
 static void pad_press(int channel, enaga_event_t *e)
@@ -129,6 +181,7 @@ static void on_pad(int channel, unsigned value)
     if (pad_state[channel] == PAD_UP && value >= pad_press_level) {
         pad_state[channel] = PAD_RISING;
         pad_peak[channel] = (u16)value;
+        pressure_start(channel);
     } else if (pad_state[channel] == PAD_RISING) {
         if (value > pad_peak[channel]) pad_peak[channel] = (u16)value;
         pad_press(channel, &e);
@@ -138,6 +191,7 @@ static void on_pad(int channel, unsigned value)
         e.type = ENAGA_EVENT_PAD_RELEASE; e.value = 0;
         deliver(&e);
     }
+    if (pad_state[channel] != PAD_UP) pressure_update(channel, value, &e);
     e.type = ENAGA_EVENT_PAD; e.value = (int)value;
     deliver(&e);
 }

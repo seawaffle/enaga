@@ -306,7 +306,7 @@ Scope, as agreed: full MIDI on the DIN jacks and over USB (USB MIDI moves here f
 stay in E5), and a UI toolkit that starts small. Steps in order; each ends tested on the emulator where it can be,
 and the ones that need the unit collect into a session.
 
-1. **Pad pressure.** An `ENAGA_EVENT_PAD_PRESSURE` beside press / release. Derived on the DSP from the normal pad
+1. (**Done** 2026-11-20, see the log; feel to be checked on the unit.) **Pad pressure.** An `ENAGA_EVENT_PAD_PRESSURE` beside press / release. Derived on the DSP from the normal pad
    stream, as Lofi-12 XT does (XF-23): a press starts a 40-sample countdown and at 1 the raw value becomes the
    baseline; raw > baseline + 200 enables pressure until release; pressure is the mean of the last 9 raw readings
    passed through a steep curve (Lofi's runs 800, 1277, 1401 ... 3200), scaled to 0-127, and sent only when it
@@ -325,8 +325,8 @@ and the ones that need the unit collect into a session.
    messages as events with their port, and send through `<enaga/midi.hpp>` (channel messages, SysEx, real-time);
    THRU (input copied to output) and the MIDI channel as Enaga settings, the channel also in the menu. The stock
    MIDI CONFIG rows (IN FROM / OUT TO DIN, USB or both; clock out; active sensing) are the model for which
-   settings Enaga owns. Testing: the emulator's UART0 model, or one added there (smpltrek-re, with the user's
-   go-ahead); then a loop through a cable and an outside instrument on the unit.
+   settings Enaga owns. Testing: a UART0 model in the emulator (smpltrek-re has none yet; requested through the user, who
+   passes it to the agent working there); then a loop through a cable and an outside instrument on the unit.
 4. **Clock, transport and SYNC.** An Enaga tempo clock that apps follow or drive: internal tempo, or MIDI clock
    in (24 PPQN, tempo derived), or SYNC IN (GP7[8] edges, 2 PPQN); START / STOP / CONTINUE, and Song Position
    Pointer sent before CONTINUE, as Lofi-12 XT does (XF-24). SYNC OUT on GP7[9]: 2 PPQN, 15 ms pulses, polarity
@@ -382,7 +382,7 @@ by feel to 1,600 / 1,000 / 600. App icons are left for E4.
 
 Since E3: one image serves the SmplTrek, Lofi-12 XT and CyDrums (the same board), and the build writes an update
 file for each; Enaga tells which it runs on from the bootloader's file name, confirmed on a SmplTrek in session 4.
-The other two are untested. Next is E4 ("E4 plan" above).
+The other two are untested. E4 is under way ("E4 plan" above): pad pressure is done.
 
 ## Open items
 
@@ -1262,4 +1262,26 @@ miss, 20-30 minutes; the key is the hash of those scripts and the patch), builds
 release with `enaga-<tag>-<device>.zip` for each device and `SHA256SUMS`. The zips keep the card names, spaces
 included, which GitHub would rewrite in a bare asset name. The firmware needs only GCC, so TI's tools are not
 involved; apps are not part of the release.
+
+### Pad pressure, E4 step 1 (2026-11-20)
+
+`ENAGA_EVENT_PAD_PRESSURE` (7) and `App::on_pad_pressure(pad, pressure)`, 0-127, between a pad's press and release
+(`firmware/kernel/main.c`). The algorithm follows Lofi-12 XT's (XF-23):
+- **Settle:** a press starts a 40-report countdown, about 150 ms. The reading at the end is the baseline.
+- **Start:** pressure turns on once a reading is more than 200 above the baseline.
+- **Value:** the mean of the last 9 readings on a curve, sent when it moves by more than 1.
+
+The curve is our own formula: 127 u³, with u running from the PADS threshold to 3,300, the same span velocity
+uses. Lofi's table, read from its image, has thresholds 800, 1277, 1401 ... 3200. Read as raw = 800 + 2400 (k /
+127)^a, the exponent comes out 0.333-0.346 along the table, so its inverse is a cube. 127 u³ reaches 1 at 1,277
+from Lofi's 800, as the table does. It follows the user's PADS setting rather than a fixed 800.
+
+The emulator test (`test_pad_pressure_after_the_hit_settles`) checks:
+- the settle;
+- a rise too small to start it;
+- the 9-reading ramp;
+- the change filter;
+- nothing after the release.
+
+The CHECK app's PANEL page shows the last pad's VEL and PRS for the unit; checklist step 10 asks how it feels.
 
