@@ -91,6 +91,9 @@ The points below are the overview; [docs/api.md](docs/api.md) is the full refere
 - MIDI on the DIN jacks: `on_midi(message)` and `on_midi_sysex` receive (running status, real-time, SysEx and
   active sensing handled), `<enaga/midi.hpp>` sends (notes, controls, clock, SysEx, raw bytes), and the user's
   MIDI CH and MIDI THRU settings live in the Enaga menu.
+- A tempo clock at 96 ticks to the quarter note (`<enaga/clock.hpp>`): driven by the app, by MIDI clock or by
+  SYNC IN pulses (the CLOCK SRC setting); `ticks()` in the audio callback gives each tick's frame; transport
+  events; MIDI clock out and SYNC out follow it.
 - `enaga::fatal(reason)` stops the app; Enaga shows the reason and keeps running. Enaga's watchdog stops an
   app the same way when a main-loop call (including `init` and `stop`) has not returned after 1 s, or `audio`
   after 100 ms; `stop` has 3 s in all, even while it is saving to the card. When an app is switched away from,
@@ -154,7 +157,7 @@ directory (the one containing `cpu.py`); it builds its core into its own `work/`
 
 ```sh
 export ENAGA_EMULATOR=/path/to/smpltrek-re/emulator
-python3 -B -m unittest discover -s tests -v                           # 70 tests, about 6 minutes
+python3 -B -m unittest discover -s tests -v                           # 74 tests, about 6 minutes
 python3 -B tools/emulate.py examples/tone --key 32@300000000           # press STEP 1; writes build/emulate/
 ```
 

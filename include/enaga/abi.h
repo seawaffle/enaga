@@ -99,9 +99,43 @@ enum enaga_event_type {
      * common and real-time. Running status is expanded; a note on with velocity 0 arrives as a note off (0x8n,
      * velocity 0); active sensing is handled by Enaga (not delivered; when it stops, every channel gets All Notes
      * Off, CC 123). Delivered whether or not the Enaga menu is open. */
-    ENAGA_EVENT_MIDI = 8                    /* id: enaga_midi_port it came from; value: status | data1 << 8 |
+    ENAGA_EVENT_MIDI = 8,                   /* id: enaga_midi_port it came from; value: status | data1 << 8 |
                                              * data2 << 16 (unused data bytes 0) */
+    ENAGA_EVENT_TRANSPORT = 9               /* id: enaga_transport; value: the clock position, in ticks */
 };
+
+/* The tempo clock (clock_* in enaga_host_t): ticks of ENAGA_CLOCK_PPQN to the quarter note. Its source is the user's
+ * CLOCK SRC setting. */
+#define ENAGA_CLOCK_PPQN 96u
+enum enaga_clock_source {
+    ENAGA_CLOCK_INTERNAL = 0,               /* the app drives it (clock_control) */
+    ENAGA_CLOCK_MIDI = 1,                   /* MIDI clock and transport at MIDI IN */
+    ENAGA_CLOCK_SYNC = 2                    /* pulses at SYNC IN, 2 to the quarter note */
+};
+enum enaga_clock_command {                  /* clock_control; with an outside source they return -1 */
+    ENAGA_CLOCK_START = 1,                  /* from tick 0 */
+    ENAGA_CLOCK_STOP = 2,
+    ENAGA_CLOCK_CONTINUE = 3,               /* from where it stopped (or was located) */
+    ENAGA_CLOCK_LOCATE = 4,                 /* value: the position in ticks */
+    ENAGA_CLOCK_TEMPO = 5                   /* value: BPM x 100, 2000-30000 */
+};
+enum enaga_transport {                      /* ENAGA_EVENT_TRANSPORT's id */
+    ENAGA_TRANSPORT_START = 1,
+    ENAGA_TRANSPORT_STOP = 2,
+    ENAGA_TRANSPORT_CONTINUE = 3,
+    ENAGA_TRANSPORT_LOCATE = 4
+};
+typedef struct enaga_clock_state {
+    uint32_t running;                       /* 1 while the clock runs */
+    uint32_t source;                        /* enaga_clock_source */
+    float tempo;                            /* BPM: the app's (INTERNAL) or the outside clock's, measured */
+    uint32_t position;                      /* whole ticks */
+    float fraction;                         /* and the part of the next, 0-1 */
+} enaga_clock_state_t;
+typedef struct enaga_clock_tick {
+    uint32_t tick;                          /* the tick's number (position) */
+    uint32_t frame;                         /* the frame of the audio block it falls on, 0 - block_frames-1 */
+} enaga_clock_tick_t;
 
 /* MIDI ports, as bits: a message's source (ENAGA_EVENT_MIDI's id), and where midi_send sends. */
 enum enaga_midi_port {
@@ -268,6 +302,13 @@ typedef struct enaga_host {
      * context. midi_channel: the user's MIDI CH setting, 0-15, for an app to listen and send on. */
     int32_t (*midi_send)(uint32_t ports, const uint8_t *data, uint32_t bytes);
     uint32_t (*midi_channel)(void);
+    /* The clock. clock_control (enaga_clock_command): 0, or -1 when the source is not INTERNAL or the value is out
+     * of range; main context. clock_state: main or audio context (in audio, as of the current block's start).
+     * clock_ticks: audio context only, the ticks that fall in the block being computed, with their frames;
+     * returns how many (at most `max`). */
+    int32_t (*clock_control)(uint32_t command, int32_t value);
+    void (*clock_state)(enaga_clock_state_t *state);
+    uint32_t (*clock_ticks)(enaga_clock_tick_t *ticks, uint32_t max);
 } enaga_host_t;
 
 /* What the app gives Enaga. Every callback receives `context`; any callback may be 0. */

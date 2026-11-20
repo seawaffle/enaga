@@ -114,6 +114,9 @@ public:
     // MIDI in (main context, also while the Enaga menu is open): every message but SysEx, which comes to
     // on_midi_sysex in chunks (the first starts with F0; `end` on the last, which ends with F7 unless it was cut).
     virtual void on_midi(const MidiMessage &message) { (void)message; }
+    // The clock's transport (<enaga/clock.hpp>): ENAGA_TRANSPORT_START, _STOP, _CONTINUE or _LOCATE, at a position
+    // in ticks. Main context.
+    virtual void on_transport(int what, uint32_t position) { (void)what; (void)position; }
     virtual void on_midi_sysex(int port, const uint8_t *data, uint32_t bytes, bool start, bool end) {
         (void)port; (void)data; (void)bytes; (void)start; (void)end;
     }
@@ -144,6 +147,7 @@ inline void event(void *app, const enaga_event_t *e) {
     else if (e->type == ENAGA_EVENT_PAD_RELEASE) a->on_pad_release(e->id);
     else if (e->type == ENAGA_EVENT_PAD_PRESSURE) a->on_pad_pressure(e->id, e->value);
     else if (e->type == ENAGA_EVENT_CARD) a->on_card(e->value > 0);
+    else if (e->type == ENAGA_EVENT_TRANSPORT) a->on_transport(e->id, uint32_t(e->value));
     else if (e->type == ENAGA_EVENT_MIDI) {
         MidiMessage m;
         m.status = uint8_t(e->value);

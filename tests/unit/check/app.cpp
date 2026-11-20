@@ -24,9 +24,11 @@
 //   MIDI   the MIDI channel (SETTINGS, MIDI CH), messages in and out, the last four received (hex) and the last
 //          SysEx's length. STEP 1 plays key 60 while held (note on / off), STEP 2 sends CC 7 = 100, STEP 3 a
 //          SysEx identity request (F0 7E 7F 06 01 F7), STEP 4 starts or stops a MIDI clock at 120 BPM (START,
-//          24 clocks a beat, STOP).
+//          24 clocks a beat, STOP). The CLK line is Enaga's clock (CLOCK SRC, its tempo, RUN and the beat):
+//          STEP 5 starts or stops it when CLOCK SRC is INT; CLOCK OUT and SYNC OUT send it.
 #include <enaga/app.hpp>
 #include <enaga/files.hpp>
+#include <enaga/clock.hpp>
 #include <enaga/midi.hpp>
 
 #include <cstdint>
@@ -349,6 +351,9 @@ private:
             clock_last_ = enaga::ms();
             clock_count_ = 0;
         }
+        if (step == 4) {
+            if (enaga::clock::running()) enaga::clock::stop(); else enaga::clock::start();
+        }
         if (sent) midi_out_++;
     }
 
@@ -364,8 +369,13 @@ private:
             canvas.text(0, 40 + 10 * i, text, i ? 8 : 15);
         }
         canvas.text(0, 82, (Line() << "SYSEX " << sysex_shown_).str(), 10);
-        canvas.text(0, 96, "1 NOTE 2 CC 3 SYSEX", 6);
-        canvas.text(0, 105, "4 CLOCK START/STOP", 6);
+        static const char *const kSources[3] = {"INT", "MIDI", "SYNC"};
+        enaga::clock::State s = enaga::clock::state();
+        int tenths = int(s.tempo * 10.0f + 0.5f);
+        canvas.text(0, 92, (Line() << "CLK " << kSources[s.source % 3] << " " << tenths / 10 << "." << tenths % 10
+                                   << (s.running ? " RUN " : " ") << (s.running ? s.position / 96 + 1 : 0u)).str());
+        canvas.text(0, 102, "1 NOTE 2 CC 3 SYSEX", 6);
+        canvas.text(0, 110, "4 OWN CLOCK 5 ENAGA CLK", 6);
     }
 
     // CARD: one stage after another, each moved on by its request callbacks.

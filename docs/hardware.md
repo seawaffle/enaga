@@ -362,6 +362,19 @@ Parsing is in the main loop (`firmware/kernel/midi.c`, docs/api.md "MIDI").
 Not yet on a unit: the jacks' wiring and the opto-isolator side are not visible to code, so the first loop through
 a cable is the check (checklist step 16).
 
+## SYNC IN / SYNC OUT
+
+GP7[8] (in) and GP7[9] (out), PINMUX17 nibbles 1 and 0 = 8, as the original firmware sets them (smpltrek-re
+HW-27).
+- **SYNC IN** takes rising edges through the GPIO bank 7 interrupt (event 72, CPU interrupt 9). Each edge's time
+  stamp feeds the clock (`firmware/kernel/clock.c`).
+- **SYNC OUT** idles low and pulses high for 15 ms, at least 60 ms apart. That is the original firmware's pulse
+  with its POLARITY OUT at the default.
+- **Not handled yet:** the original's polarity settings (falling edges in, active-low out). Enaga uses the
+  defaults.
+- **Not visible to code:** jack wiring and signal levels. The first unit session checks both directions with
+  other gear (checklist step 17).
+
 ## SD card
 
 **MMCSD0**, pins on PINMUX10; card detect on GP4[0] (low = card present); GP4[1] is driven low. 399 kHz
@@ -510,5 +523,16 @@ unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it mut
     - **Settings:** SETTINGS, MIDI CH to 2: CH on the MIDI page shows 2 and STEP 1 sends `91`. MIDI THRU ON, with
       the keyboard into MIDI IN and MIDI OUT to a second instrument or monitor: what the keyboard plays comes out
       too. Set both back.
+17. **Clock and SYNC (CHECK, MIDI page; SETTINGS):** the CLK line shows the clock's source, tempo, RUN and the beat.
+    - **Out:** SETTINGS, CLOCK OUT ON. On the MIDI page STEP 5 starts Enaga's clock at 120 BPM and stops it. A
+      synth or drum machine following MIDI clock at the unit's MIDI OUT starts, runs at 120 and stops with it. A
+      device on SYNC OUT (SYNC OUT is ON by default; a Volca or Pocket Operator, say) steps two pulses a beat.
+    - **MIDI in:** SETTINGS, CLOCK SRC MIDI; start a sequencer sending clock into MIDI IN. CLK shows MIDI, its
+      tempo (within 0.5 BPM) and RUN with the beat counting; it stops when the sequencer stops. Continuing from
+      the middle of a song resumes at the right beat (Song Position Pointer).
+    - **SYNC in:** CLOCK SRC SYNC, a device's sync out into SYNC IN. CLK shows its tempo and runs while it plays,
+      stopping a moment after it stops. If nothing happens, the device may pulse the other way (falling edges):
+      note it, since the polarity setting is not built yet.
+    Set CLOCK SRC back to INT and CLOCK OUT to OFF.
 
 Afterwards the official update restores the unit ("Installing and recovery").

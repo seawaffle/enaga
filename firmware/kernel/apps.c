@@ -49,6 +49,8 @@ static uint32_t host_device(void) { return device_id; }
 static int32_t host_input(uint32_t source, uint32_t level) { return audio_input(source, level); }
 static int32_t host_midi_send(uint32_t ports, const uint8_t *data, uint32_t bytes) { return midi_send(ports, data, bytes); }
 static uint32_t host_midi_channel(void) { return (uint32_t)midi_channel_setting; }
+static int32_t host_clock_control(uint32_t command, int32_t value) { return clock_control(command, value); }
+static uint32_t host_clock_ticks(enaga_clock_tick_t *ticks, uint32_t max) { return clock_ticks(ticks, max); }
 
 enaga_host_t app_host = {                     /* heap filled in per app by load_path */
     ENAGA_ABI_VERSION, sizeof(enaga_host_t), 0, 0,
@@ -59,7 +61,7 @@ enaga_host_t app_host = {                     /* heap filled in per app by load_
     files_stream_open, files_stream_create, files_stream_read, files_stream_write, files_stream_status,
     files_stream_close,
     host_open_menu, host_set_busy, host_speaker, host_headphones, host_device, host_input, host_midi_send,
-    host_midi_channel,
+    host_midi_channel, host_clock_control, clock_state, host_clock_ticks,
 };
 
 static void cache_sync(uint32_t address, uint32_t bytes)   /* the loader calls this just before the app's entry */
@@ -328,6 +330,7 @@ void apps_unload(void)
     audio_speaker_app = 1;                    /* the next app starts with the speaker as the setting says */
     audio_speaker_apply();
     audio_input_reset();
+    clock_app_stopped();
     files_app_stopped();
     leds_off();
 }

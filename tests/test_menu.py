@@ -241,7 +241,8 @@ class Menu(unittest.TestCase):
                 self.assertIsNone(emu.run(2200 * MS)["error"])
                 image.write_bytes(emu.cpu.sd_read())
             self.assertEqual(card.get(image, "/ENAGA/SETTINGS.TXT"),
-                             b"VOLUME=6\nBRIGHTNESS=9\nPADS=HIGH\nAUTO OFF=5 MIN\nSPEAKER=OFF\nMIDI CH=1\nMIDI THRU=OFF\n")
+                             b"VOLUME=6\nBRIGHTNESS=9\nPADS=HIGH\nAUTO OFF=5 MIN\nSPEAKER=OFF\nMIDI CH=1\nMIDI THRU=OFF\n"
+                             b"CLOCK SRC=INT\nCLOCK OUT=OFF\nSYNC OUT=ON\n")
             self.assertEqual(card.get(image, "/ENAGA/DATA/MENU-TEST/SETTINGS.TXT"),
                              b"STARTS=1\nNOTE=SAVED BY MENU-TEST\n")
             with self.boot(image) as emu:              # read back at power-on; AUTO OFF without the app busy

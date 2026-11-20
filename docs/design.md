@@ -108,6 +108,11 @@ changed.
 | SPEAKER | ON, OFF (ON) | the built-in speaker's mute, GP2[8], as the original firmware's SPEAKER MUTE |
 | MIDI CH | 1-16 (1) | the channel apps listen and send on by default (`enaga::midi::channel`) |
 | MIDI THRU | OFF, ON (OFF) | MIDI IN copied to MIDI OUT (SysEx excepted), merged with the app's own messages |
+| CLOCK SRC | INT, MIDI, SYNC (INT) | who drives the tempo clock: the app, MIDI clock at MIDI IN, or SYNC IN pulses |
+| CLOCK OUT | OFF, ON (OFF) | MIDI clock and transport at MIDI OUT, following the clock |
+| SYNC OUT | ON, OFF (ON) | pulses at SYNC OUT, 2 to the quarter note |
+
+The SETTINGS page shows nine rows and scrolls to keep the cursor on screen.
 
 The speaker, as in the original firmware: it plays unless the user has switched it off, the app has muted it
 (`speaker(false)`, e.g. while monitoring the built-in microphone, where the original firmware mutes it against
@@ -330,7 +335,7 @@ and the ones that need the unit collect into a session.
    MIDI CONFIG rows (IN FROM / OUT TO DIN, USB or both; clock out; active sensing) are the model for which
    settings Enaga owns. Testing: a UART0 model in the emulator (smpltrek-re has none yet; requested through the user, who
    passes it to the agent working there); then a loop through a cable and an outside instrument on the unit.
-4. **Clock, transport and SYNC.** An Enaga tempo clock that apps follow or drive: internal tempo, or MIDI clock
+4. (**Done** on the emulator 2026-11-20, see the log; the unit to come.) **Clock, transport and SYNC.** An Enaga tempo clock that apps follow or drive: internal tempo, or MIDI clock
    in (24 PPQN, tempo derived), or SYNC IN (GP7[8] edges, 2 PPQN); START / STOP / CONTINUE, and Song Position
    Pointer sent before CONTINUE, as Lofi-12 XT does (XF-24). SYNC OUT on GP7[9]: 2 PPQN, 15 ms pulses, polarity
    settings as stock (HW-27). Clock source and clock out as settings.
@@ -385,8 +390,8 @@ by feel to 1,600 / 1,000 / 600. App icons are left for E4.
 
 Since E3: one image serves the SmplTrek, Lofi-12 XT and CyDrums (the same board), and the build writes an update
 file for each; Enaga tells which it runs on from the bootloader's file name, confirmed on a SmplTrek in session 4.
-The other two are untested. E4 is under way ("E4 plan" above): pad pressure, input selection and MIDI on the DIN jacks are done on the
-emulator and await the unit.
+The other two are untested. E4 is under way ("E4 plan" above): pad pressure, input selection, MIDI on the DIN jacks, and the clock,
+transport and SYNC are done on the emulator and await the unit. Next is USB MIDI (step 5).
 
 ## Open items
 
@@ -1350,4 +1355,43 @@ Tests:
   - CHECK's 120 BPM clock (`tests/test_check.py`): 48 a second, each gap within 19-23 ms, no drift.
 
 CHECK has a fifth page, MIDI, for checklist step 16.
+
+### Clock, transport and SYNC, E4 step 4 (2026-11-20)
+
+`firmware/kernel/clock.c`, `<enaga/clock.hpp>`. One clock, 96 ticks to the quarter note (Lofi-12 XT's
+resolution).
+- **Where it runs:** it advances in the audio interrupt before the app's callback. `clock_ticks` gives the
+  block's ticks with their frames, so apps sequence on the sample.
+- **Sources** (the CLOCK SRC setting):
+  - INT: the app's start / stop / continue / locate / tempo.
+  - MIDI: clock and transport taken in UART0's interrupt, in byte order with Song Position Pointer, so a CONTINUE
+    after an SPP resumes at it.
+  - SYNC: rising edges on the GPIO bank 7 interrupt.
+- **Following** works as stock HW-41. The clock runs at the measured tempo, capped at the next clock's or pulse's
+  tick. Over one clock or pulse behind, it catches up at once.
+- **Outputs** (CLOCK OUT for MIDI clock and transport, SYNC OUT for pulses) follow the clock from any source.
+  They are sent from the audio interrupt, so they are exact on average and within one block (1.33 ms).
+- **Transport events:** `ENAGA_EVENT_TRANSPORT` to the app from the main loop.
+- **ABI:** the event, the clock enums and structs, and host `clock_control`, `clock_state`, `clock_ticks`.
+
+Found while testing:
+- **Next tick:** working out the next tick from the float fraction lost a tick now and then at the cap, when
+  rounding put the position a hair past it. An explicit next-tick counter, and pinning the position exactly at
+  the cap, fixed it.
+- **No interval yet:** before an outside source's first interval the clock stalled, then caught up dozens of
+  ticks in one block. It now runs at the last known tempo until the interval arrives.
+
+`tests/test_clock.py` uses the emulator's paced MIDI IN, `sync_in` pulse trains, transmit timestamps and the
+SYNC OUT pin trace:
+- **Internal at 120 BPM:** MIDI clock exact on average, every gap within a block. SYNC OUT 250 ms apart and
+  15 ms wide. Every tick reaches the app in order.
+- **Song Position Pointer** before CONTINUE, and on a locate while stopped.
+- **Following MIDI clock** at 100 BPM: the tempo to within 0.5, START, STOP, then SPP plus CONTINUE resuming at
+  tick 192.
+- **Following SYNC** at 90 BPM, stopping when the pulses stop, and bridged to MIDI clock.
+
+CHECK's MIDI page shows the clock and starts it (checklist step 17).
+
+Not built: the original's SYNC polarity settings (falling edges in, active-low out). Add them if a unit or a
+user's gear needs them.
 

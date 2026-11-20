@@ -30,9 +30,10 @@ What an app can use, header by header. This is the reference; the README's "Writ
 11. [WAV headers](#wav-headers)
 12. [App settings](#app-settings)
 13. [MIDI](#midi)
-14. [DSP library](#dsp-library)
-15. [The C interface](#the-c-interface)
-16. [Language and runtime](#language-and-runtime)
+14. [Clock and transport](#clock-and-transport)
+15. [DSP library](#dsp-library)
+16. [The C interface](#the-c-interface)
+17. [Language and runtime](#language-and-runtime)
 
 ## Building and installing an app
 
@@ -92,6 +93,7 @@ per app.
 | `void on_pad_release(int pad)` | main | that note released |
 | `void on_pad_pressure(int pad, int pressure)` | main | a held pad's pressure changed: 0-127 |
 | `void on_midi(const MidiMessage &message)` | main | a MIDI message arrived ([MIDI](#midi)) |
+| `void on_transport(int what, uint32_t position)` | main | the clock started, stopped, continued or was located ([Clock](#clock-and-transport)) |
 | `void on_midi_sysex(int port, const uint8_t *data, uint32_t bytes, bool start, bool end)` | main | a chunk of System Exclusive arrived |
 | `void on_pad(int pad, unsigned pressure)` | main | every raw pad reading, 0-16383, about 3,930 a second in all |
 | `void on_card(bool usable)` | main | the SD card was inserted and mounted (`true`), or removed or unusable (`false`) |
@@ -487,6 +489,56 @@ An app with several tracks keeps their channels in its own settings (`<enaga/set
 firmware keeps a channel per track. MIDI THRU (a setting, OFF by default) copies what arrives at MIDI IN to MIDI OUT,
 merged with the app's own messages without breaking either. SysEx is not copied.
 
+## Clock and transport
+
+One tempo clock for the whole unit, counted in ticks of `ENAGA_CLOCK_PPQN` (96) to the quarter note. In
+`<enaga/clock.hpp>`, as `enaga::clock::`.
+
+**Who drives it** is the user's CLOCK SRC setting:
+- **INT:** the app.
+- **MIDI:** MIDI clock and transport at MIDI IN.
+- **SYNC:** pulses at SYNC IN, 2 to the quarter note.
+
+**Controlling it (INT).** The app calls `start()` (from tick 0), `stop()`, `continue_()`, `locate(ticks)` and
+`set_tempo(bpm)` (20-300; 120 to begin with). With an outside source these do nothing and return `false`. The
+clock stops when the app stops.
+
+**Following an outside clock.** The tempo is measured from the clock or pulses:
+- **MIDI clock:** the mean of the last 24 intervals, kept while stopped, so a START runs at the right tempo from
+  its first tick.
+- **SYNC pulses:** the mean of the last 2 intervals.
+
+The clock runs at that tempo but never passes the tick of the next clock or pulse. If one comes early and finds it
+more than one clock or pulse behind, it catches up at once, every tick still given out (the original firmware's
+way).
+- **MIDI:** START, STOP, CONTINUE and Song Position Pointer move it.
+- **SYNC:** the first pulse starts it. A gap of more than 2.5 intervals stops it (at least 100 ms; 2 s before
+  the second pulse).
+
+**Following it in the audio callback.** `ticks(out, max)` (audio context) lists the ticks that fall in the block
+being computed. Each `Tick` has `.tick` (its number) and `.frame` (where in the block it falls), so a step can
+start on the right sample. At ordinary tempos a block holds at most one or two. A catch-up gives several at frame
+0, at most 32 a block, so ask for enough. `state()` (main or audio context) returns a `State`:
+- `.running`;
+- `.source` (`ENAGA_CLOCK_INTERNAL`, `ENAGA_CLOCK_MIDI` or `ENAGA_CLOCK_SYNC`);
+- `.tempo` in BPM;
+- `.position` in whole ticks, and `.fraction`.
+
+`running()`, `tempo()`, `position()` and `source()` read single fields.
+`ppqn` (96) and `sixteenth` (24) are the units.
+
+**Transport events.** `on_transport(what, position)` (main context) reports every change, whoever made it:
+`ENAGA_TRANSPORT_START`, `ENAGA_TRANSPORT_STOP`, `ENAGA_TRANSPORT_CONTINUE` or `ENAGA_TRANSPORT_LOCATE`, at a
+position in ticks.
+
+**Out.** These follow the clock whatever its source, so the unit can also turn SYNC into MIDI clock:
+- **CLOCK OUT on:** MIDI clock every 4 ticks (24 to the quarter note), START, STOP, and Song Position Pointer
+  before CONTINUE or on a locate while stopped.
+- **SYNC OUT on** (the default): a 15 ms pulse every 48 ticks, at least 60 ms apart.
+
+Both are sent from the audio interrupt: exact on average, and late by less than one block (1.33 ms). With CLOCK
+SRC MIDI, CLOCK OUT and MIDI THRU both on would send the clock twice.
+
 ## DSP library
 
 `<enaga/dsp.hpp>`, namespace `enaga::dsp`. Everything is float, at any sample rate. Each class wraps a plain C
@@ -661,7 +713,10 @@ app defines `const enaga_app_t *enaga_app_main(void)` (what `ENAGA_APP` writes) 
 runtime calls it after the static constructors.
 
 Its types: the enums `enaga_key`, `enaga_led`, `enaga_device`, `enaga_input_source`, `enaga_input_level`,
-`enaga_midi_port`, `enaga_sysex_flags` (`ENAGA_SYSEX_START`, `ENAGA_SYSEX_END`, `ENAGA_SYSEX_CUT`),
+`enaga_midi_port`, `enaga_sysex_flags` (`ENAGA_SYSEX_START`, `ENAGA_SYSEX_END`, `ENAGA_SYSEX_CUT`), `enaga_clock_source`,
+`enaga_clock_command` (`ENAGA_CLOCK_START`, `ENAGA_CLOCK_STOP`, `ENAGA_CLOCK_CONTINUE`, `ENAGA_CLOCK_LOCATE`,
+`ENAGA_CLOCK_TEMPO`: BPM x 100), `enaga_transport`, the structs `enaga_clock_state_t` and `enaga_clock_tick_t`
+(tags `enaga_clock_state`, `enaga_clock_tick`),
 `enaga_event_type`, `enaga_file_error`,
 `enaga_file_mode` and `enaga_stream_state`, and the structs `enaga_app_t`, `enaga_host_t`, `enaga_event_t`,
 `enaga_package_header_t`, `enaga_file_info_t` and `enaga_stream_status_t` (also by their tags, `struct
@@ -684,6 +739,7 @@ enaga_app`, `enaga_host`, `enaga_event`, `enaga_package_header`, `enaga_file_inf
 | `ENAGA_EVENT_CARD` | 0 | 1 inserted and mounted, 0 removed, or a negative `enaga_file_error` |
 | `ENAGA_EVENT_PAD_PRESSURE` | pad | pressure 0-127 |
 | `ENAGA_EVENT_MIDI` | `enaga_midi_port` | status \| data1 << 8 \| data2 << 16 |
+| `ENAGA_EVENT_TRANSPORT` | `enaga_transport` | the position in ticks |
 
 **`enaga_host_t`** (Enaga's table, `enaga::host()` in C++; valid until the app is unloaded): `abi_version`,
 `size`, `heap` and `heap_size` (the app's heap region, which the runtime manages), `sample_rate`, `block_frames`,
@@ -700,6 +756,7 @@ and the functions the C++ layer wraps:
 | `stream_open`, `stream_create`, `stream_read`, `stream_write`, `stream_status`, `stream_close` | `files::Stream` |
 | `open_menu`, `set_busy`, `speaker`, `headphones`, `device`, `input` | `enaga::system::` the same names |
 | `midi_send(ports, data, bytes)` (0 queued, -1 no room), `midi_channel` | `enaga::midi::send` and the helpers, `channel` |
+| `clock_control(command, value)`, `clock_state`, `clock_ticks(ticks, max)` | `enaga::clock::` control, `state`, `ticks` |
 
 **The package** on the card is an `enaga_package_header_t` (64 bytes: `magic` `ENAGA_PACKAGE_MAGIC`,
 `header_size`, `abi_version`, `load_address`, `load_size`, `bss_size`, `entry_offset`, `crc32`, `app_version`,

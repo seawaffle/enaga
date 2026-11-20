@@ -13,6 +13,9 @@
  *   SPEAKER     ON OFF            the built-in speaker (headphones cut it in any case); an app can also mute it
  *   MIDI CH     1-16              the channel apps listen and send on by default (enaga::midi::channel)
  *   MIDI THRU   OFF ON            copy what arrives at MIDI IN to MIDI OUT (SysEx excepted), merged with the app's own
+ *   CLOCK SRC   INT MIDI SYNC     who drives the tempo clock: the app, MIDI clock at MIDI IN, or SYNC IN (clock.c)
+ *   CLOCK OUT   OFF ON            send MIDI clock and transport at MIDI OUT
+ *   SYNC OUT    ON OFF            pulse SYNC OUT, 2 to the quarter note
  *
  * The SPI flash is not used: it holds the original firmware's sound content, which Enaga never writes. */
 #define SETTINGS_FILE "/ENAGA/SETTINGS.TXT"
@@ -22,6 +25,7 @@ static const char *const pads[] = { "LOW", "MEDIUM", "HIGH" };
 static const char *const off[] = { "OFF", "5 MIN", "10 MIN", "30 MIN", "60 MIN" };
 static const char *const on_off[] = { "ON", "OFF" };
 static const char *const off_on[] = { "OFF", "ON" };
+static const char *const sources[] = { "INT", "MIDI", "SYNC" };
 static const char *const channels[] = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14",
                                         "15", "16" };
 
@@ -31,7 +35,7 @@ typedef struct {
     int first, count, fallback;               /* labels[first .. first + count - 1]; the default's index */
 } setting_t;
 
-enum { VOLUME, BRIGHTNESS, PADS, AUTO_OFF, SPEAKER, MIDI_CH, MIDI_THRU, SETTINGS_COUNT };
+enum { VOLUME, BRIGHTNESS, PADS, AUTO_OFF, SPEAKER, MIDI_CH, MIDI_THRU, CLOCK_SRC, CLOCK_OUT, SYNC_OUT, SETTINGS_COUNT };
 static const setting_t table[SETTINGS_COUNT] = {
     { "VOLUME", numbers, 0, 11, 10 },
     { "BRIGHTNESS", numbers, 1, 10, 9 },
@@ -40,6 +44,9 @@ static const setting_t table[SETTINGS_COUNT] = {
     { "SPEAKER", on_off, 0, 2, 0 },
     { "MIDI CH", channels, 0, 16, 0 },
     { "MIDI THRU", off_on, 0, 2, 0 },
+    { "CLOCK SRC", sources, 0, 3, 0 },
+    { "CLOCK OUT", off_on, 0, 2, 0 },
+    { "SYNC OUT", on_off, 0, 2, 0 },
 };
 static int settings_value[SETTINGS_COUNT], settings_saved[SETTINGS_COUNT];
 static int settings_cursor;
@@ -61,6 +68,11 @@ static void apply(int which)
     case SPEAKER: audio_speaker_setting = v == 0; audio_speaker_apply(); break;
     case MIDI_CH: midi_channel_setting = v; break;
     case MIDI_THRU: midi_thru = v == 1; break;
+    case CLOCK_SRC:
+        if (clock_source_setting != v) { clock_source_setting = v; clock_source_changed(); }
+        break;
+    case CLOCK_OUT: clock_out_setting = v == 1; break;
+    case SYNC_OUT: sync_out_setting = v == 0; break;
     default: break;
     }
 }
@@ -163,7 +175,11 @@ void settings_draw(void)
     int k, y;
     gfx_clear(0);
     gfx_text(0, 0, "SETTINGS", 15);
-    for (k = 0, y = 26; k < SETTINGS_COUNT; k++, y += 9) {
+    /* Nine rows fit; the list scrolls to keep the cursor on screen. */
+    static int top;
+    if (settings_cursor < top) top = settings_cursor;
+    if (settings_cursor > top + 8) top = settings_cursor - 8;
+    for (k = top, y = 22; k < SETTINGS_COUNT && k < top + 9; k++, y += 9) {
         int here = k == settings_cursor;
         if (here) gfx_text(0, y, ">", 15);
         gfx_text(8, y, table[k].name, here ? 15 : 8);

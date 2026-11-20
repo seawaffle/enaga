@@ -38,6 +38,7 @@ static volatile u32 rx_head, rx_tail, tx_head, tx_tail, rt_head, rt_tail;
 
 u32 irq_global_disable(void);
 void irq_global_enable(void);
+void clock_midi_byte(u8 byte);
 
 void uart0_init(void)
 {
@@ -74,6 +75,7 @@ void uart0_isr(void)
         if (lsr & LSR_OE) uart0_overruns++;
         if (lsr & LSR_ERRORS) uart0_line_errors++;
         uart0_rx_bytes++;
+        clock_midi_byte(b);                   /* MIDI clock and transport, timed here (kernel/clock.c) */
         if (rx_head - rx_tail < RX_RING) rx_ring[rx_head++ % RX_RING] = b;
         else uart0_ring_lost++;
     }
