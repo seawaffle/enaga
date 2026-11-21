@@ -1,4 +1,6 @@
-# On a version tag (v0.1.0, ...): build the firmware and publish a GitHub release with one zip per device.
+# On a version tag (v0.1.0, ...): build the firmware and publish a GitHub release with one zip per device, the
+# SDK (tools/make_sdk.py), the prebuilt toolchain and the toolchain's source (tools/package_toolchain.py: GCC and
+# binutils are GPLv3, so their source goes out with the binaries).
 # Each zip holds the update file under the name the bootloader looks for (spaces included, which GitHub would
 # rewrite in a bare asset name). The tag must match VERSION in firmware/build.py, which names the image.
 name: Release
@@ -50,7 +52,10 @@ jobs:
             device=$(basename "$dir")
             (cd "$dir" && python3 -m zipfile -c "$GITHUB_WORKSPACE/dist/enaga-${GITHUB_REF_NAME}-${device}.zip" *.bin)
           done
-          (cd dist && sha256sum *.zip > SHA256SUMS)
+          python3 -B tools/make_sdk.py "$GITHUB_REF_NAME"
+          python3 -B tools/package_toolchain.py "$GITHUB_REF_NAME"
+          cp build/dist/* dist/
+          (cd dist && sha256sum * > SHA256SUMS)
           cat dist/SHA256SUMS
 
       - name: Publish the release
@@ -60,4 +65,8 @@ jobs:
           gh release create "$GITHUB_REF_NAME" dist/* --title "Enaga ${GITHUB_REF_NAME}" --notes \
             "Firmware update files for the SmplTrek, Lofi-12 XT and CyDrums (only the SmplTrek has been tested).
           Unzip the file for your device and copy the .bin to the root of the SD card, keeping its name; then follow
-          \"Installing\" in the README."
+          \"Installing\" in the README.
+
+          For writing apps: enaga-sdk-${GITHUB_REF_NAME}.zip and enaga-toolchain-${GITHUB_REF_NAME}-linux-x86_64.tar.xz
+          (docs/getting-started.md in the SDK). The toolchain's source, GCC and binutils (GPLv3) with GMP, MPFR,
+          MPC and ISL, is enaga-toolchain-${GITHUB_REF_NAME}-source.tar."

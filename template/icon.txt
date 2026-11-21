@@ -1,0 +1,18 @@
+# The app's icon in the Enaga menu: 16 lines of 16 greys, 0 (black) to F (white), . for 0. Delete this file for
+# the generic icon.
+................
+.......FFFFFFF..
+.......FFFFFFF..
+.......F.....F..
+.......F.....F..
+.......F.....F..
+.......F.....F..
+.......F.....F..
+.......F.....F..
+...AAA.F..AAAF..
+..AFFFAF.AFFFF..
+.AFFFFFF.FFFFF..
+.AFFFFFA.AFFFA..
+..AFFFA...AAA...
+...AAA..........
+................

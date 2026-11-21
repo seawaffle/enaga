@@ -2,6 +2,7 @@
 """Build an Enaga app (C++ and/or C sources) into a package for the card.
 
     python3 -B tools/build_app.py examples/tone          # -> build/apps/tone/APP.ENA
+    python3 -B tools/build_app.py ~/my-app               # an app outside Enaga's folder -> ~/my-app/build/APP.ENA
     python3 -B tools/build_app.py DIR -o /media/card/ENAGA/APPS/NAME/APP.ENA
 
 All *.cpp and *.c files in the directory are compiled with GCC tic6x-elf (C++20, -fno-exceptions -fno-rtti,
@@ -175,7 +176,8 @@ def main(argv=None):
         print(f"GCC tic6x-elf with C++ not found in {paths.TOOLCHAIN}; run tools/build_tic6x_binutils.sh and "
               "tools/build_tic6x_gcc.sh, or set ENAGA_TOOLCHAIN", file=sys.stderr)
         return 2
-    out = WORK / args.app_dir.resolve().name
+    app = args.app_dir.resolve()
+    out = WORK / app.name if app.is_relative_to(paths.ROOT) else app / "build"
     b = build(args.app_dir, out, args.name, args.app_version)
     target = args.output or out / "APP.ENA"
     target.write_bytes(b["package"])

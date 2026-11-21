@@ -11,6 +11,9 @@ What an app can use, header by header. This is the reference; the README's "Writ
 | `<enaga/files.hpp>` | `enaga::files`: whole files, background reads and writes, folders, `File`, `Stream` |
 | `<enaga/wav.hpp>` | `enaga::wav`: WAV headers |
 | `<enaga/settings.hpp>` | `enaga::Settings`: an app's own key/value settings |
+| `<enaga/midi.hpp>`, `<enaga/clock.hpp>` | `enaga::midi`: sending MIDI; `enaga::clock`: tempo, transport, ticks |
+| `<enaga/ui.hpp>` | `enaga::ui`: list, parameter page, dialog, text entry |
+| `<enaga/bytes.hpp>` | `enaga::bytes`: numbers in packed data at any address |
 | `<enaga/dsp.hpp>` | `enaga::dsp`: math, oscillators, filters, envelopes, LFOs, delays, chorus, reverb |
 | `<enaga/abi.h>` | The C boundary under all of it: constants, events, the host and app tables, the package header |
 | `<enaga/dsp.h>`, `<enaga/dsp/math.h>` | The DSP library's C interface, for C and `*.ti.c` files |
@@ -38,9 +41,13 @@ What an app can use, header by header. This is the reference; the README's "Writ
 
 ## Building and installing an app
 
+Outside this repository, the SDK has what building needs (`docs/getting-started.md` goes from an empty folder to
+an app on the card). Here, or in the SDK:
+
 ```sh
 python3 -B tools/build_app.py examples/tone                 # -> build/apps/tone/APP.ENA
 python3 -B tools/build_app.py DIR -o /media/card/ENAGA/APPS/NAME/APP.ENA --name "MY SYNTH" --app-version 3
+python3 -B tools/build_app.py ~/my-app                      # outside Enaga's folder -> ~/my-app/build/APP.ENA
 ```
 
 Every `*.cpp` and `*.c` file in the directory is compiled and linked with Enaga's runtime and the DSP library into
@@ -887,8 +894,11 @@ The `_memory` functions give the floats of zeroed memory the `_init` functions n
 - **Stack:** a function's frame is limited to 16 KiB, and VLAs and `alloca` are refused at build time (Enaga's
   interrupt entry uses the 16 KiB below the stack pointer). Put large arrays in statics or on the heap.
 - **Static constructors** run before the app object is made; **destructors never run**.
-- **Alignment:** a misaligned 32-bit access does not fault; it silently uses the aligned address below. Read
-  packed data (file formats) byte by byte, as `<enaga/wav.hpp>` does.
+- **Alignment:** a misaligned 32-bit access does not fault; it silently uses the aligned address below, and a
+  misaligned store overwrites the word below. Read and write packed data (file formats, SysEx) with
+  `<enaga/bytes.hpp>`, which goes byte by byte: `load_le16`, `load_le32`, `load_be16`, `load_be32`, `store_le16`,
+  `store_le32`, `store_be16`, `store_be32` in `enaga::bytes`, each taking any address (`le` little-endian, the
+  processor's and WAV's order; `be` big-endian, as in standard MIDI files).
 - **Null pointers:** reading address 0 does not fault; it returns garbage. Writes to wild pointers can corrupt
   Enaga: there is no memory protection (the C6748 has no MMU), only recovery by the watchdog and the exception
   handler.

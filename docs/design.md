@@ -200,7 +200,8 @@ Proposal, grouped by service. Names are illustrative until each service exists.
 ## Tooling and release
 
 - Toolchain: GCC 13.3 `tic6x-elf` with C and C++ and a freestanding libstdc++ (`tools/build_tic6x_*.sh`).
-  Prebuilt for Linux, macOS and Windows (Docker first) by 1.0.
+  Prebuilt for Linux x86-64 with each release from E4 (`tools/package_toolchain.py`, with its source); macOS
+  and a Docker image are still to come.
 - A project template and build tool, example apps (synth, sampler, step sequencer), an API reference (started:
   docs/api.md, kept complete by `tests/test_api_docs.py`).
 - Testing at three levels: a host-native app lab for fast UI work (planned), the SmplTrek emulator running
@@ -349,7 +350,7 @@ and the ones that need the unit collect into a session.
    confirmation dialog and text entry (patch names), drawn with the existing fonts on `Canvas`, driven from the
    app's events. Then app icons in the Enaga menu (an optional `ICON` in the package). File browser, waveform
    view and anything larger wait for real uses.
-7. **SDK.** A project template and a build tool that work outside this repository; unaligned-safe load/store
+7. (**Done** 2026-11-20, see the log.) **SDK.** A project template and a build tool that work outside this repository; unaligned-safe load/store
    helpers; the null-read note; the DSP library prebuilt if TI's licence allows (check that cl6x code calls none
    of TI's run-time library). Getting-started docs from an empty folder to an app on the card.
 8. **Exit.** Someone who has not worked on Enaga builds the template app from the docs alone.
@@ -393,7 +394,8 @@ Since E3: one image serves the SmplTrek, Lofi-12 XT and CyDrums (the same board)
 file for each; Enaga tells which it runs on from the bootloader's file name, confirmed on a SmplTrek in session 4.
 The other two are untested. E4 is under way ("E4 plan" above): pad pressure, input selection, MIDI on the DIN jacks, and the clock,
 transport and SYNC are done on the emulator and await the unit, and so does USB MIDI (step 5), whose USB product ID is still to come (pid.codes). The UI toolkit
-and app icons (step 6) are built; app icons await a look on the unit.
+and app icons (step 6) are built; app icons await a look on the unit. The SDK (step 7) is built: an SDK zip, a
+prebuilt toolchain and its source go out with each release from the next tag; step 8, the exit test, is next.
 
 ## Open items
 
@@ -1496,3 +1498,42 @@ Tests:
   the menu code, the test failed.
 - Screenshots of the menu, at the top and scrolled to SETTINGS, were looked at.
 
+### The SDK, E4 step 7 (2026-11-20)
+
+The owner's choices: a prebuilt Linux x86-64 toolchain published with each release, its source alongside; the
+DSP library stays source in the SDK, built with each app by cl6x when the developer has it, GCC otherwise.
+- **`tools/make_sdk.py <tag>`** writes `enaga-sdk-<tag>.zip`: `include/`, `runtime/` (DSP sources included),
+  `tools/build_app.py` and `tools/paths.py`, `template/`, the tone, widgets and synth examples,
+  `docs/getting-started.md`, `docs/api.md`, the licence and a README. 0.1 MB. The SDK root plays the repository's
+  part for `paths.py`, so nothing in the build tool changed for it.
+- **`build_app.py`**: an app folder outside the repository (or SDK) now builds into its own `build/APP.ENA`,
+  not into the SDK's folder. Inside, as before.
+- **`tools/package_toolchain.py <tag>`** writes `enaga-toolchain-<tag>-linux-x86_64.tar.xz`, `tic6x/` to unpack
+  into the SDK's `tools/`. Host programs are stripped, target libraries have no debug information, and LTO, gcov
+  and the manuals are left out. 27.6 MB from 1.1 GB. It needs glibc 2.38 or newer and libzstd (built on Ubuntu
+  24.04). The same script writes `enaga-toolchain-<tag>-source.tar`: the six upstream tarballs (GCC, binutils,
+  GMP, MPFR, MPC, ISL), checked against pinned SHA-256s and downloaded when the build directories lack them (a
+  CI toolchain cache hit), with the patch and both build scripts. That meets GPLv3's corresponding-source duty for
+  the binaries. Apps are not bound by it: libgcc and the libstdc++ headers fall under GCC's runtime library
+  exception.
+- **The release workflow** adds the three archives to each release, covered by `SHA256SUMS`, with a note on them.
+- **`template/`**: a one-voice synth on a `ParamPage` (wave, attack, release, level), played by the pads and MIDI
+  notes, with a note icon. Each value it shares with `audio()` is one word written by one side; `audio()` builds
+  the envelope shape itself when the times change, so it never reads a half-written struct.
+- **`<enaga/bytes.hpp>`**: little- and big-endian loads and stores at any address, byte by byte.
+  The null-read note was already in api.md ("Language and runtime"); the getting-started guide repeats both.
+- **`docs/getting-started.md`**: from the release downloads to the app on the card, then what to change first
+  and the rules that matter most.
+- Not done: the prebuilt DSP library (the owner chose source); macOS and Docker toolchains.
+
+Tests:
+- `tests/test_sdk.py` unpacks the SDK zip on its own, copies the template outside it, and builds it and the
+  three examples with the SDK's build tool. Each is byte-identical to the repository's build apart from the
+  display name, which comes from the folder.
+- The packaged toolchain is unpacked and builds the template and the synth to the same bytes as the full one.
+  Its source archive holds every tarball.
+- The template plays a MIDI note on the emulator, and the release dies away after note off.
+- `tests/test_bytes.py` checks every load and store at eight offsets on the host, and that the bytes around
+  them are untouched. A swapped byte order in `store_le32` failed it.
+- The source download and its hash check were run against gcc.gnu.org for one tarball.
+- The release workflow itself runs only on a tag, so it has not run yet.
