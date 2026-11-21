@@ -373,7 +373,7 @@ emulator where it can be, and the ones that need the unit collect into a session
 2. **SYNC IN polarity.** The stock POLARITY IN setting (rising or falling edges, HW-27), and POLARITY OUT for
    SYNC OUT's idle level. Small; the unit with a falling-edge device checks it.
 3. **USB mass storage.** The card as a USB drive, so apps and samples go on without taking the card out. The SD
-   card cannot be used by FatFs and by the computer at once. *Decision:* a USB DRIVE page in the Enaga menu that
+   card cannot be used by FatFs and by the computer at once. *Decided (2026-11-21):* a USB DRIVE page in the Enaga menu that
    stops the app, unmounts the card and hands it to the computer until it is ejected (or OK is pressed), then
    remounts and goes back to the menu; rather than a drive that appears while apps run (files would fail
    underneath them, and a computer writes whenever it likes). Class: bulk-only transport, SCSI transparent,
@@ -381,7 +381,7 @@ emulator where it can be, and the ones that need the unit collect into a session
    the emulator's scripted host speaks bulk transfers already; a host-side check reads and writes a FAT image
    through it. The unit with Windows, macOS and Linux checks it for real, including writing a large file.
 4. **USB audio.** As stock (HW-18, HW-40): class 1.0, 2 in / 2 out, 48 kHz, 16-bit, isochronous (OUT adaptive,
-   IN asynchronous, 1 ms). *Decision:* what apps see. Proposed: the computer's audio arrives as a new input
+   IN asynchronous, 1 ms). *Decided (2026-11-21):* what apps see: the computer's audio arrives as a new input
    source (`enaga::system::input(ENAGA_INPUT_USB)`), so `audio()` gets it in place of the jacks; the unit's
    output goes to the computer as well as to the jacks, with no app code. A later step can mix both inputs. The
    codec runs from its own crystal, so the two clocks drift: the stock firmware trims the codec PLL from TIMER64P1
