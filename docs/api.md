@@ -181,6 +181,11 @@ app's function key, though F1 + POWER always opens the Enaga menu.
 
 `ENAGA_KEY_COUNT` (48) bounds key numbers, for arrays indexed by key. Keys are debounced by Enaga.
 
+The knob pushes are **not** in alphabetical order: `ENAGA_KEY_PUSH_B` is 0 and `ENAGA_KEY_PUSH_A` is 1, then
+C and D. Encoder *events* are alphabetical (`encoder` 0-3 = A-D), so the two numberings disagree about A and
+B. Use the names rather than the numbers: code that takes key code 0 for knob A swaps the first two knobs,
+and nothing catches it.
+
 ### Encoders: `on_encoder(int encoder, int delta)`
 
 `encoder` 0-3 are A-D, 4 is VALUE; `delta` is signed detents since the last event, clockwise positive.
@@ -797,6 +802,10 @@ The `_memory` functions give the floats of zeroed memory the `_init` functions n
   124 MiB). Running out calls `fatal("out of memory")`. `memcpy`, `memmove`, `memset`, `memcmp` and `strlen` are
   there; the rest of libc is not.
 - **No libm:** use the DSP library's math.
+- **`<atomic>`, but loads and stores only:** there is no libatomic, so an atomic read-modify-write does not
+  link — `fetch_add` on a byte wants `__atomic_fetch_add_1`, which is not there. It compiles, so the failure
+  appears at link time. Cross-context state wants one writer per field anyway, and there a plain load and a
+  plain store are enough.
 - **Stack:** a function's frame is limited to 16 KiB, and VLAs and `alloca` are refused at build time (Enaga's
   interrupt entry uses the 16 KiB below the stack pointer). Put large arrays in statics or on the heap.
 - **Static constructors** run before the app object is made; **destructors never run**.
