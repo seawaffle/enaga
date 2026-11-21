@@ -355,6 +355,50 @@ and the ones that need the unit collect into a session.
    of TI's run-time library). Getting-started docs from an empty folder to an app on the card.
 8. (**Simulated** 2026-11-20, see the log; a person still to do it.) **Exit.** Someone who has not worked on Enaga builds the template app from the docs alone.
 
+## E5 plan (2026-11-21)
+
+Scope: the rest of the hardware, so that 1.0 (E6) freezes an API that covers the whole machine and has been used.
+Survey of what E4 left uncovered: the battery (read, ignored), USB mass storage and audio, the original firmware's
+sounds in SPI flash, and SYNC IN polarity. Steps in order, smallest and safest first; each ends tested on the
+emulator where it can be, and the ones that need the unit collect into a session.
+
+1. **Battery and power.** Panel channel 15 is the battery voltage and GP3[7] is high on batteries (smpltrek-re
+   "Power management", XF-8, HW-24). Enaga turns that into a level (0-4, the stock threshold tables per BATTERY
+   TYPE: alkaline, NiMH, lithium, with hysteresis), a BATTERY TYPE setting, a battery mark on the menu and STATUS,
+   and `enaga::system::battery()` for apps (level, or -1 on USB or adapter power). At the lowest level: a warning,
+   then a clean switch-off that closes the app's files first, so a fading battery never cuts a card write. The
+   thresholds are the stock ones; the voltages behind them want a reading on the unit with each battery type.
+2. **SYNC IN polarity.** The stock POLARITY IN setting (rising or falling edges, HW-27), and POLARITY OUT for
+   SYNC OUT's idle level. Small; the unit with a falling-edge device checks it.
+3. **USB mass storage.** The card as a USB drive, so apps and samples go on without taking the card out. The SD
+   card cannot be used by FatFs and by the computer at once. *Decision:* a USB DRIVE page in the Enaga menu that
+   stops the app, unmounts the card and hands it to the computer until it is ejected (or OK is pressed), then
+   remounts and goes back to the menu; rather than a drive that appears while apps run (files would fail
+   underneath them, and a computer writes whenever it likes). Class: bulk-only transport, SCSI transparent,
+   on top of the existing SD driver, added to the USB MIDI device as a composite (TinyUSB's MSC class). Testing:
+   the emulator's scripted host speaks bulk transfers already; a host-side check reads and writes a FAT image
+   through it. The unit with Windows, macOS and Linux checks it for real, including writing a large file.
+4. **USB audio.** As stock (HW-18, HW-40): class 1.0, 2 in / 2 out, 48 kHz, 16-bit, isochronous (OUT adaptive,
+   IN asynchronous, 1 ms). *Decision:* what apps see. Proposed: the computer's audio arrives as a new input
+   source (`enaga::system::input(ENAGA_INPUT_USB)`), so `audio()` gets it in place of the jacks; the unit's
+   output goes to the computer as well as to the jacks, with no app code. A later step can mix both inputs. The
+   codec runs from its own crystal, so the two clocks drift: the stock firmware trims the codec PLL from TIMER64P1
+   while streaming; Enaga does the same, or resamples by a fraction of a sample (to decide at the step from
+   measurements). Testing: the emulator has no isochronous transfers yet (a request through the user for
+   smpltrek-re); the unit plays and records with a DAW.
+5. **The original firmware's sounds.** About 27 MiB of chip 0 beyond the system image and chip 1 hold the stock
+   samples, kits and patterns (smpltrek-re "SPI flash", PDSN / PKIT / PISN / PPRJ). Read-only: a flash driver
+   (SPI0 by EDMA, as the bootloader, invalidating the cache over the destination) and a list of the factory
+   samples that apps can load like WAV files. Enaga never writes flash. Before the API: a map of the partitions
+   and the sample format, from smpltrek-re's analysis and a read on the unit.
+6. **Exit.** On a unit: copy an app over USB DRIVE and run it; play audio from a DAW through the unit and record
+   the unit into it; an app plays a factory sample; the battery mark falls with the batteries and the unit switches
+   itself off cleanly.
+
+E6, 1.0: a review of the whole API before freezing it (names, the C interface, what is provisional), a person's
+exit test of the SDK, the pid.codes USB IDs, the Lofi-12 XT and CyDrums run by someone with one, and the public
+release.
+
 ## Phases
 
 | Phase | Content | Exit |
@@ -364,7 +408,8 @@ and the ones that need the unit collect into a session.
 | **E2** | Audio API and DSP library, asynchronous file I/O, sample loading and streaming | one real instrument app (done) |
 | **E3** | Enaga menu, boot policy, F1 escape, app switching, settings | switch between two apps repeatedly on the unit (done) |
 | **E4** | Input selection, pad pressure, MIDI on DIN and USB, clock and SYNC, a first UI toolkit, SDK packaging and documentation | an outside developer builds the template app from the docs |
-| **E5 / 1.0** | USB mass storage and audio, API freeze, release | public release |
+| **E5** | Battery and power, SYNC polarity, USB mass storage and audio, the original firmware's sounds | apps copied over USB, audio to and from a DAW, a factory sample played, a clean low-battery switch-off, on a unit |
+| **E6 / 1.0** | API review and freeze, the SDK's exit test by a person, the USB IDs, the other two devices, release | public release |
 
 ## Status
 
@@ -392,11 +437,14 @@ by feel to 1,600 / 1,000 / 600. App icons are left for E4.
 
 Since E3: one image serves the SmplTrek, Lofi-12 XT and CyDrums (the same board), and the build writes an update
 file for each; Enaga tells which it runs on from the bootloader's file name, confirmed on a SmplTrek in session 4.
-The other two are untested. E4 is under way ("E4 plan" above): pad pressure, input selection, MIDI on the DIN jacks, and the clock,
-transport and SYNC are done on the emulator and await the unit, and so does USB MIDI (step 5), whose USB product ID is still to come (pid.codes). The UI toolkit
-and app icons (step 6) are built; app icons await a look on the unit. The SDK (step 7) is built: an SDK zip, a
-prebuilt toolchain and its source go out with each release from the next tag. Step 8, the exit test, passed as a
-simulation (a fresh agent with only the downloads); a person doing it is still to come.
+The other two are untested.
+
+E4 is complete apart from two checks, and is released as 0.2.0 (2026-11-21): pad pressure, input selection, MIDI on
+the DIN jacks and over USB, the clock with transport and SYNC, the UI toolkit, app icons, and the SDK (an SDK zip, a
+prebuilt toolchain and its source with each release). On the unit (session 5) pad pressure, the menu icons, an app
+built from the released SDK, and USB MIDI passed; still to check there are DIN MIDI, the clock and SYNC, and three
+of the input routes, which need equipment. The exit test passed as a simulation (a fresh agent with only the
+downloads); a person doing it moves to E6. USB uses test IDs until pid.codes grants one. E5 is planned ("E5 plan").
 
 ## Open items
 
