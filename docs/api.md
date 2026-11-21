@@ -1,9 +1,9 @@
 # Enaga API reference
 
-What an app can use, header by header. This is the reference; the README's "Writing an app" is the overview, and
-`examples/tone` (minimal) and `examples/synth` (a whole instrument) are working code. The interface is
+What an app can use, header by header. This is the reference; `docs/getting-started.md` goes from nothing to an
+app on the card, and `examples/tone` (minimal) and `examples/synth` (a whole instrument) are working code. The interface is
 **provisional until 1.0** (`ENAGA_ABI_VERSION` 0): names and the binary layout may still change.
-`tests/test_api_docs.py` fails when a public name in `include/enaga/` is missing here.
+In the repository, `tests/test_api_docs.py` fails when a public name in `include/enaga/` is missing here.
 
 | Header | What it gives |
 |---|---|
@@ -53,7 +53,7 @@ python3 -B tools/build_app.py ~/my-app                      # outside Enaga's fo
 Every `*.cpp` and `*.c` file in the directory is compiled and linked with Enaga's runtime and the DSP library into
 one package. `--name` is the display name in the Enaga menu (default: the directory's name; 1-23 printable ASCII
 characters, shown upper case); `--app-version` is a number stored in the package. On the card the package goes at
-`/ENAGA/APPS/<NAME>/APP.ENA`, `<NAME>` an 8.3 folder name. That folder name is the app's **package name**, which
+`/ENAGA/APPS/<NAME>/APP.ENA`, `<NAME>` a folder name of up to 8 letters, digits, `_` or `-`. That folder name is the app's **package name**, which
 also names its data folder (`/ENAGA/DATA/<NAME>`), so keep it when updating the app.
 
 **The icon.** An optional `icon.txt` in the directory is the app's icon in the Enaga menu, shown beside its name:
@@ -611,9 +611,11 @@ void draw(enaga::Canvas &canvas) override { canvas.clear(); list.draw(canvas); }
 - **Drawing:** `draw(canvas, top)` shows the title and "group/groups". Then a row per knob: its letter, the name
   with a bar for the value's place in its range, and the value at the right, brighter when it is not the
   initial one.
-- **A `Param`** has `name` (12 characters show), `min`, `max` and `initial`, and how to show the value: `labels`
-  (a name per step from `min`), `format` (a function writing up to 12 characters), or the number with an optional
-  `unit`. `format(param, out)` gives the text shown.
+- **A `Param`** has, in this order, `name` (12 characters show), `min`, `max` and `initial`, and how to show the
+  value: `labels` (a name per step from `min`), `format`, a `void (*)(int value, char *out)` writing up to 12
+  characters and a terminating 0, or the number with an optional `unit`. So
+  `{"CUTOFF", 0, 127, 64, nullptr, hertz}` or `{"LEVEL", 0, 100, 80, nullptr, nullptr, "%"}`. The page's
+  `format(param, out)` gives the text shown.
 
 **`Dialog`**: a question in a box over the screen.
 - `open(message, yes = "OK", no = "CLR")`. The message has up to three lines, split at `'\n'`, 19 characters each.

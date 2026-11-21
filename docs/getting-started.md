@@ -2,7 +2,9 @@
 
 From an empty folder to your own app running on a SmplTrek. You need:
 - a Linux PC (x86-64) with Python 3.10 or newer. Windows works through WSL.
-- a SmplTrek with Enaga installed (the README's "Installing"), its SD card and a card reader.
+- a SmplTrek with Enaga installed, its SD card and a card reader. Installing Enaga is in the project's README,
+  ["Installing"](https://github.com/seawaffle/enaga#installing): the firmware file from the same release goes on
+  the card, and the unit's own SYSTEM UPDATE installs it (an official update puts the original firmware back).
 
 The prebuilt compiler needs glibc 2.38 or newer and libzstd. Ubuntu 24.04, Debian 13 and Fedora 39 or newer
 have both. On anything older, build the compiler from source instead (step 1, last paragraph).
@@ -13,7 +15,8 @@ From the [Releases](https://github.com/seawaffle/enaga/releases) page of the ver
 - `enaga-sdk-<version>.zip`: the headers, the app runtime, the build tool, a template and the examples.
 - `enaga-toolchain-<version>-linux-x86_64.tar.xz`: GCC 13.3 for the C6748.
 
-Unpack the compiler into the SDK's `tools/` folder, where the build tool looks for it:
+In the folder you downloaded them to, unpack the SDK, then the compiler into the SDK's `tools/` folder, where the
+build tool looks for it. The commands from here on run in that folder:
 
 ```sh
 unzip enaga-sdk-v0.2.0.zip
@@ -30,8 +33,8 @@ the repository's `tools/`. That needs flex, bison and a C++ compiler, and takes 
 
 ## 2. Make your app
 
-Copy the template to a folder of your own. The folder's name is the app's name in the Enaga menu until you
-choose another:
+Copy the template to a folder of your own, anywhere. Its name becomes the app's name in the Enaga menu, in
+upper case (`my-synth` shows as MY-SYNTH), unless you give the build another (step 3):
 
 ```sh
 cp -r enaga-sdk-v0.2.0/template ~/my-synth
@@ -53,13 +56,19 @@ This writes `~/my-synth/build/APP.ENA`, the package you put on the card. Warning
 The DSP library is compiled into every app. If TI's free C6000 compiler (cl6x) is installed in
 `~/ti/ti-cgt-c6000_*`, the build tool uses it for the library, and its inner loops run several times faster. The
 tool's last line says which compiler built it. Without cl6x, GCC builds it and everything still works, just with
-less audio headroom.
+less audio headroom. App source files named `*.ti.c` are built with cl6x too, when it is there (docs/api.md,
+"Writing inner loops for cl6x"). Set `ENAGA_TI_CGT` to use a cl6x installed elsewhere, or to `none` for GCC
+only.
+
+The DSP library is built once, into the SDK's own `build/` folder, and again only when the SDK changes, so the
+SDK folder must be writable.
 
 ## 4. Put it on the card
 
-Each app has a folder under `/ENAGA/APPS` on the card, with a name of up to 8 letters, digits, `_` or `-`. That
-folder name is the app's *package name*: it also names the app's data folder (`/ENAGA/DATA/<name>`), so keep it
-when you update the app.
+Each app has a folder under `/ENAGA/APPS` on the card, with a short name: up to 8 letters, digits, `_` or `-` (a
+FAT "8.3" name). That folder name is the app's *package name*: it also names the app's data folder
+(`/ENAGA/DATA/<name>`), so keep it when you update the app. It is separate from the name the menu shows, which
+comes from the build (step 2), so here the folder is MYSYNTH and the menu says MY-SYNTH.
 
 ```sh
 mkdir -p /media/$USER/SDCARD/ENAGA/APPS/MYSYNTH
@@ -67,7 +76,8 @@ cp ~/my-synth/build/APP.ENA /media/$USER/SDCARD/ENAGA/APPS/MYSYNTH/
 ```
 
 (Your card's mount point may differ.) Eject the card, put it back in the SmplTrek and switch on. Enaga starts the
-last app that ran. **F1 + POWER** opens the menu: choose MY-SYNTH and press OK. Play a pad.
+last app that ran (or the only one installed). **F1 + POWER** opens the menu: choose MY-SYNTH and press OK. Play
+a pad.
 
 If the app does not start, the menu says why (a build for another version, say). `enaga::log` lines and crash
 reasons are on the menu's STATUS page.
@@ -94,5 +104,6 @@ The rules that matter most:
 - `docs/api.md`: the reference, header by header.
 - `examples/tone`: the smallest app. `examples/widgets`: the UI toolkit's widgets. `examples/synth`: a full
   instrument (eight voices, filters, effects, patches on the card).
-- To run apps without a unit, the repository's emulator tools (the README's "Testing without a unit") play any
-  app folder in a browser, with the screen, the controls and the sound.
+- To run apps without a unit: the SDK has no emulator. The project's repository has one (its README, ["Testing
+  without a unit"](https://github.com/seawaffle/enaga#testing-without-a-unit)): with a clone of it and of the
+  emulator, `tools/panel.py` plays any app folder in a browser, with the screen, the controls and the sound.

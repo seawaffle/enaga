@@ -353,7 +353,7 @@ and the ones that need the unit collect into a session.
 7. (**Done** 2026-11-20, see the log.) **SDK.** A project template and a build tool that work outside this repository; unaligned-safe load/store
    helpers; the null-read note; the DSP library prebuilt if TI's licence allows (check that cl6x code calls none
    of TI's run-time library). Getting-started docs from an empty folder to an app on the card.
-8. **Exit.** Someone who has not worked on Enaga builds the template app from the docs alone.
+8. (**Simulated** 2026-11-20, see the log; a person still to do it.) **Exit.** Someone who has not worked on Enaga builds the template app from the docs alone.
 
 ## Phases
 
@@ -395,7 +395,8 @@ file for each; Enaga tells which it runs on from the bootloader's file name, con
 The other two are untested. E4 is under way ("E4 plan" above): pad pressure, input selection, MIDI on the DIN jacks, and the clock,
 transport and SYNC are done on the emulator and await the unit, and so does USB MIDI (step 5), whose USB product ID is still to come (pid.codes). The UI toolkit
 and app icons (step 6) are built; app icons await a look on the unit. The SDK (step 7) is built: an SDK zip, a
-prebuilt toolchain and its source go out with each release from the next tag; step 8, the exit test, is next.
+prebuilt toolchain and its source go out with each release from the next tag. Step 8, the exit test, passed as a
+simulation (a fresh agent with only the downloads); a person doing it is still to come.
 
 ## Open items
 
@@ -1537,3 +1538,35 @@ Tests:
   them are untouched. A swapped byte order in `store_le32` failed it.
 - The source download and its hash check were run against gcc.gnu.org for one tarball.
 - The release workflow itself runs only on a tag, so it has not run yet.
+
+### The exit test, simulated, E4 step 8 (2026-11-20)
+
+A fresh agent with no knowledge of Enaga got only `enaga-sdk-v0.2.0.zip` and the toolchain archive, as a release
+would publish them. It also got an empty home folder and an empty folder for the card, and was barred from the
+repository and the network. It followed `docs/getting-started.md` literally:
+- Unpacking, copying the template, the build and the copy to the card each worked first time, in about five
+  minutes. It ran with its own HOME, so it had no cl6x: the GCC-only path, as a newcomer would have.
+- It then made the guide's first two changes from `docs/api.md` alone: the pads an octave down, and a fifth
+  parameter, CUTOFF, through `Svf`. Both compiled first time under `-Werror`.
+- Its card, booted in the emulator: the app started (the only one installed), played a MIDI note and fell silent
+  after the release. Its screen was the one it had predicted from the docs (MY APP, 1/2, PLAYING).
+
+It found no blockers. Fixed from its notes:
+- **The guide:**
+  - Installing Enaga now links to the project README on GitHub, since the SDK has no README section for it.
+  - The three names are explained: the project folder, the card's package folder, and the menu's upper-case name.
+  - It says which folder the commands run in.
+  - It covers `*.ti.c` files, `ENAGA_TI_CGT`, and that the DSP library is built into the SDK's own folder, so
+    the SDK must be writable.
+  - "Where next" says plainly that the emulator is in the repository, not the SDK.
+- **api.md:**
+  - The opening points to the guide instead of the repository README.
+  - `Param`'s field order and `format`'s signature are given, with examples.
+  - The package-name rule is the same as in the guide.
+- **build_app.py:**
+  - Its own errors (no sources, a bad name or icon, a failed compile or link) are one line, not a traceback.
+  - A folder without sources no longer gets a `build/`.
+  - The missing-compiler and no-cl6x messages point to the guide, not to repository scripts or `paths.py`.
+
+Left as they are: a number-to-text helper for `format` functions (it wanted Hz, and the SDK has no libc), and a
+way to try apps without a unit or the repository.

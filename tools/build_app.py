@@ -123,7 +123,6 @@ def read_icon(path):
 def build(app_dir, out, name=None, app_version=1):
     """Compile, link and package; returns {"package": bytes, "elf", "payload_size", "bss_size", "entry"}."""
     app_dir, out = Path(app_dir).resolve(), Path(out).resolve()
-    out.mkdir(parents=True, exist_ok=True)
     name = name or app_dir.name
     encoded = name.encode("ascii")
     if not encoded or len(encoded) >= 24 or not re.fullmatch(rb"[ -~]+", encoded):
@@ -131,6 +130,7 @@ def build(app_dir, out, name=None, app_version=1):
     sources = sorted(app_dir.glob("*.cpp")) + sorted(app_dir.glob("*.c"))
     if not sources:
         raise ValueError(f"no .cpp or .c sources in {app_dir}")
+    out.mkdir(parents=True, exist_ok=True)
     objs = [compile_source(src, out) for src in sources]
     objs.append(compile_source(RUNTIME / "runtime.cpp", out))
     libgcc = paths.libgcc()
@@ -173,17 +173,25 @@ def main(argv=None):
     ap.add_argument("--app-version", type=int, default=1)
     args = ap.parse_args(argv)
     if not tools_present():
-        print(f"GCC tic6x-elf with C++ not found in {paths.TOOLCHAIN}; run tools/build_tic6x_binutils.sh and "
-              "tools/build_tic6x_gcc.sh, or set ENAGA_TOOLCHAIN", file=sys.stderr)
+        print(f"the tic6x compiler is not in {paths.TOOLCHAIN}: unpack enaga-toolchain-<version>-linux-x86_64.tar.xz "
+              f"into {paths.ROOT / 'tools'}, or set ENAGA_TOOLCHAIN to where it is "
+              "(docs/getting-started.md, step 1)", file=sys.stderr)
         return 2
     app = args.app_dir.resolve()
     out = WORK / app.name if app.is_relative_to(paths.ROOT) else app / "build"
-    b = build(args.app_dir, out, args.name, args.app_version)
+    try:
+        b = build(args.app_dir, out, args.name, args.app_version)
+    except (ValueError, RuntimeError) as e:
+        print(f"build_app: {e}", file=sys.stderr)
+        return 1
+    except subprocess.CalledProcessError as e:     # the compiler or linker has said why
+        print(f"build_app: {Path(str(e.cmd[0])).name} failed", file=sys.stderr)
+        return 1
     target = args.output or out / "APP.ENA"
     target.write_bytes(b["package"])
     print(f"wrote {target}: {len(b['package'])} bytes (payload {b['payload_size']}, bss {b['bss_size']}, entry +{b['entry']:#x})")
     print("built with cl6x: " + ", ".join(["the DSP library", *b["ti_sources"]]) if paths.ti_present() else
-          "built with GCC only (TI's cl6x not found; tools/paths.py)")
+          "built with GCC only (TI's cl6x not found: docs/getting-started.md, step 3)")
     return 0
 
 
