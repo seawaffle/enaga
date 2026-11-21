@@ -127,6 +127,16 @@ size_t strlen(const char *text) { size_t n = 0; while (text[n]) ++n; return n; }
 
 void abort(void) { enaga::fatal("abort"); }
 
+// libgcc's helpers carry unwind tables naming these personality routines, and an app that uses
+// 64-bit integer division or modulo references __c6xabi_divlli, whose table names pr3. Defining
+// them keeps libgcc's unwinder (unwind-c6x.o, which wants __exidx_start and __exidx_end) out of
+// the link. The firmware does the same, for the same reason, in firmware/kernel/abi_stubs.c.
+void __c6xabi_unwind_cpp_pr0(void) { enaga::fatal("unwind"); }
+void __c6xabi_unwind_cpp_pr1(void) { enaga::fatal("unwind"); }
+void __c6xabi_unwind_cpp_pr2(void) { enaga::fatal("unwind"); }
+void __c6xabi_unwind_cpp_pr3(void) { enaga::fatal("unwind"); }
+void __c6xabi_unwind_cpp_pr4(void) { enaga::fatal("unwind"); }
+
 // C++ ABI. Guards assume one context (statics are not initialised from the audio callback).
 void __cxa_pure_virtual(void) { enaga::fatal("pure virtual call"); }
 void __cxa_deleted_virtual(void) { enaga::fatal("deleted virtual call"); }
