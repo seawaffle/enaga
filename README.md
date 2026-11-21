@@ -103,7 +103,8 @@ The points below are the overview; [docs/api.md](docs/api.md) is the full refere
 See `examples/tone` for a minimal app and `examples/synth` for a whole instrument: an eight-voice virtual
 analogue synthesizer with hard sync and a ring modulator, a filter, three envelopes, two LFOs that can fade in,
 a modulation matrix, unison, chorus, delay and reverb, played from the pads and STEP keys, edited page by
-page, with sixteen user patch slots and the last sound kept on the card.
+page, with sixteen user patch slots and the last sound kept on the card. `examples/widgets` shows the UI toolkit
+(`<enaga/ui.hpp>`): a list, a page of parameters on the knobs, text entry and a confirmation dialog.
 
 ## Building
 
@@ -158,7 +159,7 @@ directory (the one containing `cpu.py`); it builds its core into its own `work/`
 
 ```sh
 export ENAGA_EMULATOR=/path/to/smpltrek-re/emulator
-python3 -B -m unittest discover -s tests -v                           # 81 tests, about 8 minutes
+python3 -B -m unittest discover -s tests -v                           # 84 tests, about 8 minutes
 python3 -B tools/emulate.py examples/tone --key 32@300000000           # press STEP 1; writes build/emulate/
 ```
 
@@ -186,12 +187,13 @@ only `g++`, and `test_sysimage.py` and `test_api_docs.py` need nothing. `tools/e
 | `include/enaga/app.hpp` | The C++ layer: `enaga::App`, `enaga::Canvas`, `ENAGA_APP(Type)`, `enaga::log`, `enaga::fatal`, `enaga::system` |
 | `include/enaga/dsp.hpp`, `dsp.h`, `dsp/` | The DSP library: C++ classes over a C interface |
 | `include/enaga/files.hpp`, `wav.hpp`, `settings.hpp` | Files and streams, WAV headers, an app's own settings |
+| `include/enaga/midi.hpp`, `clock.hpp`, `ui.hpp` | MIDI out, the tempo clock and transport, the UI toolkit |
 | `runtime/dsp/` | The DSP library's block functions, built by cl6x or GCC into every app |
 | `runtime/` | Linked into every app: entry point, static constructors, heap, `new`/`delete`, C++ ABI hooks, `app.ld` |
 | `loader/` | The package loader (freestanding C, used by the firmware and the tests) |
 | `firmware/` | Enaga itself: `hal/` drivers, `kernel/` (interrupts, audio engine, app host, menu, settings, device detection, exceptions, watchdog, main loop), `start.s`, `link.ld`, `build.py` |
-| `examples/` | `synth` (the virtual analogue synthesizer); `tone` (STEP 1-8 play 750 Hz x step); `cxxcheck` (exercises the C++ runtime) |
-| `tests/` | `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board; `test_check.py` and `unit/check`: the CHECK app for sessions on a unit; `test_synth.py`: the synth example; `test_files.py` and `apps/files`: the file service; `test_streams.py` and `apps/streams`: streams and WAV; `test_menu.py` and `apps/menu`: the Enaga menu, boot policy, app switching and settings; `test_dsp.py` and `dsp/`: the DSP library on the host; `test_sysimage.py`: the update files for each device; `test_api_docs.py`: every public name is in docs/api.md |
+| `examples/` | `synth` (the virtual analogue synthesizer); `widgets` (the UI toolkit); `tone` (STEP 1-8 play 750 Hz x step); `cxxcheck` (exercises the C++ runtime) |
+| `tests/` | `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board; `test_check.py` and `unit/check`: the CHECK app for sessions on a unit; `test_synth.py`: the synth example; `test_files.py` and `apps/files`: the file service; `test_streams.py` and `apps/streams`: streams and WAV; `test_menu.py` and `apps/menu`: the Enaga menu, boot policy, app switching and settings; `test_dsp.py` and `dsp/`: the DSP library on the host; `test_ui.py` and `ui/`: the UI toolkit on the host, `test_widgets.py`: on the firmware; `test_midi.py`, `test_clock.py`, `test_usb.py`, `test_input.py`: MIDI, the clock and SYNC, USB MIDI, input selection; `test_sysimage.py`: the update files for each device; `test_api_docs.py`: every public name is in docs/api.md |
 | `tools/` | `build_app.py`, `emulate.py`, `panel.py` (apps live in the emulator's web panel), `card.py` (FAT and exFAT card images through Enaga's own FatFs), `unit_card.py` and `unit_dry_run.py` (files for a session on a unit, and the session walked on the emulator), `sysimage.py` (the update-file format), `paths.py`, toolchain build scripts |
 | `docs/` | `api.md` (the app interface reference), `design.md` (decisions, architecture, plan, log), `hardware.md` (the hardware notes) |
 

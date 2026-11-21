@@ -31,9 +31,10 @@ What an app can use, header by header. This is the reference; the README's "Writ
 12. [App settings](#app-settings)
 13. [MIDI](#midi)
 14. [Clock and transport](#clock-and-transport)
-15. [DSP library](#dsp-library)
-16. [The C interface](#the-c-interface)
-17. [Language and runtime](#language-and-runtime)
+15. [UI toolkit](#ui-toolkit)
+16. [DSP library](#dsp-library)
+17. [The C interface](#the-c-interface)
+18. [Language and runtime](#language-and-runtime)
 
 ## Building and installing an app
 
@@ -541,6 +542,78 @@ position in ticks.
 
 Both are sent from the audio interrupt: exact on average, and late by less than one block (1.33 ms). With CLOCK
 SRC MIDI, CLOCK OUT and MIDI THRU both on would send the clock twice.
+
+## UI toolkit
+
+`<enaga/ui.hpp>`, as `enaga::ui::`: a list, a page of parameters on the knobs, a confirmation dialog and text
+entry. They're drawn on the `Canvas` with Enaga's font, so apps look alike, and are header-only, with nothing in
+the firmware. `examples/widgets` uses all four.
+
+**Driving them.** An app passes its own key and knob callbacks to the widget it is showing and draws it in `draw`.
+Each `key(key, down)` and `encoder(encoder, delta)` returns an `Action`:
+- `Action::none`: not for this widget, or nothing changed;
+- `moved`, `changed`;
+- `chosen` (OK on a list entry, or text accepted);
+- `back` (CLR on a list);
+- `yes` and `no` (a dialog answered).
+
+The widgets keep pointers to what the app gives them (names, parameters, values), which must outlive them. Main
+context only. The controls follow the original firmware's: knobs A-D for parameters, the selection buttons under
+the screen for groups, UP / DOWN or VALUE in lists, OK and CLR to answer. F1 stays the app's.
+
+```cpp
+enaga::ui::List list;                                  // members of the app
+void on_key(int key, bool down) override {
+    if (list.key(key, down) == enaga::ui::Action::chosen) open(list.cursor());
+}
+void on_encoder(int encoder, int delta) override { list.encoder(encoder, delta); }
+void draw(enaga::Canvas &canvas) override { canvas.clear(); list.draw(canvas); }
+```
+
+**`List`**: a scrolling list with a title.
+- **Movement:** UP / DOWN or VALUE move the cursor, stopping at the ends. OK gives `chosen`, CLR `back`.
+- **Entries:** `set_items(names, count)` for fixed strings, or `set_items(count, label, user)` with a `Label`
+  function, `void (int index, char *out, int size, void *user)`, for entries that change. `set_count` changes
+  how many there are and `set_title` sets the title.
+- **Cursor:** `cursor()` and `select(index)`. `count()` and `name(index, out, size)` read the list back.
+- **Drawing:** `draw(canvas, top, bottom)` shows the title and as many rows (`row_height`, 11 px) as fit, the
+  cursor's on a dim bar, with marks at the right when there is more above or below.
+
+**`ParamPage`**: the original firmware's way of editing.
+- **Groups:** the page's parameters go in groups of four, in order, on knobs A-D. The selection buttons flip
+  between groups (wrapping). Turning a knob changes its parameter, clamped; pushing it returns the parameter to its
+  initial value.
+- **Setting up:** construct it, or call `set(title, params, count, values)`, with an array of `Param` and the
+  app's own `int` values, one per parameter. The page only changes those values.
+- **Changes:** after `Action::changed`, `changed()` is the parameter. `set_value(param, value)` sets one from the
+  app, clamped. `value(param)` reads one.
+- **Groups from the app:** `groups()`, `group()` and `show_group(n)`.
+- **Drawing:** `draw(canvas, top)` shows the title and "group/groups". Then a row per knob: its letter, the name
+  with a bar for the value's place in its range, and the value at the right, brighter when it is not the
+  initial one.
+- **A `Param`** has `name` (12 characters show), `min`, `max` and `initial`, and how to show the value: `labels`
+  (a name per step from `min`), `format` (a function writing up to 12 characters), or the number with an optional
+  `unit`. `format(param, out)` gives the text shown.
+
+**`Dialog`**: a question in a box over the screen.
+- `open(message, yes = "OK", no = "CLR")`. The message has up to three lines, split at `'\n'`, 19 characters each.
+- While it is `active()`, `key` takes every key. OK gives `yes`, CLR `no`, and both close it; `close()` closes it
+  without an answer.
+- `draw(canvas)` after the page, so it sits on top. `encoder` does nothing.
+
+**`TextEntry`**: editing a short name.
+- `open(title, initial, chars)` takes up to `max_chars` (16). Lower case in `initial` becomes upper case, and
+  characters the font lacks become spaces.
+- **Moving:** LEFT / RIGHT or knob A move the cursor.
+- **Changing:** VALUE, knob B or UP / DOWN step the character under it through `characters`: space, A-Z, 0-9 and
+  `- + . # !`. All are safe in file names.
+- **Answering:** OK gives `chosen` and CLR `no`, both closing it. While it is `active()` it takes every key.
+- **Reading:** `text()` is the text without trailing spaces, and `cursor()` the position.
+- `draw(canvas, top)` shows the title, the text in boxes with the cursor's lit, and the controls.
+
+**Layout helpers.** `screen_width` (128), `char_width` (6, the font's advance), `line_chars` (21 to a line), and
+`text_right(canvas, y, text, grey, x_end)` for right-aligned text. The font has A-Z, 0-9, space and
+`! # + - . / : = ? % >`.
 
 ## DSP library
 

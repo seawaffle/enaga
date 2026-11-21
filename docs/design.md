@@ -345,7 +345,7 @@ and the ones that need the unit collect into a session.
    audio can join it in E5 as a composite device. The stack is a decision at this step: a TinyUSB port (MIT; it
    has a MUSB driver for other TI parts) or StarterWare usblib as the stock firmware uses (LIB-1; licence to
    check). The emulator would need a USB model or a host-side shim; the unit and a computer test it for real.
-6. **UI toolkit, first cut.** Small: a list menu, a parameter page (name / value rows on the encoders), a
+6. (**Toolkit done** 2026-11-20, see the log; app icons to come.) **UI toolkit, first cut.** Small: a list menu, a parameter page (name / value rows on the encoders), a
    confirmation dialog and text entry (patch names), drawn with the existing fonts on `Canvas`, driven from the
    app's events. Then app icons in the Enaga menu (an optional `ICON` in the package). File browser, waveform
    view and anything larger wait for real uses.
@@ -392,8 +392,8 @@ by feel to 1,600 / 1,000 / 600. App icons are left for E4.
 Since E3: one image serves the SmplTrek, Lofi-12 XT and CyDrums (the same board), and the build writes an update
 file for each; Enaga tells which it runs on from the bootloader's file name, confirmed on a SmplTrek in session 4.
 The other two are untested. E4 is under way ("E4 plan" above): pad pressure, input selection, MIDI on the DIN jacks, and the clock,
-transport and SYNC are done on the emulator and await the unit, and so does USB MIDI (step 5), whose USB product ID is still to come (pid.codes). Next is
-the UI toolkit (step 6).
+transport and SYNC are done on the emulator and await the unit, and so does USB MIDI (step 5), whose USB product ID is still to come (pid.codes). The UI toolkit
+(step 6) is built; app icons in the menu are its remaining part.
 
 ## Open items
 
@@ -1444,4 +1444,32 @@ the brief of 2026-11-20):
 CHECK's MIDI page marks each message D or U (checklist step 18).
 
 Not done: mass storage and USB audio (E5), the real USB IDs.
+
+### The UI toolkit, E4 step 6 (2026-11-20)
+
+`<enaga/ui.hpp>`: header-only, app side, nothing in the firmware or the ABI. Four widgets, each fed the app's key
+and knob callbacks and returning an `Action`:
+- **`List`:** scrolls with UP / DOWN / VALUE; OK chooses, CLR goes back.
+- **`ParamPage`:** the synth's pattern made general. Parameters in groups of four on knobs A-D, the selection
+  buttons flip groups, a knob push resets, values shown by labels, a format function or number and unit.
+- **`Dialog`:** OK / CLR in a box over the page.
+- **`TextEntry`:** up to 16 characters from the font's file-name-safe set; knob A or LEFT / RIGHT move, knob B,
+  VALUE or UP / DOWN change.
+
+The look follows the Enaga menu and the synth: title row, dim cursor bar, right-aligned values, value bars. The
+controls follow the owner's conventions: four-knob groups, selection buttons for groups, F1 left to the app.
+
+Tests:
+- `tests/test_ui.py` compiles the header for the host against a stand-in host table that records the text drawn.
+  It checks each widget's logic and what it draws.
+- A mutation check (resetting to the wrong value, not trimming text) failed the expected checks.
+- `tests/test_widgets.py` drives `examples/widgets` on the emulator through every widget by keys and encoder
+  pins.
+- Screenshots of the four pages were looked at.
+
+The synth keeps its own drawing: it is a demo and gets bug fixes only. Naming a patch on the unit would use
+`TextEntry`, but that is a feature.
+
+Not done: app icons in the Enaga menu, which need an optional `ICON` in the package and a menu layout with room
+for them.
 
