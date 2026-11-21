@@ -401,7 +401,8 @@ simulation (a fresh agent with only the downloads); a person doing it is still t
 ## Open items
 
 - USB IDs: the device uses TinyUSB's test vendor and product IDs (0xCAFE / 0x4011, `firmware/usb/usb.c`) until
-  the pid.codes product ID (vendor 0x1209) is granted. They must not ship in a release.
+  the pid.codes product ID (vendor 0x1209) is granted. The request is in, and its timing is pid.codes'; releases
+  ship with the test IDs until then (0.2.0 did, and its notes say so).
 
 - STEP 4 crash (unit session 5): pressing STEP 4 on CHECK's MIDI page once crashed, with USB connected to a
   Windows PC; not repeated on the unit, nor on the emulator (60 s of STEP 4's clock with a host that never reads,
