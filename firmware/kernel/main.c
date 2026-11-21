@@ -268,6 +268,7 @@ static void poll_inputs(u32 ms)
             deliver(&e);
         }
     uart1_poll();                             /* pads arrive through on_pad */
+    if (usb_poll(ms)) last_input = ms;        /* USB MIDI bytes into the parser */
     if (midi_poll(ms)) last_input = ms;       /* MIDI goes to the app even while the menu is open */
     clock_poll();                             /* transport events likewise */
     if (!mcu_replies && ms - a0_last_ms >= 2000) {   /* the MCU may have missed the first A0: ask again */
@@ -404,6 +405,8 @@ void main(void)
     irq_enable(1u << IRQ_UART0);
     clock_init();                             /* SYNC IN / OUT */
     irq_enable(1u << IRQ_GPIO7);
+    usb_init();                               /* USB MIDI: PHY, then connect */
+    irq_enable(1u << IRQ_USB0);
     irq_global_enable();                      /* audio blocks start being serviced (silence until an app) */
     log_line("ENAGA " ENAGA_VERSION);
     log_cache(cache_entry_config(), cache_config());   /* the second line: hardware.md "Checks on a unit" step 2 */

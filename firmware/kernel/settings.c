@@ -13,6 +13,8 @@
  *   SPEAKER     ON OFF            the built-in speaker (headphones cut it in any case); an app can also mute it
  *   MIDI CH     1-16              the channel apps listen and send on by default (enaga::midi::channel)
  *   MIDI THRU   OFF ON            copy what arrives at MIDI IN to MIDI OUT (SysEx excepted), merged with the app's own
+ *   MIDI IN     DIN USB BOTH      which ports' messages (and MIDI clock) reach apps and the clock
+ *   MIDI OUT    DIN USB BOTH      where apps' messages (unless an app picks a port) and MIDI clock out go
  *   CLOCK SRC   INT MIDI SYNC     who drives the tempo clock: the app, MIDI clock at MIDI IN, or SYNC IN (clock.c)
  *   CLOCK OUT   OFF ON            send MIDI clock and transport at MIDI OUT
  *   SYNC OUT    ON OFF            pulse SYNC OUT, 2 to the quarter note
@@ -26,6 +28,7 @@ static const char *const off[] = { "OFF", "5 MIN", "10 MIN", "30 MIN", "60 MIN" 
 static const char *const on_off[] = { "ON", "OFF" };
 static const char *const off_on[] = { "OFF", "ON" };
 static const char *const sources[] = { "INT", "MIDI", "SYNC" };
+static const char *const ports[] = { "DIN", "USB", "BOTH" };
 static const char *const channels[] = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14",
                                         "15", "16" };
 
@@ -35,7 +38,8 @@ typedef struct {
     int first, count, fallback;               /* labels[first .. first + count - 1]; the default's index */
 } setting_t;
 
-enum { VOLUME, BRIGHTNESS, PADS, AUTO_OFF, SPEAKER, MIDI_CH, MIDI_THRU, CLOCK_SRC, CLOCK_OUT, SYNC_OUT, SETTINGS_COUNT };
+enum { VOLUME, BRIGHTNESS, PADS, AUTO_OFF, SPEAKER, MIDI_CH, MIDI_THRU, MIDI_IN, MIDI_OUT, CLOCK_SRC, CLOCK_OUT, SYNC_OUT,
+       SETTINGS_COUNT };
 static const setting_t table[SETTINGS_COUNT] = {
     { "VOLUME", numbers, 0, 11, 10 },
     { "BRIGHTNESS", numbers, 1, 10, 9 },
@@ -44,6 +48,8 @@ static const setting_t table[SETTINGS_COUNT] = {
     { "SPEAKER", on_off, 0, 2, 0 },
     { "MIDI CH", channels, 0, 16, 0 },
     { "MIDI THRU", off_on, 0, 2, 0 },
+    { "MIDI IN", ports, 0, 3, 2 },
+    { "MIDI OUT", ports, 0, 3, 2 },
     { "CLOCK SRC", sources, 0, 3, 0 },
     { "CLOCK OUT", off_on, 0, 2, 0 },
     { "SYNC OUT", on_off, 0, 2, 0 },
@@ -68,6 +74,8 @@ static void apply(int which)
     case SPEAKER: audio_speaker_setting = v == 0; audio_speaker_apply(); break;
     case MIDI_CH: midi_channel_setting = v; break;
     case MIDI_THRU: midi_thru = v == 1; break;
+    case MIDI_IN: midi_in_setting = v + 1; break;     /* DIN 1, USB 2, BOTH 3: the port bits */
+    case MIDI_OUT: midi_out_setting = v + 1; break;
     case CLOCK_SRC:
         if (clock_source_setting != v) { clock_source_setting = v; clock_source_changed(); }
         break;

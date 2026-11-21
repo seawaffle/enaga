@@ -6,7 +6,7 @@
  * and CPU interrupt 8 <- event 8 (EDMA3_0_CC0_INT1, the DSP's shadow region 1, the audio block). Both are also
  * the reset mapping, written explicitly so the kernel does not depend on what the bootloader left. CPU
  * interrupt 6 <- event 46 (UART1_INT, the panel MCU's bytes), CPU interrupt 7 <- event 38 (UART0_INT, MIDI DIN) and
- * CPU interrupt 9 <- event 72 (GPIO_B7INT, SYNC IN) are not.
+ * CPU interrupt 9 <- event 72 (GPIO_B7INT, SYNC IN) and CPU interrupt 10 <- event 19 (USB0_INT) are not.
  *
  * Handlers run with interrupts off, except the app's audio callback, during which the watchdog, UART1, UART0 and
  * the SYNC IN edge may nest (audio.c), so irq_active counts the handlers running. */
@@ -21,7 +21,7 @@ static u32 enabled;
 void irq_init(void)
 {
     REG32(INTMUX1) = (REG32(INTMUX1) & ~0x7F7F007Fu) | 4u | 46u << 16 | 38u << 24;   /* INTSEL4 = 4, 6 = 46, 7 = 38 */
-    REG32(INTMUX2) = (REG32(INTMUX2) & ~0x7F7Fu) | 8u | 72u << 8;   /* INTSEL8 = event 8, INTSEL9 = event 72 */
+    REG32(INTMUX2) = (REG32(INTMUX2) & ~0x7F7F7Fu) | 8u | 72u << 8 | 19u << 16;   /* INTSEL8 = 8, 9 = 72, 10 = 19 */
     irq_set_istp((u32)vectors);
 }
 
@@ -39,6 +39,7 @@ void enaga_irq(unsigned number)
     else if (number == IRQ_UART1) uart1_isr();
     else if (number == IRQ_UART0) uart0_isr();
     else if (number == IRQ_GPIO7) clock_gpio_isr();
+    else if (number == IRQ_USB0) usb_isr();
     else if (number == IRQ_AUDIO) audio_isr();
     irq_active--;
 }

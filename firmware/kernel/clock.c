@@ -78,11 +78,9 @@ static void event(u32 what, u32 position)
     events_head++;
 }
 
-static void midi_out(const u8 *bytes, u32 n)
+static void midi_out(const u8 *bytes, u32 n)      /* to the MIDI OUT routing (midi.c) */
 {
-    if (!clock_out_setting) return;
-    if (n == 1) uart0_send_realtime(bytes[0]);
-    else uart0_send(bytes, n);
+    if (clock_out_setting) midi_out_bytes(0, bytes, n);
 }
 
 static void send_position(u32 ticks)                    /* SPP: sixteenths, 24 ticks each */
@@ -323,7 +321,7 @@ int clock_control(u32 command, int value)               /* main context */
         if (running) break;
         whole = next_tick; frac = 0.0f;                 /* resume on the next whole tick */
         { u8 c[4] = { 0xF2, (u8)((whole / 24u) & 0x7F), (u8)((whole / 24u >> 7) & 0x7F), 0xFB };
-          if (clock_out_setting) uart0_send(c, 4); }
+          midi_out(c, 4); }
         running = 1;
         event(ENAGA_TRANSPORT_CONTINUE, whole);
         break;

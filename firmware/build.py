@@ -3,7 +3,7 @@
 
     python3 -B firmware/build.py        # build/firmware/{enaga.elf,enaga.map,enaga.dis,ENAGA_<version>.bin,<device>/<card name>}
 
-Sources: start.s, link.ld, hal/*.c (drivers), kernel/*.c, the package loader (loader/) and FatFs. The loadable
+Sources: start.s, link.ld, hal/*.c (drivers), kernel/*.c, usb/*.c, the package loader (loader/), FatFs and TinyUSB. The loadable
 bytes (.text, .vectors, .rodata, .data, contiguous from 0xC0000000) become one section entered at `_start`,
 wrapped by tools/sysimage.py into the update file the unit's bootloader installs (docs/hardware.md).
 """
@@ -29,7 +29,10 @@ LOAD = 0xC0000000
 CFLAGS = ["-march=c674x", "-mlittle-endian", "-O2", "-Werror=frame-larger-than=16384", "-Werror=vla", "-Werror=alloca", "-ffreestanding", "-fno-builtin", "-nostdlib",
           "-fno-asynchronous-unwind-tables", "-fno-exceptions", "-msdata=none", "-Wall", "-Wextra", "-Werror",
           "-Wno-main", f"-I{HERE / 'include'}", f"-I{ENAGA / 'include'}", f"-I{ENAGA / 'loader'}",
-          f"-I{HERE / 'third_party' / 'fatfs'}"]
+          f"-I{HERE / 'third_party' / 'fatfs'}", f"-I{HERE / 'usb'}", f"-I{HERE / 'third_party' / 'tinyusb' / 'src'}"]
+TINYUSB = HERE / "third_party" / "tinyusb" / "src"
+TINYUSB_SOURCES = ["tusb.c", "common/tusb_fifo.c", "device/usbd.c", "class/midi/midi_device.c",
+                   "portable/mentor/musb/dcd_musb.c"]
 
 
 def tools_present():
@@ -54,10 +57,15 @@ def build(out=OUT):
     out.mkdir(parents=True, exist_ok=True)
     objs = [out / "start.o"]
     run([AS, "-mlittle-endian", "-march=c674x", "-o", objs[0], HERE / "start.s"], out)
-    sources = sorted((HERE / "hal").glob("*.c")) + sorted((HERE / "kernel").glob("*.c")) + [ENAGA / "loader" / "loader.c"]
+    sources = (sorted((HERE / "hal").glob("*.c")) + sorted((HERE / "kernel").glob("*.c")) + sorted((HERE / "usb").glob("*.c"))
+               + [ENAGA / "loader" / "loader.c"])
     for src in sources:
         obj = out / f"{src.parent.name}_{src.stem}.o"
         run([GCC, *CFLAGS, "-c", "-o", obj, src], out)
+        objs.append(obj)
+    for name in TINYUSB_SOURCES:                          # third-party code: not held to -Werror
+        obj = out / ("tinyusb_" + name.replace("/", "_").replace(".c", ".o"))
+        run([GCC, *[f for f in CFLAGS if f != "-Werror"], "-c", "-o", obj, TINYUSB / name], out)
         objs.append(obj)
     ff = HERE / "third_party" / "fatfs" / "ff.c"          # third-party code: not held to -Werror
     run([GCC, *[f for f in CFLAGS if f != "-Werror"], "-c", "-o", out / "ff.o", ff], out)

@@ -21,7 +21,8 @@
 //          read). KiB/s for each, SCATTER's reads a second, and how many 48 kHz 16-bit stereo streams (187.5
 //          KiB/s each) READ's rate would feed. The file is removed afterwards; the results also go to the log.
 //          A failure stops the app, so that Enaga's status page shows the log with the SD driver's details.
-//   MIDI   the MIDI channel (SETTINGS, MIDI CH), messages in and out, the last four received (hex) and the last
+//   MIDI   the MIDI channel (SETTINGS, MIDI CH), messages in and out, the last four received (hex, then D for the
+//          DIN jack or U for USB) and the last
 //          SysEx's length. STEP 1 plays key 60 while held (note on / off), STEP 2 sends CC 7 = 100, STEP 3 a
 //          SysEx identity request (F0 7E 7F 06 01 F7), STEP 4 starts or stops a MIDI clock at 120 BPM (START,
 //          24 clocks a beat, STOP). The CLK line is Enaga's clock (CLOCK SRC, its tempo, RUN and the beat):
@@ -222,7 +223,8 @@ public:
         midi_in_++;
         if (m.status == 0xF8) return;                  // clocks are counted, not listed
         for (int i = 3; i > 0; i--) midi_last_[i] = midi_last_[i - 1];
-        midi_last_[0] = uint32_t(m.status) | uint32_t(m.data1) << 8 | uint32_t(m.data2) << 16 | 1u << 24;
+        midi_last_[0] = uint32_t(m.status) | uint32_t(m.data1) << 8 | uint32_t(m.data2) << 16 |
+                        uint32_t(m.port == ENAGA_MIDI_USB ? 2 : 1) << 24;
     }
     void on_midi_sysex(int port, const uint8_t *data, uint32_t bytes, bool start, bool end) override {
         (void)port; (void)data;
@@ -364,8 +366,8 @@ private:
         for (int i = 0; i < 4; i++) {
             uint32_t m = midi_last_[i];
             if (!(m >> 24)) break;
-            char text[9] = {kHex[m >> 4 & 15], kHex[m & 15], ' ', kHex[m >> 12 & 15], kHex[m >> 8 & 15], ' ',
-                            kHex[m >> 20 & 15], kHex[m >> 16 & 15], 0};
+            char text[11] = {kHex[m >> 4 & 15], kHex[m & 15], ' ', kHex[m >> 12 & 15], kHex[m >> 8 & 15], ' ',
+                             kHex[m >> 20 & 15], kHex[m >> 16 & 15], ' ', (m >> 24) == 2 ? 'U' : 'D', 0};
             canvas.text(0, 40 + 10 * i, text, i ? 8 : 15);
         }
         canvas.text(0, 82, (Line() << "SYSEX " << sysex_shown_).str(), 10);

@@ -375,6 +375,30 @@ HW-27).
 - **Not visible to code:** jack wiring and signal levels. The first unit session checks both directions with
   other gear (checklist step 17).
 
+## USB
+
+USB0 at `0x01E00000`: a Mentor MUSB core at +0x400 behind TI's wrapper (SPRUH79C chapter 33). Enaga runs it as a
+full-speed USB MIDI device with TinyUSB (`firmware/third_party/tinyusb`). The C6748 port is
+`firmware/usb/musb_enaga.h` and the glue `firmware/usb/usb.c`.
+- **Bring-up:** as the original firmware (smpltrek-re HW-12):
+  1. CFGCHIP2 = 0x0972: 24 MHz reference, PHY clock from AUXCLK, PHY PLL on, VBUS and session comparators on.
+  2. PSC1 module 1 on.
+  3. CTRLR reset.
+  4. Wait for USB0PHYCLKGD (CFGCHIP2 bit 17; within 10 ms on the unit, HW-59).
+  5. Wrapper masks 0x01FF1E1F.
+  6. SOFTCONN.
+- **Interrupts:** event 19 on CPU interrupt 10. Status comes from the wrapper with CTRLR.UINT = 0: INTMASKEDR,
+  cleared through INTCLRR, then a write of 0 to EOIR. The core's own INTRTX / INTRRX / INTRUSB must not be read in
+  this mode, since a read clears them (SPRUH79C 33.2.8.13.1, 33.4.9, 33.4.23-33.4.27). TinyUSB is patched to
+  take its status from the port.
+- **FIFOs:** dynamic, in the core's 4 KiB. The core has no RX / TX_DOUBLE_PACKET_DISABLE registers (0x340 / 0x342,
+  found on newer MUSB revisions); double buffering is the DPB bit of TXFIFOSZ / RXFIFOSZ.
+- **Endpoints and IDs:** the MIDI interface uses bulk endpoints 0x01 and 0x81 (64 bytes). The USB IDs are
+  TinyUSB's test values (0xCAFE / 0x4011) until a pid.codes product ID is granted.
+
+Tested on the emulator's USB model and scripted host (enumeration, MIDI both ways, clock, unplugging); not yet on
+the unit (checklist step 18).
+
 ## SD card
 
 **MMCSD0**, pins on PINMUX10; card detect on GP4[0] (low = card present); GP4[1] is driven low. 399 kHz
@@ -534,5 +558,16 @@ unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it mut
       stopping a moment after it stops. If nothing happens, the device may pulse the other way (falling edges):
       note it, since the polarity setting is not built yet.
     Set CLOCK SRC back to INT and CLOCK OUT to OFF.
+18. **USB MIDI (CHECK, MIDI page):** connect the unit to a computer with a USB cable. It should appear as a MIDI
+    device named "Enaga SmplTrek" with no driver (macOS: Audio MIDI Setup, MIDI window; Windows: a DAW's MIDI
+    settings or MIDI-OX; Linux: `aconnect -l`). Report if it does not appear, and what the computer says (on
+    Linux, `dmesg` right after plugging in).
+    - **In:** play notes from a DAW or a virtual keyboard to it. They show on the MIDI page with `U` at the end;
+      DIN messages show `D`.
+    - **Out:** STEP 1 to 3 arrive in a MIDI monitor on the computer. STEP 5 with CLOCK OUT ON gives a clock a DAW
+      can follow.
+    - **Settings:** MIDI IN to DIN, and USB notes stop showing; MIDI OUT to DIN, and the computer stops receiving.
+      Set both back to BOTH.
+    - **Unplug and plug back in** while CHECK runs: nothing should crash, and the device comes back.
 
 Afterwards the official update restores the unit ("Installing and recovery").

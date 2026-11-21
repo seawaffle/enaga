@@ -108,6 +108,8 @@ changed.
 | SPEAKER | ON, OFF (ON) | the built-in speaker's mute, GP2[8], as the original firmware's SPEAKER MUTE |
 | MIDI CH | 1-16 (1) | the channel apps listen and send on by default (`enaga::midi::channel`) |
 | MIDI THRU | OFF, ON (OFF) | MIDI IN copied to MIDI OUT (SysEx excepted), merged with the app's own messages |
+| MIDI IN | DIN, USB, BOTH (BOTH) | which ports' messages reach apps, and whose MIDI clock the clock follows |
+| MIDI OUT | DIN, USB, BOTH (BOTH) | where apps' messages (unless an app picks a port) and MIDI clock out go |
 | CLOCK SRC | INT, MIDI, SYNC (INT) | who drives the tempo clock: the app, MIDI clock at MIDI IN, or SYNC IN pulses |
 | CLOCK OUT | OFF, ON (OFF) | MIDI clock and transport at MIDI OUT, following the clock |
 | SYNC OUT | ON, OFF (ON) | pulses at SYNC OUT, 2 to the quarter note |
@@ -121,8 +123,7 @@ the unit in session 3). Switching it fades the output around the change. Apps ca
 (`headphones()`, GP3[8]: 1 with a plug in PHONES, unaffected by the other jacks, confirmed on the unit); the
 status page shows it as `H`.
 
-The routing rows of the stock MIDI CONFIG page (IN FROM / OUT TO: DIN, USB, both) come with USB MIDI (E4 step 5).
-An app's own settings are separate: `<enaga/settings.hpp>` gives it a key/value
+MIDI IN and MIDI OUT are the stock MIDI CONFIG page's IN FROM / OUT TO. An app's own settings are separate: `<enaga/settings.hpp>` gives it a key/value
 store in its data folder (`SETTINGS.TXT`, the same text format), built on the file API, with nothing new in Enaga.
 
 ## Memory
@@ -339,7 +340,7 @@ and the ones that need the unit collect into a session.
    in (24 PPQN, tempo derived), or SYNC IN (GP7[8] edges, 2 PPQN); START / STOP / CONTINUE, and Song Position
    Pointer sent before CONTINUE, as Lofi-12 XT does (XF-24). SYNC OUT on GP7[9]: 2 PPQN, 15 ms pulses, polarity
    settings as stock (HW-27). Clock source and clock out as settings.
-5. **MIDI over USB.** A USB device stack for USB0 (a Mentor MUSB controller, full speed as stock: HW-12), class
+5. (**Done** on the emulator 2026-11-20, see the log; the unit and the USB IDs to come.) **MIDI over USB.** A USB device stack for USB0 (a Mentor MUSB controller, full speed as stock: HW-12), class
    compliant USB MIDI (bulk endpoints, 64 bytes), same messages and routing as DIN. Built so mass storage and
    audio can join it in E5 as a composite device. The stack is a decision at this step: a TinyUSB port (MIT; it
    has a MUSB driver for other TI parts) or StarterWare usblib as the stock firmware uses (LIB-1; licence to
@@ -391,9 +392,13 @@ by feel to 1,600 / 1,000 / 600. App icons are left for E4.
 Since E3: one image serves the SmplTrek, Lofi-12 XT and CyDrums (the same board), and the build writes an update
 file for each; Enaga tells which it runs on from the bootloader's file name, confirmed on a SmplTrek in session 4.
 The other two are untested. E4 is under way ("E4 plan" above): pad pressure, input selection, MIDI on the DIN jacks, and the clock,
-transport and SYNC are done on the emulator and await the unit. Next is USB MIDI (step 5).
+transport and SYNC are done on the emulator and await the unit, and so does USB MIDI (step 5), whose USB product ID is still to come (pid.codes). Next is
+the UI toolkit (step 6).
 
 ## Open items
+
+- USB IDs: the device uses TinyUSB's test vendor and product IDs (0xCAFE / 0x4011, `firmware/usb/usb.c`) until
+  the pid.codes product ID (vendor 0x1209) is granted. They must not ship in a release.
 
 - Lofi-12 XT and CyDrums: the build makes their update files (docs/hardware.md "Installing and recovery"), but
   Enaga has never been installed on either. A first session on one would follow "Checks on a unit" steps 1-11,
@@ -1394,4 +1399,49 @@ CHECK's MIDI page shows the clock and starts it (checklist step 17).
 
 Not built: the original's SYNC polarity settings (falling edges in, active-low out). Add them if a unit or a
 user's gear needs them.
+
+### USB MIDI, E4 step 5 (2026-11-20)
+
+**The stack.** TinyUSB 0.21.0 (MIT), vendored as a subset in `firmware/third_party/tinyusb`, with its Mentor MUSB
+device driver.
+- **StarterWare's usblib**, which the original firmware uses, carries a TI-only licence forbidding combination
+  with "viral" open-source code, so it cannot ship in an MIT project.
+- **TI's Processor SDK USB driver** for the OMAP-L138 (BSD-3) was the reference for the chip-specific parts and is
+  the fallback.
+
+**The C6748 port** (`firmware/usb/musb_enaga.h`, selected by `TUP_USBIP_MUSB_ENAGA` in `firmware/usb/tusb_config.h`
+since the C6748 is not a TinyUSB MCU) copies the original firmware's bring-up and interrupt handling. Three
+patches to TinyUSB, each marked `Enaga:` and listed in its README:
+1. **Interrupt status from the TI wrapper**, for the first read and for the handler's re-check. With CTRLR.UINT =
+   0 the core's own interrupt registers must not be read (SPRUH79C), and TinyUSB read them.
+2. **No double-packet-disable registers:** the C6748's core lacks them at 0x340 / 0x342. The emulator stopped on
+   the access during enumeration.
+3. **Real-time MIDI as CIN 0xF:** TinyUSB sent CIN 0x5, contrary to USB MIDI 1.0 table 4-1.
+
+**Code checks.**
+- The FIFO registers get 32-bit accesses with 16- and 8-bit tails. The main register struct is not packed.
+- User buffers are read with byte loads: TinyUSB treats non-ARM targets as strict-alignment.
+- The firmware grew by about 37 KB.
+
+**Glue** (`firmware/usb/usb.c`).
+- **Descriptors:** one configuration with the MIDI interfaces (audio control and MIDI streaming), bulk 0x01 /
+  0x81, 64 bytes, self-powered. The product string names the device ("Enaga SmplTrek", "Enaga Lofi-12 XT",
+  "Enaga CyDrums").
+- **Ports and settings:** MIDI from USB goes through midi.c's parser as port `ENAGA_MIDI_USB`. Sending goes through
+  a 2 KiB queue (any context, all or nothing, nothing while unconfigured) drained in the main loop. New settings
+  MIDI IN and MIDI OUT (DIN, USB, BOTH); the clock's MIDI out follows MIDI OUT.
+- **MIDI clock from USB** reaches the clock from the main loop, so it jitters by about a pass. The tempo is the
+  mean of 24 intervals, so it holds to within about 2 BPM on the emulator.
+
+**Tests** (`tests/test_usb.py`, on the emulator's USB0 model and scripted host, which the emulator agent built to
+the brief of 2026-11-20):
+- enumeration, the descriptors and the per-device product string;
+- MIDI in and out, SysEx both ways;
+- the routing settings;
+- MIDI clock in and out over USB;
+- unplugging and plugging back in.
+
+CHECK's MIDI page marks each message D or U (checklist step 18).
+
+Not done: mass storage and USB audio (E5), the real USB IDs.
 

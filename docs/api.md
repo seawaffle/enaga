@@ -434,7 +434,9 @@ to `value_bytes` - 1 (31). Enaga's own settings are separate and not here.
 
 ## MIDI
 
-The MIDI IN and OUT jacks (DIN). USB MIDI joins them in a later step, under the same calls. In
+The MIDI IN and OUT jacks (DIN) and USB MIDI: plugged into a computer, the unit is a class-compliant USB MIDI
+device ("Enaga SmplTrek", or the device's name), with no driver needed. The user's MIDI IN setting (DIN, USB or
+both) says which ports reach the app, and MIDI OUT where its messages go; both default to BOTH. In
 `<enaga/app.hpp>` (receiving) and `<enaga/midi.hpp>` (sending).
 
 ### Receiving: `on_midi(const MidiMessage &)` and `on_midi_sysex`
@@ -465,8 +467,9 @@ was cut short by another status byte. The data is valid only during the call.
 
 ### Sending: `enaga::midi::`
 
-Each call queues one whole message for MIDI OUT and returns `true`. If the queue (2 KiB) is full it queues
-nothing and returns `false`: a message is never cut. Real-time messages (clock, start, continue, stop) go ahead
+Each call queues one whole message for the ports MIDI OUT names and returns `true`. If a queue (2 KiB each) is
+full it queues nothing and returns `false`: a message is never cut. With no computer connected, USB is skipped.
+USB MIDI out leaves within about a millisecond (a main-loop pass and a USB frame). Real-time messages (clock, start, continue, stop) go ahead
 of whatever is queued, behind at most the byte already being sent (0.32 ms). Main or audio context. Channels are
 0-15 and data bytes are masked to 7 bits.
 
@@ -486,8 +489,8 @@ where a message came from, and every sending helper takes its channel. So one ap
 outside sequencer (channel 1 to the drums, 2 to the bass) or play several synths. `enaga::midi::channel()` is the
 user's MIDI CH setting (0-15), only a default: the channel a single-voice app uses when it has no reason to choose.
 An app with several tracks keeps their channels in its own settings (`<enaga/settings.hpp>`), as the original
-firmware keeps a channel per track. MIDI THRU (a setting, OFF by default) copies what arrives at MIDI IN to MIDI OUT,
-merged with the app's own messages without breaking either. SysEx is not copied.
+firmware keeps a channel per track. MIDI THRU (a setting, OFF by default) copies what arrives at the MIDI IN jack to the MIDI OUT jack,
+merged with the app's own messages without breaking either. SysEx is not copied, and USB is not involved.
 
 ## Clock and transport
 

@@ -11,7 +11,11 @@
  *   - active sensing (FE) is not delivered: once seen, a gap of over 300 ms gives the app All Notes Off (CC 123)
  *     on every channel, as the specification asks of a receiver, and sensing waits for the next FE.
  * MIDI THRU (a setting) copies each complete DIN message, except SysEx, to the DIN output, queued like the app's
- * own messages so that the two never interleave mid-message. The parser is per port, ready for USB (step 5). */
+ * own messages so that the two never interleave mid-message.
+ *
+ * Ports: DIN (uart0.c) and USB (usb.c, step 5), each with its own parser. The MIDI IN setting says which reach the
+ * app (and whose MIDI clock the clock follows); MIDI OUT says where messages sent to "the user's routing" (ports 0)
+ * go, as the original firmware's IN FROM / OUT TO. */
 #define SENSE_TIMEOUT_MS 300u
 
 typedef struct {
@@ -23,8 +27,10 @@ typedef struct {
     u32 sensed_ms;
 } midi_port_t;
 
-static midi_port_t din;
+static midi_port_t din, usb;
 int midi_channel_setting;                     /* MIDI CH, 0-15 */
+int midi_in_setting = ENAGA_MIDI_DIN | ENAGA_MIDI_USB;    /* MIDI IN: ports whose messages reach the app */
+int midi_out_setting = ENAGA_MIDI_DIN | ENAGA_MIDI_USB;   /* MIDI OUT: where ports 0 sends */
 int midi_thru;                                /* MIDI THRU on */
 u32 midi_messages_in, midi_messages_out, midi_sysex_in, midi_dropped_out;
 
@@ -35,6 +41,7 @@ static void deliver(int port, u8 status, u8 a, u8 b, u32 ms)
     e.id = (u16)port;
     e.value = (int)(status | (u32)a << 8 | (u32)b << 16);
     e.ms = ms;
+    if (!(midi_in_setting & port)) return;
     midi_messages_in++;
     apps_event(&e);
 }
@@ -60,7 +67,7 @@ static void sysex_flush(midi_port_t *p, int port, u32 flags)
 {
     if (!p->sysex_started) flags |= ENAGA_SYSEX_START;
     p->sysex_started = 1;
-    apps_sysex(port, p->sysex, p->sysex_bytes, flags);
+    if (midi_in_setting & port) apps_sysex(port, p->sysex, p->sysex_bytes, flags);
     p->sysex_bytes = 0;
 }
 
@@ -126,20 +133,43 @@ int midi_poll(u32 ms)                         /* main loop: returns the number o
         din.sensing = 0;
         for (ch = 0; ch < 16; ch++) deliver(ENAGA_MIDI_DIN, (u8)(0xB0 | ch), 123, 0, ms);
     }
+    if (usb.sensing && ms - usb.sensed_ms > SENSE_TIMEOUT_MS) {
+        usb.sensing = 0;
+        for (ch = 0; ch < 16; ch++) deliver(ENAGA_MIDI_USB, (u8)(0xB0 | ch), 123, 0, ms);
+    }
     return n;
 }
 
-/* An app's midi_send: whole messages only, all or nothing. ports 0 = the user's routing (the DIN jack for now). */
+void midi_usb_byte(u8 b, u32 ms)              /* usb.c, main loop: one received USB MIDI byte */
+{
+    if (midi_in_setting & ENAGA_MIDI_USB) {   /* MIDI clock from USB, timed here (a main-loop pass late) */
+        u32 gie = irq_global_disable();
+        clock_midi_byte(b);
+        if (gie) irq_global_enable();
+    }
+    parse(&usb, ENAGA_MIDI_USB, b, ms);
+}
+
+/* Bytes out to `ports` (0 = the MIDI OUT setting): all or nothing across the ports asked for. A single real-time
+ * byte goes ahead of the DIN queue. Main or interrupt context. */
+int midi_out_bytes(u32 ports, const u8 *data, u32 bytes)
+{
+    int realtime = bytes == 1 && data[0] >= 0xF8;
+    if (ports == 0) ports = (u32)midi_out_setting;
+    if ((ports & ENAGA_MIDI_DIN) && !realtime && uart0_tx_free() < bytes) return -1;
+    if ((ports & ENAGA_MIDI_USB) && usb_configured() && usb_midi_tx_free() < bytes) return -1;
+    if (ports & ENAGA_MIDI_DIN) {
+        if (realtime ? uart0_send_realtime(data[0]) < 0 : uart0_send(data, bytes) < 0) return -1;
+    }
+    if (ports & ENAGA_MIDI_USB) usb_midi_send(data, bytes);
+    return 0;
+}
+
+/* An app's midi_send: whole messages only, all or nothing. ports 0 = the user's routing (MIDI OUT). */
 int midi_send(u32 ports, const u8 *data, u32 bytes)
 {
     if (!bytes || !data || !(data[0] & 0x80)) return -1;
-    if (ports == 0) ports = ENAGA_MIDI_DIN;
-    if (!(ports & ENAGA_MIDI_DIN)) return 0;
-    if (bytes == 1 && data[0] >= 0xF8) {
-        if (uart0_send_realtime(data[0]) < 0) return -1;
-    } else if (uart0_send(data, bytes) < 0) {
-        return -1;
-    }
+    if (midi_out_bytes(ports, data, bytes) < 0) return -1;
     midi_messages_out++;
     return 0;
 }

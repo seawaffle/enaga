@@ -88,9 +88,10 @@ The points below are the overview; [docs/api.md](docs/api.md) is the full refere
   `enaga::system::speaker(false)` mutes the built-in speaker (e.g. while monitoring the built-in microphone). `headphones()` says whether headphones are plugged in; `device()`
   says which of the SmplTrek, Lofi-12 XT and CyDrums Enaga runs on; `input(source, level)` chooses the audio
   input (built-in mic, Hi-Z, dynamic mic, stereo or mono line; LOW, NORMAL or HIGH).
-- MIDI on the DIN jacks: `on_midi(message)` and `on_midi_sysex` receive (running status, real-time, SysEx and
-  active sensing handled), `<enaga/midi.hpp>` sends (notes, controls, clock, SysEx, raw bytes), and the user's
-  MIDI CH and MIDI THRU settings live in the Enaga menu.
+- MIDI on the DIN jacks and over USB (the unit is a class-compliant USB MIDI device): `on_midi(message)` and
+  `on_midi_sysex` receive (running status, real-time, SysEx and active sensing handled), `<enaga/midi.hpp>` sends
+  (notes, controls, clock, SysEx, raw bytes), and the user's MIDI CH, MIDI THRU, MIDI IN and MIDI OUT settings
+  live in the Enaga menu.
 - A tempo clock at 96 ticks to the quarter note (`<enaga/clock.hpp>`): driven by the app, by MIDI clock or by
   SYNC IN pulses (the CLOCK SRC setting); `ticks()` in the audio callback gives each tick's frame; transport
   events; MIDI clock out and SYNC out follow it.
@@ -157,7 +158,7 @@ directory (the one containing `cpu.py`); it builds its core into its own `work/`
 
 ```sh
 export ENAGA_EMULATOR=/path/to/smpltrek-re/emulator
-python3 -B -m unittest discover -s tests -v                           # 74 tests, about 6 minutes
+python3 -B -m unittest discover -s tests -v                           # 81 tests, about 8 minutes
 python3 -B tools/emulate.py examples/tone --key 32@300000000           # press STEP 1; writes build/emulate/
 ```
 
@@ -197,5 +198,6 @@ only `g++`, and `test_sysimage.py` and `test_api_docs.py` need nothing. `tools/e
 ## Licence
 
 Enaga is released under the [MIT licence](LICENSE). FatFs (`firmware/third_party/fatfs`) is © ChaN under its own
-BSD-style licence. `tools/patches/` holds a patch to GNU binutils, which falls under binutils' own licence (GPL).
+BSD-style licence. TinyUSB (`firmware/third_party/tinyusb`, a subset with a few marked changes) is © hathach and
+contributors under the MIT licence. `tools/patches/` holds a patch to GNU binutils, which falls under binutils' own licence (GPL).
 Enaga contains no Sonicware code.
