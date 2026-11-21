@@ -270,7 +270,7 @@ class Menu(unittest.TestCase):
             self.assertEqual(card.get(image, "/ENAGA/SETTINGS.TXT"),
                              b"VOLUME=6\nBRIGHTNESS=9\nPADS=HIGH\nAUTO OFF=5 MIN\nSPEAKER=OFF\nMIDI CH=1\nMIDI THRU=OFF\nMIDI IN=BOTH\n"
                              b"MIDI OUT=BOTH\n"
-                             b"CLOCK SRC=INT\nCLOCK OUT=OFF\nSYNC OUT=ON\n")
+                             b"CLOCK SRC=INT\nCLOCK OUT=OFF\nSYNC OUT=ON\nBATTERY=ALKALINE\n")
             self.assertEqual(card.get(image, "/ENAGA/DATA/MENU-TEST/SETTINGS.TXT"),
                              b"STARTS=1\nNOTE=SAVED BY MENU-TEST\n")
             with self.boot(image) as emu:              # read back at power-on; AUTO OFF without the app busy

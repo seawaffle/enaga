@@ -119,6 +119,22 @@ the measured state.
 
 Switching off, in the original firmware's order: `B2` to the panel MCU, DAC mute, `C2`, then GP4[11] low.
 
+**Battery level** (`firmware/kernel/power.c`), as the original firmware computes it (smpltrek-re "Power
+management"; its `battery_sample` run in c6sim from Enaga's side, 2026-11-21): the latest channel 15 reading once a
+second, readings under 2000 ignored, eight to an average. The level (0-4) falls a step while the average is below
+the falling threshold under it and rises a step only at or above the rising one over it; the first average sets
+it outright. Raw thresholds per BATTERY setting (the stock BATTERY TYPE):
+
+| Type | Falling (to 0, 1, 2, 3) | Rising (to 1, 2, 3, 4) |
+|---|---|---|
+| ALKALINE | 2630, 2830, 2980, 3180 | 2730, 2930, 3080, 3280 |
+| NiMH | 2840, 2915, 2940, 2990 | 2855, 2930, 2955, 3005 |
+| LITHIUM | 3030, 3280, 3360, 3490 | 3080, 3330, 3410, 3540 |
+
+The voltages these raw values stand for are not measured; the original firmware only draws the level. Enaga
+also switches off after 30 s at level 0 on batteries (closing the app's files first), which the original
+firmware does not do.
+
 ## Keys
 
 A 6 x 8 matrix: rows GP2[0..5] are outputs driven one high at a time; columns 0-5 are GP3[1..6], column 6
@@ -573,5 +589,12 @@ unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it mut
     - **Settings:** MIDI IN to DIN, and USB notes stop showing; MIDI OUT to DIN, and the computer stops receiving.
       Set both back to BOTH.
     - **Unplug and plug back in** while CHECK runs: nothing should crash, and the device comes back.
+
+19. **Battery (E5):** on batteries (GP3[7] high), open STATUS: `B` (right end of the LOAD line) shows the level, 0-4;
+    on USB power it shows `-`. The menu shows a battery mark at the top right on batteries only. Each level change
+    logs `BATTERY <level> <raw average>`: note the lines, the battery type and, if possible, the voltage across the
+    batteries at each change, which ties the raw values to volts. Set SETTINGS, BATTERY to the type in the unit.
+    With nearly flat batteries, if it gets that far: BATTERY EMPTY with a countdown at the bottom of the screen,
+    then the unit switches off showing BATTERY EMPTY.
 
 Afterwards the official update restores the unit ("Installing and recovery").

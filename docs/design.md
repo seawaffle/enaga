@@ -364,7 +364,7 @@ Left out on purpose: the original firmware's sounds in SPI flash. What is there 
 card. Enaga still neither reads nor writes the flash. Steps in order, smallest and safest first; each ends tested on the
 emulator where it can be, and the ones that need the unit collect into a session.
 
-1. **Battery and power.** Panel channel 15 is the battery voltage and GP3[7] is high on batteries (smpltrek-re
+1. (**Done** on the emulator 2026-11-21, see the log; the unit to come.) **Battery and power.** Panel channel 15 is the battery voltage and GP3[7] is high on batteries (smpltrek-re
    "Power management", XF-8, HW-24). Enaga turns that into a level (0-4, the stock threshold tables per BATTERY
    TYPE: alkaline, NiMH, lithium, with hysteresis), a BATTERY TYPE setting, a battery mark on the menu and STATUS,
    and `enaga::system::battery()` for apps (level, or -1 on USB or adapter power). At the lowest level: a warning,
@@ -449,6 +449,8 @@ downloads); a person doing it moves to E6. USB uses test IDs until pid.codes gra
   the pid.codes product ID (vendor 0x1209) is granted. The request is in, and its timing is pid.codes'; releases
   ship with the test IDs until then (0.2.0 did, and its notes say so).
 
+- Battery: the raw thresholds are the original firmware's; their voltages, and whether 30 s at level 0 is a
+  sensible time before switching off, want readings on the unit with each battery type (checklist step 19).
 - STEP 4 crash (unit session 5): pressing STEP 4 on CHECK's MIDI page once crashed, with USB connected to a
   Windows PC; not repeated on the unit, nor on the emulator (60 s of STEP 4's clock with a host that never reads,
   then 40 random STEP 1-5 presses). The reason was not noted. If it recurs, photograph STATUS before switching off.
@@ -1655,3 +1657,25 @@ for would return true and lose it on DIN. Instead USB counts as stalled after 10
 taken (`usb_midi_stalled`), and a stalled USB no longer holds a message back: it gets what fits and drops the rest
 (`usb_tx_lost`). DIN always drains (31,250 baud), so its queue being full is only ever a wait. When the host reads
 again, USB carries on.
+
+### Battery and power, E5 step 1 (2026-11-21)
+
+Enaga reads the battery, as the original firmware does (`firmware/kernel/power.c`, docs/hardware.md "Power"). The
+level rules were not fully known: smpltrek-re had the threshold tables but had not read the loop that steps the
+level, so the stock `battery_sample` and `battery_set_type` were run in its c6sim with every raw value from 3700 down
+to 2400 and back, for the three types. Result: a step down below the first table, a step up at or above the
+second (so the second is hysteresis, as smpltrek-re supposed), the first average setting the level directly, and
+readings under 2000 ignored.
+- `enaga::system::battery()`: 0-4, or -1 off batteries (GP3[7] low). A new `battery` entry at the end of
+  `enaga_host_t`.
+- BATTERY setting (ALKALINE, NiMH, LITHIUM) on the SETTINGS page and in `SETTINGS.TXT`. The file's write buffer
+  grew from 160 to 320 bytes: with the new line the longest file is about 180.
+- A battery mark at the top right of the menu (one bar per level) and `B` on STATUS; level changes are logged
+  with the raw average, for tying the raw values to volts on the unit.
+- At level 0 on batteries: a bar at the bottom of the screen counts down 30 s, then the unit switches off as POWER
+  does, showing BATTERY EMPTY. The app's `stop()` runs and its files are closed first. If the level recovers in
+  time, nothing happens. The original firmware only redraws every 30 s at levels 0-1; the switch-off is Enaga's
+  own, to keep a fading supply from cutting a card write.
+- `tests/test_battery.py` (an app that logs the level and saves a file in `stop()`): thresholds and hysteresis,
+  readings under 2000, the power source, the BATTERY setting, the menu mark, the switch-off with the file saved,
+  and a recovery that cancels it.

@@ -46,6 +46,7 @@ static void host_set_busy(uint32_t busy) { app_keep_on = busy != 0; }
 static void host_speaker(uint32_t on) { audio_speaker_app = on != 0; audio_speaker_apply(); }
 static int32_t host_headphones(void) { return audio_headphones(); }
 static uint32_t host_device(void) { return device_id; }
+static int32_t host_battery(void) { return battery_level(); }
 static int32_t host_input(uint32_t source, uint32_t level) { return audio_input(source, level); }
 static int32_t host_midi_send(uint32_t ports, const uint8_t *data, uint32_t bytes) { return midi_send(ports, data, bytes); }
 static uint32_t host_midi_channel(void) { return (uint32_t)midi_channel_setting; }
@@ -61,7 +62,7 @@ enaga_host_t app_host = {                     /* heap filled in per app by load_
     files_stream_open, files_stream_create, files_stream_read, files_stream_write, files_stream_status,
     files_stream_close,
     host_open_menu, host_set_busy, host_speaker, host_headphones, host_device, host_input, host_midi_send,
-    host_midi_channel, host_clock_control, clock_state, host_clock_ticks,
+    host_midi_channel, host_clock_control, clock_state, host_clock_ticks, host_battery,
 };
 
 static void cache_sync(uint32_t address, uint32_t bytes)   /* the loader calls this just before the app's entry */

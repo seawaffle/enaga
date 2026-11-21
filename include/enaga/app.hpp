@@ -56,6 +56,9 @@ inline int input(int source, int level = ENAGA_INPUT_NORMAL) { return host().inp
 // Which device Enaga runs on: ENAGA_DEVICE_SMPLTREK, _LOFI12XT, _CYDRUMS or _UNKNOWN (enaga_device in abi.h).
 // Same board and controls in the same places; use it for what differs, such as the labels printed on the panel.
 inline int device() { return int(host().device()); }
+// The battery: 0-4 (4 full) on batteries, -1 on USB or adapter power. Changes slowly (several seconds); poll it.
+// At 0 Enaga warns and then switches the unit off, stopping the app as POWER does: save what matters in stop().
+inline int battery() { return int(host().battery()); }
 }  // namespace system
 
 // The draw target: ENAGA_SCREEN_W x ENAGA_SCREEN_H bytes, row-major, grey 0-15.
