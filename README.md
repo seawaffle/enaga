@@ -127,12 +127,12 @@ into `build/dsplib/` and again when it changes. Then:
 
 ```sh
 python3 -B tools/build_app.py examples/tone     # -> build/apps/tone/APP.ENA
-python3 -B firmware/build.py                    # -> build/firmware/<device>/<card name>, ENAGA_0_1_0.bin
+python3 -B firmware/build.py                    # -> build/firmware/<device>/<card name>, ENAGA_0_2_0.bin
 ```
 
 ## Installing
 
-For developers and testers: 0.1.0 runs on a SmplTrek, but it is early software (docs/design.md "Open items").
+For developers and testers: 0.2.0 runs on a SmplTrek, but it is early software (docs/design.md "Open items").
 The Lofi-12 XT and CyDrums files are **untested**: their update format is checked against official releases,
 but nobody has installed Enaga on one, and what their own bootloaders leave behind is unknown. Only try one if
 you are prepared to restore it with its official update.

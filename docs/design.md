@@ -1570,3 +1570,9 @@ It found no blockers. Fixed from its notes:
 
 Left as they are: a number-to-text helper for `format` functions (it wanted Hz, and the SDK has no libc), and a
 way to try apps without a unit or the repository.
+
+### Version 0.2.0
+
+`VERSION` in `firmware/build.py`, `ENAGA_VERSION`, the USB device release (`bcdDevice` 0x0020) and the README go
+to 0.2.0 for the first release with E4's work: MIDI (DIN and USB), the UI toolkit, app icons and the SDK. ABI_VERSION
+stays 0; the interface is still provisional, and an app needs firmware of its own version.
