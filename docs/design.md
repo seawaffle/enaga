@@ -358,8 +358,10 @@ and the ones that need the unit collect into a session.
 ## E5 plan (2026-11-21)
 
 Scope: the rest of the hardware, so that 1.0 (E6) freezes an API that covers the whole machine and has been used.
-Survey of what E4 left uncovered: the battery (read, ignored), USB mass storage and audio, the original firmware's
-sounds in SPI flash, and SYNC IN polarity. Steps in order, smallest and safest first; each ends tested on the
+Survey of what E4 left uncovered: the battery (read, ignored), USB mass storage and audio, and SYNC IN polarity.
+Left out on purpose: the original firmware's sounds in SPI flash. What is there depends on what was installed last
+(a stock update, another product's firmware), so apps could not count on it; apps bring their own samples on the
+card. Enaga still neither reads nor writes the flash. Steps in order, smallest and safest first; each ends tested on the
 emulator where it can be, and the ones that need the unit collect into a session.
 
 1. **Battery and power.** Panel channel 15 is the battery voltage and GP3[7] is high on batteries (smpltrek-re
@@ -386,13 +388,8 @@ emulator where it can be, and the ones that need the unit collect into a session
    while streaming; Enaga does the same, or resamples by a fraction of a sample (to decide at the step from
    measurements). Testing: the emulator has no isochronous transfers yet (a request through the user for
    smpltrek-re); the unit plays and records with a DAW.
-5. **The original firmware's sounds.** About 27 MiB of chip 0 beyond the system image and chip 1 hold the stock
-   samples, kits and patterns (smpltrek-re "SPI flash", PDSN / PKIT / PISN / PPRJ). Read-only: a flash driver
-   (SPI0 by EDMA, as the bootloader, invalidating the cache over the destination) and a list of the factory
-   samples that apps can load like WAV files. Enaga never writes flash. Before the API: a map of the partitions
-   and the sample format, from smpltrek-re's analysis and a read on the unit.
-6. **Exit.** On a unit: copy an app over USB DRIVE and run it; play audio from a DAW through the unit and record
-   the unit into it; an app plays a factory sample; the battery mark falls with the batteries and the unit switches
+5. **Exit.** On a unit: copy an app over USB DRIVE and run it; play audio from a DAW through the unit and record
+   the unit into it; the battery mark falls with the batteries and the unit switches
    itself off cleanly.
 
 E6, 1.0: a review of the whole API before freezing it (names, the C interface, what is provisional), a person's
@@ -408,7 +405,7 @@ release.
 | **E2** | Audio API and DSP library, asynchronous file I/O, sample loading and streaming | one real instrument app (done) |
 | **E3** | Enaga menu, boot policy, F1 escape, app switching, settings | switch between two apps repeatedly on the unit (done) |
 | **E4** | Input selection, pad pressure, MIDI on DIN and USB, clock and SYNC, a first UI toolkit, SDK packaging and documentation | an outside developer builds the template app from the docs |
-| **E5** | Battery and power, SYNC polarity, USB mass storage and audio, the original firmware's sounds | apps copied over USB, audio to and from a DAW, a factory sample played, a clean low-battery switch-off, on a unit |
+| **E5** | Battery and power, SYNC polarity, USB mass storage and audio | apps copied over USB, audio to and from a DAW, a clean low-battery switch-off, on a unit |
 | **E6 / 1.0** | API review and freeze, the SDK's exit test by a person, the USB IDs, the other two devices, release | public release |
 
 ## Status
