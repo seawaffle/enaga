@@ -49,6 +49,19 @@ characters, shown upper case); `--app-version` is a number stored in the package
 `/ENAGA/APPS/<NAME>/APP.ENA`, `<NAME>` an 8.3 folder name. That folder name is the app's **package name**, which
 also names its data folder (`/ENAGA/DATA/<NAME>`), so keep it when updating the app.
 
+**The icon.** An optional `icon.txt` in the directory is the app's icon in the Enaga menu, shown beside its name:
+16 lines of 16 greys, each a hex digit from `0` (black) to `F` (white), or `.` for 0. Lines starting with `#` are
+comments. Grey 0 shows the menu's background, which is dim grey on the selected line. An app without one gets a
+generic icon. `examples/tone/icon.txt`:
+
+```
+................
+...FFF..........
+..FF.FF.........
+.FF...F.........
+```
+(the first rows of a sine wave).
+
 Apps are compiled with `-Wall -Wextra -Werror`: warnings stop the build. Files named `*.ti.c` are built with TI's
 cl6x when it is installed ("Writing inner loops for cl6x" below).
 
@@ -837,7 +850,8 @@ and the functions the C++ layer wraps:
 **The package** on the card is an `enaga_package_header_t` (64 bytes: `magic` `ENAGA_PACKAGE_MAGIC`,
 `header_size`, `abi_version`, `load_address`, `load_size`, `bss_size`, `entry_offset`, `crc32`, `app_version`,
 `flags`, `name[ENAGA_NAME_BYTES]`) followed by the image, linked at `ENAGA_APP_BASE`; `tools/build_app.py` writes
-it. The entry point is an `enaga_entry_t`, `const enaga_app_t *(const enaga_host_t *)`, in the runtime.
+it. With `ENAGA_PACKAGE_ICON` in `flags`, `ENAGA_ICON_BYTES` (128) of icon follow the image: `ENAGA_ICON_SIZE` x `ENAGA_ICON_SIZE` (16 x 16) greys, row by
+row, two pixels a byte with the left one in the high nibble. The entry point is an `enaga_entry_t`, `const enaga_app_t *(const enaga_host_t *)`, in the runtime.
 
 **Memory**: the app's image starts at `ENAGA_APP_BASE` (0xC0400000) and its heap runs from the end of the image to
 `ENAGA_APP_LIMIT` (0xC8000000), about 124 MiB in all.

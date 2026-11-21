@@ -112,7 +112,10 @@ class E0(unittest.TestCase):
         self.rejected(self.cxxcheck[:-4], "truncated")
         self.rejected(self.patched(0, 0x12345678), "magic")
         self.rejected(self.patched(4, 60), "header")
-        self.rejected(self.patched(36, 1), "header")
+        self.rejected(self.patched(36, 2), "header")
+        self.rejected(self.patched(36, 1), "truncated")      # an icon declared, none after the payload
+        with_icon = bytearray(self.patched(36, 1)) + bytes(range(128))
+        self.rejected(bytes(with_icon[:-1]), "truncated")
         self.rejected(self.patched(8, 1), "abi")
         self.rejected(self.patched(12, 0xC2000000), "window")
         self.rejected(self.patched(24, len(self.cxxcheck)), "window")
@@ -120,6 +123,25 @@ class E0(unittest.TestCase):
         corrupt = bytearray(self.cxxcheck)
         corrupt[100] ^= 1
         self.rejected(bytes(corrupt), "crc")
+
+    def test_package_with_an_icon_loads(self):
+        package = bytearray(self.cxxcheck) + bytes(range(128))
+        struct.pack_into("<I", package, 36, 1)
+        result = self.execute(bytes(package))
+        self.assertEqual((result["status"], result["load"], result["name"]), ("returned", LOAD["ok"], "CxxCheck"))
+
+    def test_icon_txt_goes_after_the_payload(self):
+        tone = build_app.build(ENAGA / "examples" / "tone", WORK / "tone")
+        package = tone["package"]
+        flags = build_app.HEADER.unpack_from(package)[9]
+        self.assertEqual(flags, 1)
+        self.assertEqual(len(package), 64 + tone["payload_size"] + 128)
+        rows = [r for r in (ENAGA / "examples" / "tone" / "icon.txt").read_text().splitlines() if not r.startswith("#")]
+        icon = package[-128:]
+        for y, row in enumerate(rows):
+            for x, c in enumerate(row):
+                pixel = icon[(y * 16 + x) // 2] >> (0 if x & 1 else 4) & 15
+                self.assertEqual(pixel, 0 if c == "." else int(c, 16), (x, y))
 
     def test_out_of_memory_is_fatal(self):
         result = self.execute(self.oom)

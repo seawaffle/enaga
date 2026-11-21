@@ -5,18 +5,23 @@
  * (Enaga's status page). F1 + POWER opens it over a running app, which is paused meanwhile (no events, update or
  * draw; its audio goes on), and closes it again; CLR closes it too. An app can open it itself (open_menu). UP /
  * DOWN or VALUE move, OK chooses: the running app resumes, another replaces it, SETTINGS and STATUS show their
- * pages until OK or CLR.
+ * pages until OK or CLR. Each line has an icon: the package's (ENAGA_PACKAGE_ICON), else a generic one; SETTINGS
+ * and STATUS have their own. Grey 0 in an icon shows the line's background.
  *
  * With no app running the menu cannot close: the screen is the menu, or the status page (after a crash, or when
  * the card holds no apps), from which OK opens the menu. */
 #define MENU_APPS   24
-#define MENU_ROWS   10                        /* list lines on screen, 9 px apart from y = 26 */
+#define MENU_ROWS   5                         /* list lines on screen, MENU_LINE px apart from y = MENU_TOP */
+#define MENU_TOP    24
+#define MENU_LINE   20
 
 int menu_active;                              /* 1: the menu (or its status page) has the screen and the inputs */
 int menu_status;                              /* 1: showing the status page */
 static int menu_settings;                     /* 1: showing the settings page */
 static char menu_names[MENU_APPS][APPS_FOLDER];
 char menu_titles[MENU_APPS][ENAGA_NAME_BYTES];
+static u8 menu_icons[MENU_APPS][ENAGA_ICON_BYTES];
+static int menu_has_icon[MENU_APPS];
 static int menu_count, menu_cursor, menu_top;   /* lines: the apps, then SETTINGS (menu_count), STATUS */
 static char menu_message[40];
 
@@ -39,7 +44,7 @@ void menu_open(const char *why)
     menu_count = apps_scan(menu_names, MENU_APPS);
     if (menu_count < 0) menu_count = 0;
     for (i = 0; i < menu_count; i++)
-        if (apps_title(menu_names[i], menu_titles[i]) != 0 || !menu_titles[i][0])
+        if (apps_title(menu_names[i], menu_titles[i], menu_icons[i], &menu_has_icon[i]) != 0 || !menu_titles[i][0])
             copy(menu_titles[i], sizeof menu_titles[i], menu_names[i]);
     copy(menu_message, sizeof menu_message, why);
     menu_cursor = 0;
@@ -90,6 +95,52 @@ void menu_event(const enaga_event_t *e)
     }
 }
 
+/* Built-in icons, as icon.txt spells them (tools/build_app.py): a grey per character, "." for 0. */
+static const char *const icon_generic[ENAGA_ICON_SIZE] = {
+    "................", "..9999....9999..", ".933339..933339.", ".933339..933339.",
+    ".933339..933339.", ".933339..933339.", "..9999....9999..", "................",
+    "................", "..9999....9999..", ".933339..933339.", ".933339..933339.",
+    ".933339..933339.", ".933339..933339.", "..9999....9999..", "................",
+};
+static const char *const icon_settings[ENAGA_ICON_SIZE] = {
+    "................", "...5....5....5..", "...5....5....5..", "...5...FFF...5..",
+    "...5...FFF...5..", "...5....5....5..", "...5....5...FFF.", "...5....5...FFF.",
+    "...5....5....5..", "..FFF...5....5..", "..FFF...5....5..", "...5....5....5..",
+    "...5....5....5..", "...5....5....5..", "...5....5....5..", "................",
+};
+static const char *const icon_status[ENAGA_ICON_SIZE] = {
+    "................", "....99999999....", "...99......99...", "..99........99..",
+    ".99....FF....99.", ".9.....FF.....9.", ".9............9.", ".9....FFF.....9.",
+    ".9.....FF.....9.", ".9.....FF.....9.", ".9.....FF.....9.", ".99...FFFF...99.",
+    "..99........99..", "...99......99...", "....99999999....", "................",
+};
+
+static void draw_builtin(int x, int y, const char *const rows[ENAGA_ICON_SIZE])
+{
+    int r, c;
+    for (r = 0; r < ENAGA_ICON_SIZE; r++)
+        for (c = 0; c < ENAGA_ICON_SIZE; c++) {
+            char ch = rows[r][c];
+            u8 grey = (u8)(ch >= 'A' ? ch - 'A' + 10 : ch >= '0' ? ch - '0' : 0);
+            if (grey) gfx_pixel(x + c, y + r, grey);
+        }
+}
+
+static void draw_icon(int x, int y, const u8 *icon)   /* ENAGA_ICON_BYTES: two pixels a byte, the left one high */
+{
+    int i;
+    for (i = 0; i < ENAGA_ICON_SIZE * ENAGA_ICON_SIZE; i++) {
+        u8 grey = (u8)(i & 1 ? icon[i / 2] & 0xF : icon[i / 2] >> 4);
+        if (grey) gfx_pixel(x + i % ENAGA_ICON_SIZE, y + i / ENAGA_ICON_SIZE, grey);
+    }
+}
+
+static void fill(int x, int y, int w, int h, u8 grey)
+{
+    int i, j;
+    for (j = y; j < y + h; j++) for (i = x; i < x + w; i++) gfx_pixel(i, j, grey);
+}
+
 void menu_draw(void)
 {
     int i, y;
@@ -99,12 +150,18 @@ void menu_draw(void)
     gfx_text(36, 0, ENAGA_VERSION, 6);
     if (menu_message[0]) gfx_text(0, 12, menu_message, 12);
     else if (menu_count == 0) gfx_text(0, 12, "NO APPS", 12);
-    for (i = menu_top, y = 26; i <= menu_count + 1 && i < menu_top + MENU_ROWS; i++, y += 9) {
+    for (i = menu_top, y = MENU_TOP; i <= menu_count + 1 && i < menu_top + MENU_ROWS; i++, y += MENU_LINE) {
         int running = i < menu_count && app_current && same(menu_names[i], app_folder);
-        char shown[19];                       /* 18 characters: room for the running mark */
-        if (i == menu_cursor) gfx_text(0, y, ">", 15);
+        char shown[16];                       /* 15 characters: from x = 22 to the running mark */
+        if (i == menu_cursor) fill(0, y, CANVAS_W - 4, MENU_LINE - 1, 3);
+        if (i == menu_count) draw_builtin(1, y + 1, icon_settings);
+        else if (i == menu_count + 1) draw_builtin(1, y + 1, icon_status);
+        else if (menu_has_icon[i]) draw_icon(1, y + 1, menu_icons[i]);
+        else draw_builtin(1, y + 1, icon_generic);
         copy(shown, sizeof shown, i < menu_count ? menu_titles[i] : i == menu_count ? "SETTINGS" : "STATUS");
-        gfx_text(8, y, shown, i == menu_cursor ? 15 : 8);
-        if (running) gfx_text(116, y, "ON", 12);
+        gfx_text(22, y + 6, shown, i == menu_cursor ? 15 : 8);
+        if (running) gfx_text(112, y + 6, "ON", 12);
     }
+    if (menu_top > 0) fill(CANVAS_W - 2, MENU_TOP, 2, 3, 8);                                  /* more above */
+    if (menu_top + MENU_ROWS < menu_count + 2) fill(CANVAS_W - 2, MENU_TOP + MENU_ROWS * MENU_LINE - 4, 2, 3, 8);
 }

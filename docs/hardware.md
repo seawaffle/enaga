@@ -518,7 +518,8 @@ unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it mut
 
 13. **Menu and switching (E3's exit):** with CHECK and SYNTH both on the card (copy `synth/ENAGA/APPS/SYNTH` into
     the card's `ENAGA/APPS`), switch on. Expected: the last app (CHECK), or the menu if none is recorded. Hold F1 and
-    press POWER: the menu (the apps by name, then SETTINGS and STATUS; ON marks the running one). DOWN to SYNTH, OK: the synth starts.
+    press POWER: the menu (the apps by name, each with an icon, then SETTINGS and STATUS; ON marks the running one;
+    note whether the icons read clearly). DOWN to SYNTH, OK: the synth starts.
     F1 + POWER, UP to CHECK, OK: CHECK starts again. Switch back and forth at least ten times, playing a note in the
     synth each time; report any hang, crash screen, wrong app, or sound that stays after switching. Then: F1 + POWER
     with a synth note held (the note should stop when the menu opens, F1 + POWER again to resume); switch off and on

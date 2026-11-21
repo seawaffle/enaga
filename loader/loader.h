@@ -14,7 +14,7 @@
 
 typedef enum enaga_load_status {
     ENAGA_LOAD_OK = 0,
-    ENAGA_LOAD_TRUNCATED = -1,      /* file shorter than the header or the payload it declares */
+    ENAGA_LOAD_TRUNCATED = -1,      /* file shorter than the header, or the payload or icon it declares */
     ENAGA_LOAD_BAD_MAGIC = -2,
     ENAGA_LOAD_BAD_HEADER = -3,     /* header_size or flags not understood */
     ENAGA_LOAD_ABI = -4,            /* built for another ABI version */

@@ -98,7 +98,7 @@ void apps_card_status(void);                  /* app_status from the card's stat
 #define APPS_FOLDER 32                       /* bytes for an app's folder name under /ENAGA/APPS, with the NUL */
 int  apps_scan(char (*names)[APPS_FOLDER], int max);   /* the installed apps' folders; count, or -1: no /ENAGA/APPS */
 int  apps_start(const char *folder);          /* stops the running app, starts /ENAGA/APPS/<folder>; 0 = running */
-int  apps_title(const char *folder, char title[ENAGA_NAME_BYTES]);   /* the package's display name; 0 = read */
+int  apps_title(const char *folder, char title[ENAGA_NAME_BYTES], u8 icon[ENAGA_ICON_BYTES], int *has_icon);   /* name (0 = read) and icon */
 int  apps_boot(int menu_requested, char *message, unsigned size);   /* the boot policy; 1 = open the menu */
 void apps_service(u32 ms);                    /* each pass: the boot record once the app has settled */
 extern char app_folder[APPS_FOLDER];          /* the running (or last started) app's folder */

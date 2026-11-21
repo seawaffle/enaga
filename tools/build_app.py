@@ -7,8 +7,11 @@
 All *.cpp and *.c files in the directory are compiled with GCC tic6x-elf (C++20, -fno-exceptions -fno-rtti,
 freestanding libstdc++ headers), linked with the Enaga runtime (runtime/) and the DSP library's block functions
 (runtime/dsp, built once into build/dsplib) at ENAGA_APP_BASE with libgcc, and
-wrapped as enaga_package_header (include/enaga/abi.h) + payload. No libc. The package format is provisional
+wrapped as enaga_package_header (include/enaga/abi.h) + payload (+ icon). No libc. The package format is provisional
 until 1.0.
+
+An optional icon.txt in the directory is the app's icon in the Enaga menu: 16 lines of 16 greys, each a hex digit
+0 (black) to F (white) or "." for 0; lines starting with "#" are comments.
 
 Files named *.ti.c, and the DSP library, are built with TI's cl6x instead when it is installed (tools/paths.py, TI_CGT): its
 software pipelining makes inner DSP loops several times faster than GCC's code. They must be C that GCC also
@@ -35,6 +38,8 @@ MAGIC = 0x41474E45
 BASE = 0xC0400000
 LIMIT = 0xC8000000
 HEADER = struct.Struct("<10I24s")
+FLAG_ICON = 1
+ICON_SIZE = 16
 # Every GCC frame must fit in the 16 KiB that Enaga's interrupt entry leaves below the interrupted stack pointer
 # (firmware/start.s, "Interrupt stack gap"): GCC can release a frame a few cycles before its last reads of it.
 COMMON = ["-march=c674x", "-mlittle-endian", "-O2", "-Werror=frame-larger-than=16384", "-Werror=vla", "-Werror=alloca", "-ffreestanding", "-nostdlib", "-fno-asynchronous-unwind-tables",
@@ -104,6 +109,16 @@ def dsp_library():
     return archive
 
 
+def read_icon(path):
+    """icon.txt -> the package's icon bytes (ENAGA_ICON_BYTES: two pixels a byte, the left one high)."""
+    rows = [line.strip() for line in path.read_text().splitlines()]
+    rows = [row for row in rows if row and not row.startswith("#")]
+    if len(rows) != ICON_SIZE or any(not re.fullmatch(r"[0-9A-Fa-f.]{16}", row) for row in rows):
+        raise ValueError(f"{path}: an icon is {ICON_SIZE} lines of {ICON_SIZE} hex digits (0-F, or . for 0)")
+    greys = [0 if c == "." else int(c, 16) for row in rows for c in row]
+    return bytes(greys[i] << 4 | greys[i + 1] for i in range(0, len(greys), 2))
+
+
 def build(app_dir, out, name=None, app_version=1):
     """Compile, link and package; returns {"package": bytes, "elf", "payload_size", "bss_size", "entry"}."""
     app_dir, out = Path(app_dir).resolve(), Path(out).resolve()
@@ -141,10 +156,11 @@ def build(app_dir, out, name=None, app_version=1):
         raise RuntimeError("bss does not follow the payload inside the app window")
     bss = sym["__bss_end"] - (BASE + len(payload))
     entry = sym["enaga_entry"] - BASE
+    icon = read_icon(app_dir / "icon.txt") if (app_dir / "icon.txt").exists() else b""
     header = HEADER.pack(MAGIC, HEADER.size, ABI_VERSION, BASE, len(payload), bss, entry,
-                         zlib.crc32(payload) & 0xFFFFFFFF, app_version, 0, encoded)
+                         zlib.crc32(payload) & 0xFFFFFFFF, app_version, FLAG_ICON if icon else 0, encoded)
     ti_sources = [src.name for src in sources if src.name.endswith(".ti.c")] if paths.ti_present() else []
-    return {"package": header + payload, "elf": elf, "payload_size": len(payload), "bss_size": bss, "entry": entry,
+    return {"package": header + payload + icon, "elf": elf, "payload_size": len(payload), "bss_size": bss, "entry": entry,
             "ti_sources": ti_sources}
 
 

@@ -87,8 +87,8 @@ Steps 1 and 2 as built: the output fades to silence over 8 blocks (11 ms) while 
 the callback is removed and `stop()` called; a new app's output fades in the same way. `stop()` has 3 s
 (`APPS_STOP_MS`, checked by the watchdog tick whether or not the main loop is fed, since saving to the card feeds
 it); a `stop()` that overruns, hangs or calls `fatal` drops the app as any failure does, and the switch then goes
-on to the chosen app (or the power-off goes on, if it was switching off). Not yet: app icons (they want a
-different menu layout than a 9-pixel list, so they wait for E4's UI toolkit).
+on to the chosen app (or the power-off goes on, if it was switching off). App icons came in E4 ("App icons in the
+menu", E4 step 6, in the log).
 
 ## Settings
 
@@ -345,7 +345,7 @@ and the ones that need the unit collect into a session.
    audio can join it in E5 as a composite device. The stack is a decision at this step: a TinyUSB port (MIT; it
    has a MUSB driver for other TI parts) or StarterWare usblib as the stock firmware uses (LIB-1; licence to
    check). The emulator would need a USB model or a host-side shim; the unit and a computer test it for real.
-6. (**Toolkit done** 2026-11-20, see the log; app icons to come.) **UI toolkit, first cut.** Small: a list menu, a parameter page (name / value rows on the encoders), a
+6. (**Done** 2026-11-20, see the log: the toolkit, then app icons.) **UI toolkit, first cut.** Small: a list menu, a parameter page (name / value rows on the encoders), a
    confirmation dialog and text entry (patch names), drawn with the existing fonts on `Canvas`, driven from the
    app's events. Then app icons in the Enaga menu (an optional `ICON` in the package). File browser, waveform
    view and anything larger wait for real uses.
@@ -393,7 +393,7 @@ Since E3: one image serves the SmplTrek, Lofi-12 XT and CyDrums (the same board)
 file for each; Enaga tells which it runs on from the bootloader's file name, confirmed on a SmplTrek in session 4.
 The other two are untested. E4 is under way ("E4 plan" above): pad pressure, input selection, MIDI on the DIN jacks, and the clock,
 transport and SYNC are done on the emulator and await the unit, and so does USB MIDI (step 5), whose USB product ID is still to come (pid.codes). The UI toolkit
-(step 6) is built; app icons in the menu are its remaining part.
+and app icons (step 6) are built; app icons await a look on the unit.
 
 ## Open items
 
@@ -1470,6 +1470,29 @@ Tests:
 The synth keeps its own drawing: it is a demo and gets bug fixes only. Naming a patch on the unit would use
 `TextEntry`, but that is a feature.
 
-Not done: app icons in the Enaga menu, which need an optional `ICON` in the package and a menu layout with room
-for them.
+Not done here: app icons in the Enaga menu, which came next (below).
+
+### App icons in the menu, E4 step 6 (2026-11-20)
+
+The second half of step 6, with the owner's choices: a 16 x 16 icon in the screen's 16 greys, optional, in the
+package; a list with the icon at the left of each line; a generic icon for apps without one.
+- **Package:** `ENAGA_PACKAGE_ICON` (flags bit 0) says 128 bytes of icon follow the payload, two pixels a byte. The
+  loader accepts that flag only (any other bit is still `BAD_HEADER`) and calls a package whose icon is cut short
+  `TRUNCATED`. The header is unchanged, so packages without an icon load as before.
+- **Build:** `icon.txt` in the app's folder, 16 lines of 16 hex digits (`.` for 0), read by `tools/build_app.py`;
+  a malformed file stops the build. `examples/tone` (a sine) and `examples/widgets` (a knob) have one. The synth
+  does not (it is a demo).
+- **Menu:** lines 20 pixels apart from y = 24, five on screen. Each has a 16 x 16 icon at the left: the package's,
+  else a generic one (four tiles). SETTINGS (three faders) and STATUS (an i in a circle) have their own. The name
+  follows at x = 22 (15 characters shown, was 18), ON at the right for the running app. The selected line is a
+  dim grey bar, as in the toolkit's `List`; grey 0 in an icon shows the bar. Marks at the right edge show more
+  lines above or below. The icon is read with the name, when the menu opens.
+
+Tests:
+- `tests/test_e0.py`: the loader takes a package with an icon, rejects unknown flags and a short icon. `icon.txt`
+  lands after the payload pixel for pixel.
+- `tests/test_menu.py`: on the emulator, the menu's canvas holds TONE's icon, the generic icon for the menu test
+  app, and the SETTINGS and STATUS icons, each over the right background. With package icons switched off in
+  the menu code, the test failed.
+- Screenshots of the menu, at the top and scrolled to SETTINGS, were looked at.
 

@@ -1,11 +1,12 @@
 """The Enaga menu and app switching on the emulator (docs/design.md decisions 2 and 3, "Boot and app switching"):
 F1 + POWER, switching between two apps repeatedly, the boot policy (last app, F1 held at power-on), an app
 that fails at start-up not being loaded again, display names, open_menu, the fade and the stop() limit on a
-switch, the SETTINGS page and its file, AUTO OFF and set_busy, an app's own settings (enaga::Settings), and
-the input selection reset between apps.
+switch, the SETTINGS page and its file, AUTO OFF and set_busy, an app's own settings (enaga::Settings), the
+input selection reset between apps, and the menu's icons.
 
     ENAGA_EMULATOR=/path/to/emulator python3 -B -m unittest tests.test_menu
 """
+import re
 import struct
 import sys
 import tempfile
@@ -170,6 +171,32 @@ class Menu(unittest.TestCase):
                 with self.boot(image) as emu:
                     s = self.state(emu)
                     self.assertEqual((s["menu"], s["running"], s["message"]), (1, False, "HANG DID NOT START"), s)
+
+    def builtin_icon(self, name):                    # from menu.c, as icon.txt spells it
+        source = (ENAGA / "firmware" / "kernel" / "menu.c").read_text()
+        body = re.search(rf"icon_{name}\[ENAGA_ICON_SIZE\] = {{(.*?)}};", source, re.S).group(1)
+        return re.findall(r'"([0-9A-F.]{16})"', body)
+
+    def test_icons_beside_the_names(self):
+        rows = [r for r in (APPS["TONE"] / "icon.txt").read_text().splitlines() if not r.startswith("#")]
+        with tempfile.TemporaryDirectory() as d:
+            image = self.card(d, ["MENUAPP", "TONE"])    # TONE has an icon.txt, the menu test app none
+            with self.boot(image) as emu:
+                self.assertEqual(self.state(emu)["menu"], 1)
+                self.press(emu, DOWN)                    # the cursor on the second line
+                self.assertIsNone(emu.run(60 * MS)["error"])
+                raw = emu.cpu.read(emu.names["menu_titles"], 48)
+                titles = [raw[i:i + 24].split(b"\0")[0].decode() for i in (0, 24)]
+                canvas = emu.cpu.read(emu.names["canvas"], 128 * 128)
+                icons = {"TONE": rows, "MENU-TEST": self.builtin_icon("generic")}
+                lines = [icons[t] for t in titles] + [self.builtin_icon("settings"), self.builtin_icon("status")]
+                for line, icon in enumerate(lines):
+                    background = 3 if line == 1 else 0
+                    top = 24 + 20 * line
+                    for y, row in enumerate(icon):
+                        for x, c in enumerate(row):
+                            want = background if c == "." else int(c, 16)
+                            self.assertEqual(canvas[(top + 1 + y) * 128 + 1 + x], want, (line, x, y))
 
     def test_names_open_menu_fade_slow_stop_settings_and_auto_off(self):
         with tempfile.TemporaryDirectory() as d:

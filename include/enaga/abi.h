@@ -156,7 +156,14 @@ typedef struct enaga_event {
     uint32_t ms;                            /* when Enaga read it */
 } enaga_event_t;
 
-/* On the card: this header, then load_size payload bytes. 64 bytes, little-endian. */
+/* On the card: this header, then load_size payload bytes, then the icon when flags has ENAGA_PACKAGE_ICON.
+ * 64 bytes, little-endian. The icon is ENAGA_ICON_SIZE x ENAGA_ICON_SIZE greys (0-15), row by row, two pixels a
+ * byte with the left one in the high nibble; the Enaga menu shows it beside the app's name (a generic icon when
+ * there is none). tools/build_app.py makes it from icon.txt in the app's folder. */
+#define ENAGA_PACKAGE_ICON    1u            /* flags: the icon follows the payload */
+#define ENAGA_ICON_SIZE       16
+#define ENAGA_ICON_BYTES      (ENAGA_ICON_SIZE * ENAGA_ICON_SIZE / 2)
+
 typedef struct enaga_package_header {
     uint32_t magic;                         /* ENAGA_PACKAGE_MAGIC */
     uint32_t header_size;                   /* sizeof(enaga_package_header_t); the payload starts here */
@@ -167,7 +174,7 @@ typedef struct enaga_package_header {
     uint32_t entry_offset;                  /* enaga_entry_t, from load_address */
     uint32_t crc32;                         /* IEEE CRC-32 of the payload */
     uint32_t app_version;                   /* the app's own version, shown by Enaga */
-    uint32_t flags;                         /* 0 */
+    uint32_t flags;                         /* ENAGA_PACKAGE_ICON or 0 */
     char name[ENAGA_NAME_BYTES];            /* NUL-padded display name */
 } enaga_package_header_t;
 

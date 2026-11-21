@@ -13,7 +13,7 @@ uint32_t enaga_crc32(const uint8_t *data, uint32_t bytes) {
 enaga_load_status_t enaga_package_check(const enaga_package_header_t *header, uint32_t file_size) {
     if (file_size < sizeof(*header)) return ENAGA_LOAD_TRUNCATED;
     if (header->magic != ENAGA_PACKAGE_MAGIC) return ENAGA_LOAD_BAD_MAGIC;
-    if (header->header_size != sizeof(*header) || header->flags != 0) return ENAGA_LOAD_BAD_HEADER;
+    if (header->header_size != sizeof(*header) || (header->flags & ~ENAGA_PACKAGE_ICON)) return ENAGA_LOAD_BAD_HEADER;
     if (header->abi_version != ENAGA_ABI_VERSION) return ENAGA_LOAD_ABI;   /* exact match until 1.0 */
     uint32_t window = ENAGA_APP_LIMIT - ENAGA_APP_BASE;
     if (header->load_address != ENAGA_APP_BASE || header->load_size == 0 || header->load_size > window ||
@@ -21,6 +21,8 @@ enaga_load_status_t enaga_package_check(const enaga_package_header_t *header, ui
         (header->entry_offset & 3u))
         return ENAGA_LOAD_WINDOW;
     if (file_size - sizeof(*header) < header->load_size) return ENAGA_LOAD_TRUNCATED;
+    if ((header->flags & ENAGA_PACKAGE_ICON) && file_size - sizeof(*header) - header->load_size < ENAGA_ICON_BYTES)
+        return ENAGA_LOAD_TRUNCATED;
     return ENAGA_LOAD_OK;
 }
 

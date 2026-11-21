@@ -215,16 +215,22 @@ static void package_path(char *path, const char *folder)     /* /ENAGA/APPS/<fol
     path[n] = 0;
 }
 
-int apps_title(const char *folder, char title[ENAGA_NAME_BYTES])   /* the package's display name; 0 = read */
+/* The package's display name, and its icon when it has one (*has_icon 1; ENAGA_PACKAGE_ICON). 0 = the name was read. */
+int apps_title(const char *folder, char title[ENAGA_NAME_BYTES], u8 icon[ENAGA_ICON_BYTES], int *has_icon)
 {
     static FIL f;
     char path[APPS_FOLDER + 24];
     enaga_package_header_t header;
-    UINT got;
+    UINT got, got2;
     unsigned i;
+    *has_icon = 0;
     package_path(path, folder);
     if (f_open(&f, path, FA_READ) != FR_OK) return -1;
     if (f_read(&f, &header, sizeof header, &got) != FR_OK) got = 0;
+    if (got == sizeof header && header.magic == ENAGA_PACKAGE_MAGIC && (header.flags & ENAGA_PACKAGE_ICON) &&
+        f_lseek(&f, (FSIZE_t)header.header_size + header.load_size) == FR_OK &&
+        f_read(&f, icon, ENAGA_ICON_BYTES, &got2) == FR_OK && got2 == ENAGA_ICON_BYTES)
+        *has_icon = 1;
     f_close(&f);
     if (got != sizeof header || header.magic != ENAGA_PACKAGE_MAGIC) return -1;
     for (i = 0; i + 1 < ENAGA_NAME_BYTES && header.name[i]; i++) title[i] = header.name[i];
