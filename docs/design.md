@@ -403,6 +403,13 @@ simulation (a fresh agent with only the downloads); a person doing it is still t
 - USB IDs: the device uses TinyUSB's test vendor and product IDs (0xCAFE / 0x4011, `firmware/usb/usb.c`) until
   the pid.codes product ID (vendor 0x1209) is granted. They must not ship in a release.
 
+- STEP 4 crash (unit session 5): pressing STEP 4 on CHECK's MIDI page once crashed, with USB connected to a
+  Windows PC; not repeated on the unit, nor on the emulator (60 s of STEP 4's clock with a host that never reads,
+  then 40 random STEP 1-5 presses). The reason was not noted. If it recurs, photograph STATUS before switching off.
+- MIDI out is all or nothing across DIN and USB (`midi_out_bytes`): a full USB queue (2 KiB; a host that stops
+  reading) would also stop DIN output. Not seen; sending to each port on its own would remove the coupling.
+- Input routes HI-Z, LINE ST and LINE MONO are unconfirmed on the unit: session 5's source was too quiet (only DYN
+  MIC at HIGH moved, to 2-3 per mille). Retest with a line-level signal.
 - Lofi-12 XT and CyDrums: the build makes their update files (docs/hardware.md "Installing and recovery"), but
   Enaga has never been installed on either. A first session on one would follow "Checks on a unit" steps 1-11,
   ready to restore it with its official update.
@@ -1576,3 +1583,20 @@ way to try apps without a unit or the repository.
 `VERSION` in `firmware/build.py`, `ENAGA_VERSION`, the USB device release (`bcdDevice` 0x0020) and the README go
 to 0.2.0 for the first release with E4's work: MIDI (DIN and USB), the UI toolkit, app icons and the SDK. ABI_VERSION
 stays 0; the interface is still provisional, and an app needs firmware of its own version.
+
+### Unit session 5: the 0.2.0 release (2026-11-21)
+
+The release's `SmplTrek.bin` (sha256 a93f1cb1..., the same bytes as the local build), CHECK, SYNTH and MYSYNTH (the
+SDK template built from the release downloads). Checklist steps:
+- 1-3: as expected; the log starts `ENAGA 0.2.0`.
+- 7, input routes: no ERR on any route. MIC follows the built-in microphone, and LOW / NORM / HIGH change the level.
+  The source was too quiet to judge the others (open items).
+- 10, pad pressure: PRS stays at 0 resting after a hit and follows harder presses smoothly; the feel is good.
+- 13: the menu icons read clearly; switching works. MYSYNTH, built from the SDK, plays.
+- 14: the settings work; PADS is fine.
+- 16-17, DIN MIDI and clock: not run (no equipment at hand).
+- 18, USB MIDI: passes (docs/hardware.md "USB"). A first reading of SYSEX after a USB SysEx was not repeated in
+  five later tries, the same bytes included.
+- One crash on CHECK's MIDI page after STEP 4, not reproduced (open items). An "SD issue" remembered on the status
+  page (not photographed) was probably the
+  `W1` / `W7` write probe that `ENAGA/SDTEST.BIN` on the staged card starts at every boot.

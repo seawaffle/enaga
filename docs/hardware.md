@@ -396,8 +396,11 @@ full-speed USB MIDI device with TinyUSB (`firmware/third_party/tinyusb`). The C6
 - **Endpoints and IDs:** the MIDI interface uses bulk endpoints 0x01 and 0x81 (64 bytes). The USB IDs are
   TinyUSB's test values (0xCAFE / 0x4011) until a pid.codes product ID is granted.
 
-Tested on the emulator's USB model and scripted host (enumeration, MIDI both ways, clock, unplugging); not yet on
-the unit (checklist step 18).
+Tested on the emulator's USB model and scripted host (enumeration, MIDI both ways, clock, unplugging), and on the
+unit in session 5 (0.2.0): Windows lists it as "Enaga SmplTrek"; through usbipd and pyusb from WSL, channel
+messages and SysEx (one transfer or split across transfers, packets ending CIN 5, 6 and 7) arrive with `U`, STEP 1-4
+reach the host (START, 263 clocks in about 5.5 s, STOP), the MIDI IN / MIDI OUT settings at DIN stop each
+direction, and after unplugging and replugging under CHECK it enumerates again and carries MIDI both ways.
 
 ## SD card
 
