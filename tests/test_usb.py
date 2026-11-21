@@ -115,6 +115,18 @@ class Usb(unittest.TestCase):
         self.assertEqual(self.take(), bytes([0x09, 0x90, 60, 100]))
         self.assertEqual(self.emu.cpu.uart_sent(0, din)[0], b"")
 
+    def test_a_host_that_stops_reading_does_not_hold_up_din(self):
+        self.start()                                                      # MIDI OUT = BOTH; the host never reads
+        din = self.emu.cpu.uart_sent(0)[1]
+        for _ in range(12):                                               # 12 x 301 bytes: USB's 2 KiB fills
+            self.press(2)
+            self.run_ms(120)                                              # each takes 96 ms on the DIN wire
+        self.assertEqual(self.emu.cpu.uart_sent(0, din)[0].count(0xF0), 12)   # DIN got every one
+        self.assertGreater(self.emu.word("usb_tx_lost"), 0)              # USB dropped what did not fit
+        self.take()                                                       # the host reads again: USB carries on
+        self.press(1)
+        self.assertEqual(self.take(), bytes([0x09, 0x90, 60, 100]))
+
     def test_midi_in_routing(self):
         self.start()
         self.setting("midi_in_setting", 1)                               # MIDI IN = DIN only: USB ignored

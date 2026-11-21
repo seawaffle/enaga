@@ -163,7 +163,7 @@ directory (the one containing `cpu.py`); it builds its core into its own `work/`
 
 ```sh
 export ENAGA_EMULATOR=/path/to/smpltrek-re/emulator
-python3 -B -m unittest discover -s tests -v                           # 91 tests, about 9 minutes
+python3 -B -m unittest discover -s tests -v                           # 92 tests, about 9 minutes
 python3 -B tools/emulate.py examples/tone --key 32@300000000           # press STEP 1; writes build/emulate/
 ```
 

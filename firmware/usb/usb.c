@@ -48,10 +48,17 @@ int enaga_usb_phy_start(void)                  /* the original firmware's order 
 /* ---- MIDI out queue ---- */
 
 #define TX_RING 2048u
+#define USB_STALL_MS 100u
 static u8 tx_ring[TX_RING];
 static volatile u32 tx_head, tx_tail;
 
+static volatile u32 tx_moved_ms;              /* the queue last drained, or was last empty */
+
 u32 usb_midi_tx_free(void) { return TX_RING - (tx_head - tx_tail); }
+
+/* The host has stopped reading (no program has the port open, say): bytes waiting and none taken for
+ * USB_STALL_MS. MIDI out then stops waiting for USB room, so DIN is not held up; USB carries on when it reads. */
+int usb_midi_stalled(void) { return tx_head != tx_tail && timer_ms() - tx_moved_ms > USB_STALL_MS; }
 
 int usb_midi_send(const u8 *data, u32 bytes)   /* all or nothing; 0 when not configured (nothing to send to) */
 {
@@ -59,6 +66,7 @@ int usb_midi_send(const u8 *data, u32 bytes)   /* all or nothing; 0 when not con
     int result = 0;
     if (!tud_mounted()) return 0;
     gie = irq_global_disable();
+    if (tx_head == tx_tail) tx_moved_ms = timer_ms();
     if (TX_RING - (tx_head - tx_tail) >= bytes) {
         for (i = 0; i < bytes; i++) tx_ring[(tx_head + i) % TX_RING] = data[i];
         tx_head += bytes;
@@ -98,6 +106,7 @@ int usb_poll(u32 ms)                           /* main loop: returns the MIDI by
         if (count > TX_RING - at) count = TX_RING - at;
         sent = tud_midi_stream_write(0, &tx_ring[at], count);
         tx_tail += sent;
+        if (sent) tx_moved_ms = timer_ms();
         if (sent < count) break;               /* TinyUSB's buffer is full: the rest next pass */
     }
     if (!tud_mounted()) tx_tail = tx_head;     /* the host went: drop what was waiting */

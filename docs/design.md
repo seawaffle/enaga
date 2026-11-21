@@ -407,8 +407,6 @@ simulation (a fresh agent with only the downloads); a person doing it is still t
 - STEP 4 crash (unit session 5): pressing STEP 4 on CHECK's MIDI page once crashed, with USB connected to a
   Windows PC; not repeated on the unit, nor on the emulator (60 s of STEP 4's clock with a host that never reads,
   then 40 random STEP 1-5 presses). The reason was not noted. If it recurs, photograph STATUS before switching off.
-- MIDI out is all or nothing across DIN and USB (`midi_out_bytes`): a full USB queue (2 KiB; a host that stops
-  reading) would also stop DIN output. Not seen; sending to each port on its own would remove the coupling.
 - Input routes HI-Z, LINE ST and LINE MONO are unconfirmed on the unit: session 5's source was too quiet (only DYN
   MIC at HIGH moved, to 2-3 per mille). Retest with a line-level signal.
 - Lofi-12 XT and CyDrums: the build makes their update files (docs/hardware.md "Installing and recovery"), but
@@ -1601,3 +1599,14 @@ SDK template built from the release downloads). Checklist steps:
 - One crash on CHECK's MIDI page after STEP 4, not reproduced (open items). An "SD issue" remembered on the status
   page (not photographed) was probably the
   `W1` / `W7` write probe that `ENAGA/SDTEST.BIN` on the staged card starts at every boot.
+
+### MIDI out: a stalled USB host no longer holds up DIN (2026-11-21)
+
+`midi_out_bytes` is all or nothing across the ports, so a sender can wait for room. With a host that had stopped
+reading USB (Windows lists the device but no program has the port open), USB's 2 KiB queue filled and then every
+message was refused for DIN too: a new test (`test_usb`, a host that stops reading) sent twelve 301-byte messages
+and DIN got 8. Sending to each port separately would have broken that waiting: USB taking a message DIN had no room
+for would return true and lose it on DIN. Instead USB counts as stalled after 100 ms with bytes queued and none
+taken (`usb_midi_stalled`), and a stalled USB no longer holds a message back: it gets what fits and drops the rest
+(`usb_tx_lost`). DIN always drains (31,250 baud), so its queue being full is only ever a wait. When the host reads
+again, USB carries on.

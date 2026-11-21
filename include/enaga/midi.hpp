@@ -1,7 +1,7 @@
 // MIDI out, and the user's MIDI channel. MIDI in arrives at App::on_midi and App::on_midi_sysex (<enaga/app.hpp>).
 //
-// Each call queues one whole message for the MIDI OUT jack (and USB MIDI once it exists), or nothing if the queue
-// is full (false): a message is never cut. Real-time messages (clock, start, stop, continue) go ahead of anything
+// Each call queues one whole message for the ports MIDI OUT names (the jack, USB), or nothing if a queue is full
+// (false): a message is never cut. A computer that has stopped reading USB is skipped rather than waited for. Real-time messages (clock, start, stop, continue) go ahead of anything
 // queued. Main or audio context. Channels are 0-15; data bytes are masked to 7 bits.
 #pragma once
 

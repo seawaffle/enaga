@@ -65,7 +65,7 @@ void clock_app_stopped(void);
 extern int clock_source_setting, clock_out_setting, sync_out_setting;
 int  midi_poll(u32 ms);
 void midi_usb_byte(u8 byte, u32 ms);          /* usb.c: one received USB MIDI byte */
-int  midi_out_bytes(u32 ports, const u8 *data, u32 bytes);   /* 0 = the MIDI OUT routing; all or nothing */
+int  midi_out_bytes(u32 ports, const u8 *data, u32 bytes);   /* 0 = the MIDI OUT routing; all or nothing, but a stalled USB host is skipped */
 extern int midi_in_setting, midi_out_setting; /* enaga_midi_port bits */
 /* usb.c */
 void usb_init(void);
@@ -73,6 +73,7 @@ void usb_isr(void);
 int  usb_poll(u32 ms);                        /* main loop: returns the MIDI bytes received */
 int  usb_configured(void);                    /* a host has configured the device */
 u32  usb_midi_tx_free(void);
+int  usb_midi_stalled(void);                   /* the host has stopped taking MIDI out */
 int  usb_midi_send(const u8 *data, u32 bytes);
 #define IRQ_USB0 10                           /* CPU interrupt 10 <- event 19, USB0_INT */                       /* main loop: parse MIDI input; returns the bytes taken */
 int  midi_send(u32 ports, const u8 *data, u32 bytes);   /* an app's midi_send (enaga_host_t) */

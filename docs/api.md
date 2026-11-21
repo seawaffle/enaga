@@ -489,7 +489,9 @@ was cut short by another status byte. The data is valid only during the call.
 ### Sending: `enaga::midi::`
 
 Each call queues one whole message for the ports MIDI OUT names and returns `true`. If a queue (2 KiB each) is
-full it queues nothing and returns `false`: a message is never cut. With no computer connected, USB is skipped.
+full it queues nothing and returns `false`: a message is never cut. With no computer connected, USB is skipped,
+and so is a computer that has stopped taking what the unit sends (no program has the port open, say): after
+100 ms without progress USB gets only what fits, so it never holds up the MIDI OUT jack.
 USB MIDI out leaves within about a millisecond (a main-loop pass and a USB frame). Real-time messages (clock, start, continue, stop) go ahead
 of whatever is queued, behind at most the byte already being sent (0.32 ms). Main or audio context. Channels are
 0-15 and data bytes are masked to 7 bits.

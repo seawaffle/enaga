@@ -150,14 +150,16 @@ void midi_usb_byte(u8 b, u32 ms)              /* usb.c, main loop: one received 
     parse(&usb, ENAGA_MIDI_USB, b, ms);
 }
 
-/* Bytes out to `ports` (0 = the MIDI OUT setting): all or nothing across the ports asked for. A single real-time
- * byte goes ahead of the DIN queue. Main or interrupt context. */
+/* Bytes out to `ports` (0 = the MIDI OUT setting): all or nothing across the ports asked for, so a full queue holds
+ * the message back for every port and the sender can wait for room. USB counts only while the host is taking its
+ * bytes: one that has stopped (usb_midi_stalled) would otherwise hold up DIN for good, so it gets what fits and
+ * drops the rest (usb_tx_lost). A single real-time byte goes ahead of the DIN queue. Main or interrupt context. */
 int midi_out_bytes(u32 ports, const u8 *data, u32 bytes)
 {
     int realtime = bytes == 1 && data[0] >= 0xF8;
     if (ports == 0) ports = (u32)midi_out_setting;
     if ((ports & ENAGA_MIDI_DIN) && !realtime && uart0_tx_free() < bytes) return -1;
-    if ((ports & ENAGA_MIDI_USB) && usb_configured() && usb_midi_tx_free() < bytes) return -1;
+    if ((ports & ENAGA_MIDI_USB) && usb_configured() && !usb_midi_stalled() && usb_midi_tx_free() < bytes) return -1;
     if (ports & ENAGA_MIDI_DIN) {
         if (realtime ? uart0_send_realtime(data[0]) < 0 : uart0_send(data, bytes) < 0) return -1;
     }
