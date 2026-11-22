@@ -18,11 +18,13 @@
 // between body_top and body_bottom), Notice shows a message for a moment, and bar and meter draw levels.
 //
 // Widgets keep no pointers to the app beyond what it hands them (item names, parameters, values), which must
-// outlive the widget. Main context only. Text is upper case: the font has A-Z, 0-9, space and ! # + - . / : = ? % >.
+// outlive the widget. Main context only. Text is upper case: the font has A-Z (lower case draws as upper case), 0-9,
+// space and ! # + - . / : = ? % > < ( ) , _ ' * [ ].
 #pragma once
 
 #include <enaga/app.hpp>
 #include <enaga/dsp/math.h>
+#include <enaga/files.hpp>
 
 #include <cstdint>
 
@@ -70,10 +72,10 @@ inline void text_right(Canvas &canvas, int y, const char *text, uint8_t grey = 1
 
 // ---- Text -------------------------------------------------------------------------------------------------------
 
-// Whether Enaga's font has a character; it draws any other as '?'.
+// Whether Enaga's font has a character (lower case letters draw as upper case); it draws any other as '?'.
 inline bool drawable(char c) {
-    if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) return true;
-    for (const char *p = " !#+-./:=?%>"; *p; p++) if (*p == c) return true;
+    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) return true;
+    for (const char *p = " !#+-./:=?%><(),_'*[]"; *p; p++) if (*p == c) return true;
     return false;
 }
 
@@ -131,7 +133,7 @@ public:
         return number(octave);
     }
     // Text from outside the app, a file name, say, as the font can draw it: lower case raised, anything else the
-    // font lacks shown as '-', at most `max` characters. "kick_01.wav" becomes "KICK-01.WAV".
+    // font lacks shown as '-', at most `max` characters. "kick (1)é.wav" becomes "KICK (1)--.WAV" (é is two bytes).
     Line &shown(const char *text, int max = capacity) {
         for (int i = 0; text && text[i] && i < max; i++) {
             char c = text[i] >= 'a' && text[i] <= 'z' ? char(text[i] - 'a' + 'A') : text[i];
@@ -331,20 +333,173 @@ private:
     int count_ = 0, cursor_ = 0;
 };
 
+// ---- Grid -------------------------------------------------------------------------------------------------------
+
+// Cells in rows and columns, such as a bank of patterns or sound slots: a List in two dimensions. The arrow keys
+// move the cursor (stopping at the edges), VALUE moves it through the cells in order; OK gives Action::chosen and
+// CLR Action::back. A cell can be lit, drawn filled: a slot that holds something, a pattern that is playing. Labels
+// are fixed strings or computed, as in List; as many characters show as fit the cell. Up to max_cells cells.
+class Grid {
+public:
+    static constexpr int max_cells = 64;
+    static constexpr int cell_height = 12;
+    using Label = void (*)(int index, char *out, int size, void *user);
+
+    void set_title(const char *title) { title_ = title; }
+    void set_items(const char *const *names, int count, int columns) {
+        names_ = names; label_ = nullptr; set_shape(count, columns);
+    }
+    void set_items(int count, int columns, Label label, void *user) {
+        names_ = nullptr; label_ = label; user_ = user; set_shape(count, columns);
+    }
+
+    int count() const { return count_; }
+    int columns() const { return columns_; }
+    int cursor() const { return cursor_; }
+    void select(int cell) { cursor_ = cell >= count_ ? count_ - 1 : cell < 0 ? 0 : cell; }
+    void light(int cell, bool on) {
+        if (cell < 0 || cell >= max_cells) return;
+        uint64_t bit = uint64_t(1) << cell;
+        lit_ = on ? lit_ | bit : lit_ & ~bit;
+    }
+    bool lit(int cell) const { return cell >= 0 && cell < max_cells && (lit_ >> cell & 1); }
+    void clear_lights() { lit_ = 0; }
+
+    Action key(int key, bool down) {
+        if (!down || !count_) return Action::none;
+        int column = cursor_ % columns_;
+        switch (key) {
+        case ENAGA_KEY_LEFT: return column > 0 ? to(cursor_ - 1) : Action::none;
+        case ENAGA_KEY_RIGHT: return column < columns_ - 1 ? to(cursor_ + 1) : Action::none;
+        case ENAGA_KEY_UP: return to(cursor_ - columns_);
+        case ENAGA_KEY_DOWN: return to(cursor_ + columns_);
+        case ENAGA_KEY_OK: return Action::chosen;
+        case ENAGA_KEY_CLR: return Action::back;
+        default: return Action::none;
+        }
+    }
+    Action encoder(int encoder, int delta) {
+        if (encoder != 4 || !count_) return Action::none;
+        int before = cursor_;
+        select(cursor_ + delta);
+        return cursor_ != before ? Action::moved : Action::none;
+    }
+
+    void name(int index, char *out, int size) const {
+        if (label_) { out[0] = 0; label_(index, out, size, user_); }
+        else detail::copy(out, size, names_ ? names_[index] : "");
+    }
+
+    // The title, then as many rows of cells as fit, scrolled to keep the cursor's row in view. Each cell is its
+    // share of the width: lit cells filled, the cursor's framed.
+    void draw(Canvas &canvas, int top = 0, int bottom = ENAGA_SCREEN_H) const {
+        int y = top;
+        if (title_) { canvas.text(0, y, title_, 15); y += 12; }
+        if (!count_) { canvas.text(9, y + 2, "EMPTY", 6); return; }
+        int rows = (bottom - y) / cell_height, total = (count_ + columns_ - 1) / columns_;
+        if (rows < 1) return;
+        int row = cursor_ / columns_, first = row < rows ? 0 : row - rows + 1;
+        if (first > total - rows) first = total - rows > 0 ? total - rows : 0;
+        int w = screen_width / columns_, chars = (w - 4) / char_width;
+        char text[line_chars + 1];
+        for (int r = 0; r < rows && first + r < total; r++) {
+            for (int c = 0; c < columns_; c++) {
+                int cell = (first + r) * columns_ + c;
+                if (cell >= count_) break;
+                int x = c * w, cy = y + r * cell_height;
+                bool on = lit(cell), here = cell == cursor_;
+                canvas.rect(x + 1, cy, w - 2, cell_height - 1, on ? 9 : 2);
+                if (here) {
+                    canvas.rect(x, cy - 1, w, 1, 15); canvas.rect(x, cy + cell_height - 1, w, 1, 15);
+                    canvas.rect(x, cy - 1, 1, cell_height + 1, 15); canvas.rect(x + w - 1, cy - 1, 1, cell_height + 1, 15);
+                }
+                name(cell, text, chars + 1 < int(sizeof text) ? chars + 1 : int(sizeof text));
+                canvas.text(x + 2, cy + 2, text, on ? 0 : here ? 15 : 10);
+            }
+        }
+        if (first > 0) canvas.rect(screen_width - 2, y, 2, 3, 8);
+        if (first + rows < total) canvas.rect(screen_width - 2, y + rows * cell_height - 4, 2, 3, 8);
+    }
+
+private:
+    void set_shape(int count, int columns) {
+        count_ = count < 0 ? 0 : count > max_cells ? max_cells : count;
+        columns_ = columns < 1 ? 1 : columns;
+        select(cursor_);
+    }
+    Action to(int cell) {
+        if (cell < 0 || cell >= count_) return Action::none;
+        cursor_ = cell;
+        return Action::moved;
+    }
+    const char *title_ = nullptr;
+    const char *const *names_ = nullptr;
+    Label label_ = nullptr;
+    void *user_ = nullptr;
+    int count_ = 0, columns_ = 1, cursor_ = 0;
+    uint64_t lit_ = 0;
+};
+
+// ---- PadMap -----------------------------------------------------------------------------------------------------
+
+// The fifteen pads as they lie on the panel, for a screen that says what each pad does: two staggered rows like a
+// piano's keys, eight below (the even pads 0-14, left to right) and seven above (the odd pads 1-13), each upper pad
+// over the gap between two lower ones (docs/hardware.md "Panel MCU"). Each pad has a short label (two characters
+// show), a level of light (0 dark to 15) and one pad can be marked as selected. The app sets them, from on_pad_press
+// for instance: the map takes no events.
+class PadMap {
+public:
+    static constexpr int pads = 15;
+    static constexpr int cell_width = 16, cell_height = 14;
+    static constexpr int height = 2 * cell_height;
+
+    static bool upper(int pad) { return pad % 2 == 1; }
+    static int x(int pad) { return cell_width * (pad / 2) + (upper(pad) ? cell_width / 2 : 0); }
+
+    void label(int pad, const char *text) { if (valid(pad)) detail::copy(labels_[pad], 3, text); }
+    void light(int pad, uint8_t grey) { if (valid(pad)) light_[pad] = grey > 15 ? 15 : grey; }
+    void select(int pad) { selected_ = valid(pad) ? pad : -1; }
+    int selected() const { return selected_; }
+
+    // The upper row at `top`, the lower one under it; `height` pixels in all.
+    void draw(Canvas &canvas, int top) const {
+        for (int pad = 0; pad < pads; pad++) {
+            int px = x(pad), py = top + (upper(pad) ? 0 : cell_height);
+            uint8_t fill = light_[pad] < 2 ? 2 : light_[pad];
+            canvas.rect(px + 1, py + 1, cell_width - 2, cell_height - 2, fill);
+            if (pad == selected_) {
+                canvas.rect(px, py, cell_width, 1, 15); canvas.rect(px, py + cell_height - 1, cell_width, 1, 15);
+                canvas.rect(px, py, 1, cell_height, 15); canvas.rect(px + cell_width - 1, py, 1, cell_height, 15);
+            }
+            canvas.text(px + 2, py + 4, labels_[pad], fill >= 8 ? 0 : 15);
+        }
+    }
+
+private:
+    static bool valid(int pad) { return pad >= 0 && pad < pads; }
+    char labels_[pads][3] = {};
+    uint8_t light_[pads] = {};
+    int selected_ = -1;
+};
+
 // ---- ParamPage --------------------------------------------------------------------------------------------------
 
-// One parameter: a name (up to 12 characters show), a range, the value a knob push returns to, and how to show the
-// value: names for each step from min (`labels`), a function, or the number with an optional unit.
+// One parameter: a name (up to 12 characters show), a range, the value a knob push returns to, how to show the
+// value (names for each step from min, `labels`; a function; or the number with an optional unit) and how far one
+// detent moves it. Designated initialisers name the ones wanted: {.name = "TEMPO", .min = 20, .max = 300,
+// .initial = 120, .unit = "BPM"}.
 struct Param {
     const char *name;
     int min, max, initial;
     const char *const *labels = nullptr;      // labels[value - min]
     void (*format)(int value, char *out) = nullptr;   // out holds at least 12 characters
     const char *unit = nullptr;               // after the number: "MS", "%"
+    int step = 1;                             // per detent, before acceleration
 };
 
 // Parameters on the knobs: the page's parameters in groups of four, in order, A-D on knobs A-D. The selection
-// buttons flip between groups; turning a knob changes its parameter (clamped); pushing it returns the parameter to
+// buttons flip between groups; turning a knob changes its parameter by its step a detent (clamped), faster when
+// the knob turns quickly and the range is wide (more than wide_steps steps); pushing it returns the parameter to
 // its initial value. Values live in the app's array, one per parameter, and the page only changes them.
 class ParamPage {
 public:
@@ -353,6 +508,16 @@ public:
     void set(const char *title, const Param *params, int count, int *values) {
         title_ = title; params_ = params; count_ = count; values_ = values; group_ = 0; changed_ = -1;
     }
+    // Other values for the same parameters (another track's, say), keeping the group shown.
+    void set_values(int *values) { values_ = values; }
+    // Turning quickly moves a wide parameter further a detent: on by default.
+    void set_acceleration(bool on) { accelerate_ = on; }
+    static constexpr int wide_steps = 100;
+    // A name for each group (groups() of them), shown as tabs on the title line in place of "1/3".
+    void set_group_names(const char *const *names) { group_names_ = names; }
+    // Columns: the four parameters side by side, each with its name, value and bar, rather than in rows. Names and
+    // values then show five characters each.
+    void set_columns(bool columns) { columns_ = columns; }
 
     int groups() const { return (count_ + 3) / 4; }
     int group() const { return group_; }
@@ -386,8 +551,11 @@ public:
 
     Action encoder(int encoder, int delta) {
         int param = group_ * 4 + encoder;
-        if (encoder > 3 || param >= count_) return Action::none;   // VALUE and knobs past the group's end
-        return set_value(param, values_[param] + delta) ? Action::changed : Action::none;
+        if (encoder > 3 || param >= count_ || !delta) return Action::none;   // VALUE and knobs past the group's end
+        const Param &p = params_[param];
+        int step = p.step > 0 ? p.step : 1;
+        return set_value(param, values_[param] + delta * step * speed(param, delta, (p.max - p.min) / step))
+            ? Action::changed : Action::none;
     }
 
     // The value as shown: a label, the format function's text, or the number and unit.
@@ -402,19 +570,15 @@ public:
         }
     }
 
-    // The title and the group's place ("FILTER 2/3"), then a row per knob: its letter, the name with a bar under it
-    // for the value's place in its range, and the value at the right (dimmer when it is not the initial value).
+    // The title and the group's place ("FILTER 2/3", or the group names as tabs, the current one lit), then a row
+    // per knob: its letter, the name with a bar under it for the value's place in its range, and the value at the
+    // right (brighter when it is not the initial value). In columns, the same four side by side.
     void draw(Canvas &canvas, int top = 0) const {
         if (!count_) return;
         char text[line_chars + 1];
         canvas.text(0, top, title_ ? title_ : "", 15);
-        if (groups() > 1) {
-            detail::number(text, group_ + 1);
-            int n = detail::length(text);
-            text[n++] = '/';
-            detail::number(text + n, groups());
-            detail::right(canvas, top, text, 6);
-        }
+        if (groups() > 1) draw_groups(canvas, top);
+        if (columns_) { draw_columns(canvas, top); return; }
         for (int knob = 0; knob < 4; knob++) {
             int param = group_ * 4 + knob;
             if (param >= count_) break;
@@ -431,10 +595,63 @@ public:
     }
 
 private:
+    // How many detents one counts for: 1, or more when the same parameter turns the same way again soon after (a
+    // quick spin) and it has more than wide_steps steps. Times between detents: under 30 ms 8, under 60 ms 3.
+    int speed(int param, int delta, int steps) {
+        uint32_t now = enaga::ms();
+        bool again = param == last_param_ && (delta > 0) == (last_delta_ > 0);
+        uint32_t gap = now - last_ms_;
+        last_param_ = param; last_delta_ = delta; last_ms_ = now;
+        if (!accelerate_ || !again || steps <= wide_steps) return 1;
+        return gap < 30 ? 8 : gap < 60 ? 3 : 1;
+    }
+
+    // Tabs when the groups have names and they fit beside the title, else "2/3".
+    void draw_groups(Canvas &canvas, int top) const {
+        int chars = 0;
+        if (group_names_) for (int g = 0; g < groups(); g++) chars += detail::length(group_names_[g]) + 1;
+        if (group_names_ && detail::length(title_) + chars <= line_chars) {
+            int x = screen_width - (chars - 1) * char_width;
+            for (int g = 0; g < groups(); g++) {
+                int w = detail::length(group_names_[g]) * char_width;
+                if (g == group_) canvas.rect(x - 1, top - 1, w + 1, 9, 4);
+                canvas.text(x, top, group_names_[g], g == group_ ? 15 : 6);
+                x += w + char_width;
+            }
+            return;
+        }
+        Line place;
+        place.number(group_ + 1).add('/').number(groups());
+        detail::right(canvas, top, place, 6);
+    }
+
+    void draw_columns(Canvas &canvas, int top) const {
+        constexpr int w = screen_width / 4;
+        char text[line_chars + 1];
+        for (int knob = 0; knob < 4; knob++) {
+            int param = group_ * 4 + knob;
+            if (param >= count_) break;
+            const Param &p = params_[param];
+            int x = knob * w, y = top + 14, v = values_[param];
+            char letter[2] = {char('A' + knob), 0};
+            canvas.text(x, y, letter, 6);
+            detail::copy(text, 6, p.name);
+            canvas.text(x, y + 11, text, 12);
+            format(param, text);
+            text[5] = 0;
+            canvas.text(x, y + 24, text, v == p.initial ? 11 : 15);
+            bar(canvas, x, y + 34, w - 4, v, p.min, p.max, 2);
+        }
+    }
+
     const char *title_ = nullptr;
+    const char *const *group_names_ = nullptr;
     const Param *params_ = nullptr;
     int count_ = 0, group_ = 0, changed_ = -1;
     int *values_ = nullptr;
+    bool columns_ = false, accelerate_ = true;
+    int last_param_ = -1, last_delta_ = 0;
+    uint32_t last_ms_ = 0;
 };
 
 // ---- Dialog -----------------------------------------------------------------------------------------------------
@@ -579,6 +796,150 @@ private:
     char text_[max_chars + 1] = {}, result_[max_chars + 1] = {};
     int chars_ = max_chars, cursor_ = 0;
     bool open_ = false;
+};
+
+// ---- FileBrowser ------------------------------------------------------------------------------------------------
+
+// Choosing a file on the card: a List of a folder's entries, folders first (shown ending in '/') and then files,
+// each sorted by name. OK on a folder goes into it and CLR goes back up; OK on a file gives Action::chosen, and
+// path() is then its full path. CLR in the starting folder gives Action::back. An extension (".WAV") shows only
+// those files, in any case. Listing runs in the background through the file service: draw() says LOADING until it
+// is done, and an error or an empty folder says so too. Up to max_entries entries a folder; names longer than
+// name_bytes - 1 bytes are left out (they could not be opened from here). Main context only; keep the browser for
+// as long as a listing may still be running (a member of the app).
+class FileBrowser {
+public:
+    static constexpr int max_entries = 128, name_bytes = 64, path_bytes = 256;
+
+    // Starts at `folder` ("/SAMPLES"), which is also as far up as CLR goes.
+    void open(const char *folder, const char *extension = nullptr) {
+        detail::copy(root_, path_bytes, folder);
+        extension_ = extension;
+        enter(folder);
+    }
+
+    bool loading() const { return pending_ > 0; }
+    int32_t error() const { return error_; }           // the listing's error, or ENAGA_FILE_OK
+    const char *folder() const { return folder_; }
+    const char *path() const { return path_; }         // the chosen file, after Action::chosen
+    int count() const { return count_; }
+    int cursor() const { return list_.cursor(); }
+    bool is_folder(int index) const { return index >= 0 && index < count_ && entries_[order_[index]].folder; }
+    const char *name(int index) const { return index >= 0 && index < count_ ? entries_[order_[index]].name : ""; }
+
+    Action key(int key, bool down) {
+        if (!down) return Action::none;
+        if (key == ENAGA_KEY_CLR) {
+            if (same(folder_, root_)) return Action::back;
+            up();
+            return Action::moved;
+        }
+        if (key == ENAGA_KEY_OK) {
+            if (loading() || !count_) return Action::none;
+            int at = list_.cursor();
+            if (!join(path_, folder_, name(at))) return Action::none;
+            if (is_folder(at)) { char next[path_bytes]; detail::copy(next, path_bytes, path_); enter(next); return Action::moved; }
+            return Action::chosen;
+        }
+        return loading() ? Action::none : list_.key(key, down);
+    }
+    Action encoder(int encoder, int delta) { return loading() ? Action::none : list_.encoder(encoder, delta); }
+
+    // The folder (its end, if long) as the title, then its entries.
+    void draw(Canvas &canvas, int top = 0, int bottom = ENAGA_SCREEN_H) const {
+        Line title;
+        int n = detail::length(folder_);
+        title.shown(n > line_chars ? folder_ + n - line_chars : folder_);
+        canvas.text(0, top, title, 15);
+        if (loading()) { canvas.text(9, top + 14, "LOADING", 6); return; }
+        if (error_ != ENAGA_FILE_OK) { canvas.text(9, top + 14, enaga::files::error_name(error_), 6); return; }
+        list_.draw(canvas, top + 12, bottom);
+    }
+
+private:
+    struct Entry { char name[name_bytes]; bool folder; };
+
+    static bool same(const char *a, const char *b) {
+        while (*a && *a == *b) { a++; b++; }
+        return *a == *b;
+    }
+    static char upper(char c) { return c >= 'a' && c <= 'z' ? char(c - 'a' + 'A') : c; }
+    static bool before(const Entry &a, const Entry &b) {   // folders first, then by name, ignoring case
+        if (a.folder != b.folder) return a.folder;
+        for (int i = 0;; i++) {
+            char x = upper(a.name[i]), y = upper(b.name[i]);
+            if (x != y || !x) return x < y;
+        }
+    }
+    bool wanted(const char *name) const {
+        if (!extension_) return true;
+        int n = detail::length(name), e = detail::length(extension_);
+        if (n < e) return false;
+        for (int i = 0; i < e; i++) if (upper(name[n - e + i]) != upper(extension_[i])) return false;
+        return true;
+    }
+    static bool join(char *out, const char *folder, const char *name) {
+        int n = detail::length(folder), m = detail::length(name), slash = n > 0 && folder[n - 1] == '/' ? 0 : 1;
+        if (n + slash + m >= path_bytes) return false;
+        detail::copy(out, path_bytes, folder);
+        if (slash) out[n] = '/';
+        detail::copy(out + n + slash, path_bytes - n - slash, name);
+        return true;
+    }
+
+    void enter(const char *folder) {
+        detail::copy(folder_, path_bytes, folder);
+        count_ = 0;
+        error_ = ENAGA_FILE_OK;
+        list_.set_items(0, &label, this);
+        stale_ = pending_;                       // entries of a listing still running are not this folder's
+        int32_t queued = enaga::files::list<&FileBrowser::entry, &FileBrowser::done>(folder_, this);
+        if (queued < 0) error_ = queued;
+        else pending_++;
+    }
+    void up() {
+        int n = detail::length(folder_);
+        while (n > 1 && folder_[n - 1] == '/') n--;
+        while (n > 1 && folder_[n - 1] != '/') n--;
+        if (n > 1) n--;                          // "/SAMPLES/KICKS" -> "/SAMPLES", "/SAMPLES" -> "/"
+        char parent[path_bytes];
+        detail::copy(parent, n + 1, folder_);
+        enter(parent);
+    }
+
+    void entry(const enaga::files::Info &info) {
+        if (stale_ > 0 || count_ >= max_entries) return;
+        bool folder = info.flags & ENAGA_FILE_FOLDER;
+        if (detail::length(info.name) >= name_bytes || (!folder && !wanted(info.name))) return;
+        Entry &e = entries_[count_];
+        detail::copy(e.name, name_bytes, info.name);
+        e.folder = folder;
+        int at = count_++;                       // insertion into the sorted order
+        while (at > 0 && before(e, entries_[order_[at - 1]])) { order_[at] = order_[at - 1]; at--; }
+        order_[at] = uint8_t(count_ - 1);
+    }
+    void done(int32_t result) {
+        if (pending_ > 0) pending_--;
+        if (stale_ > 0) { stale_--; return; }
+        if (result < 0) error_ = result;
+        list_.set_items(count_, &label, this);
+        list_.select(0);
+    }
+    static void label(int index, char *out, int size, void *user) {
+        const FileBrowser *self = static_cast<const FileBrowser *>(user);
+        Line text;
+        text.shown(self->name(index));
+        if (self->is_folder(index)) text.add('/');
+        detail::copy(out, size, text);
+    }
+
+    Entry entries_[max_entries];
+    uint8_t order_[max_entries] = {};
+    char root_[path_bytes] = {}, folder_[path_bytes] = {}, path_[path_bytes] = {};
+    const char *extension_ = nullptr;
+    List list_;
+    int count_ = 0, pending_ = 0, stale_ = 0;
+    int32_t error_ = ENAGA_FILE_OK;
 };
 
 }  // namespace enaga::ui

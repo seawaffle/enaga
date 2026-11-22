@@ -1,7 +1,9 @@
 // E0 check app: exercises the C++ features an Enaga app relies on, and logs one line per result so a test
 // can compare the whole log. Static constructors, virtual dispatch, pure virtuals, new/delete, function-local
-// statics, templates, freestanding standard headers, 64-bit and float arithmetic (libgcc helpers).
+// statics, templates, freestanding standard headers, 64-bit and float arithmetic (libgcc's helpers, and the
+// runtime's own 64-bit division), and the string functions of <enaga/string.h>.
 #include <enaga/app.hpp>
+#include <enaga/string.h>
 
 #include <algorithm>
 #include <array>
@@ -102,9 +104,20 @@ public:
         line("optional", index.value_or(-1));           // 5
         line("max", *std::max_element(values.begin(), values.end()));
 
-        int64_t big = int64_t(123456789) * 1000;
-        line("int64 div", big / 977);                   // 126363141
-        line("int64 mod", big % 977);                   // 343
+        volatile int64_t big = int64_t(123456789) * 1000, divisor = 977, negative = -big;   // volatile: at run time
+        line("int64 div", big / divisor);               // 126363141
+        line("int64 mod", big % divisor);               // 343
+        line("int64 negative div", negative / divisor); // -126363141, rounded towards zero
+        line("int64 negative mod", negative % divisor); // -343, the dividend's sign
+        volatile uint64_t huge = 0xFEDCBA9876543210ull, by = 0x123456789ull;
+        line("uint64 div", int64_t(huge / by));         // 3740085487
+        line("uint64 mod", int64_t(huge % by));         // 1490061265
+        const char *name = "SAMPLES/KICK.WAV";
+        line("strcmp", strcmp("ABC", "ABD") < 0 && strcmp("ABC", "ABC") == 0 && strcmp("B", "A") > 0);
+        line("strncmp", strncmp("KICK1", "KICK2", 4) == 0 && strncmp("A", "AB", 5) < 0);
+        line("strchr", strchr(name, '/') - name);       // 7
+        line("strrchr", strrchr(name, '.') - name);     // 12
+        line("strchr end", strchr(name, 0) - name == 16 && !strchr(name, 'Z'));
         volatile float x = 2.0f, y = 3.0f;              // volatile: force the runtime path
         float ratio = x / y;
         line("float milli", int64_t(ratio * 1000.0f));  // 666

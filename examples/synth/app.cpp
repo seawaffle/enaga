@@ -6,17 +6,23 @@
 // matrix; chorus, a stereo delay and a reverb. POLY, MONO or LEGATO, with glide; up to four unison voices a note.
 //
 // Playing: the pads are a keyboard (the lower row the white keys C to C, the upper row the black ones; or all
-// fifteen chromatic), velocity from the pad and pressure as a modulation source. STEP 1-16 play the chromatic
+// fifteen chromatic), velocity from the pad and its pressure (Enaga's aftertouch) as a modulation source. STEP 1-16 play the chromatic
 // notes from the same C at a fixed velocity. The octave buttons shift both by an octave.
 //
 // Editing: F2-F8 choose a page (OSC, FILTER, ENV, LFO, MOD, FX, VOICE). A page holds one or more groups of up to
 // four parameters, turned with knobs A-D; the selection buttons under the screen flip between the groups. Pushing
 // a knob puts its parameter back to the patch's value. F1 is the function button: F1 + F2 opens PATCH, where
-// VALUE chooses a patch, OK loads it and F1 + OK saves the sound into the chosen user slot (U1-U16, after the
-// factory patches). CLR silences every note. The sound when the app stops (switching off included) is saved too,
-// and is where it starts next time. Patches are files in the app's data folder (patches.hpp).
+// VALUE or UP / DOWN choose a patch, OK loads it and F1 + OK saves the sound into the chosen user slot (U1-U16,
+// after the factory patches). CLR silences every note. The sound when the app stops (switching off included) is
+// saved too, and is where it starts next time. Patches are files in the app's data folder (patches.hpp).
+//
+// The screen uses Enaga's UI toolkit (<enaga/ui.hpp>): the status line, a List for the patches, bars, a Notice
+// for messages and Line for text. The parameter pages are the synth's own, drawn like a ParamPage: their groups
+// hold two to four parameters each, picked from one table, and the values live in the engine, where the audio
+// context reads them.
 #include <enaga/app.hpp>
 #include <enaga/files.hpp>
+#include <enaga/ui.hpp>
 
 #include "engine.hpp"
 #include "patches.hpp"
@@ -24,6 +30,8 @@
 namespace {
 
 using namespace synth;
+using enaga::ui::Action;
+using enaga::ui::Line;
 
 struct Group {
     const char *title;
@@ -92,6 +100,8 @@ public:
     bool init() override {
         engine_.init(float(ENAGA_SAMPLE_RATE));
         scan_user();
+        patches_.set_title("PATCH");
+        patches_.set_items(entries(), &patch_label, this);
         if (!restore_last()) load_patch(0);
         show_page_leds();
         show_pad_leds();
@@ -109,8 +119,6 @@ public:
     }
 
     void audio(const float *, float *out, uint32_t frames) override { engine_.render(out, frames); }
-
-    void update(uint32_t ms) override { now_ = ms; }
 
     void on_card(bool usable) override {
         scan_user();
@@ -134,12 +142,12 @@ public:
         }
         if (!down) return;
         if (function_ && key == ENAGA_KEY_OK && page_ == kPatchPage) {
-            save_patch(choice_);
+            save_patch(patches_.cursor());
             return;
         }
         if (function_ && key == kPatchKey) {
             page_ = kPatchPage;
-            choice_ = patch_;
+            patches_.select(patch_);
             show_page_leds();
             return;
         }
@@ -155,6 +163,10 @@ public:
             if (knob < group.count) set(group.params[knob], patch_values_[group.params[knob]]);
             return;
         }
+        if (page_ == kPatchPage && key != ENAGA_KEY_CLR && patches_.key(key, down) == Action::chosen) {
+            load_patch(patches_.cursor());       // OK
+            return;
+        }
         switch (key) {
         case ENAGA_KEY_SELECT_LEFT:
         case ENAGA_KEY_SELECT_RIGHT:
@@ -163,7 +175,6 @@ public:
                 group_[page_] = (group_[page_] + (key == ENAGA_KEY_SELECT_RIGHT ? 1 : count - 1)) % count;
             }
             break;
-        case ENAGA_KEY_OK: if (page_ == kPatchPage) load_patch(choice_); break;
         case ENAGA_KEY_OCTAVE_LEFT: if (octave_ > -3) octave_--; break;
         case ENAGA_KEY_OCTAVE_RIGHT: if (octave_ < 3) octave_++; break;
         case ENAGA_KEY_CLR: send(NoteEvent::all_off, 0, 0, 0); break;
@@ -173,7 +184,7 @@ public:
 
     void on_encoder(int encoder, int delta) override {
         if (page_ == kPatchPage) {
-            if (encoder == 4) choice_ = (choice_ + delta % entries() + entries()) % entries();
+            patches_.encoder(encoder, delta);
             return;
         }
         const Group &group = current_group();
@@ -186,7 +197,6 @@ public:
         if (semitone < 0) return;
         pad_note_[pad] = uint8_t(kBase + 12 * octave_ + semitone);
         pad_held_[pad] = true;
-        pad_pressure_[pad] = 0;
         send(NoteEvent::on, pad, pad_note_[pad], velocity);
         enaga::pad_led(pad, 0, 2 + unsigned(velocity) * 8 / 127, 0);
     }
@@ -198,36 +208,27 @@ public:
         show_pad_led(pad);
     }
 
-    void on_pad(int pad, unsigned reading) override {
-        if (!pad_held_[pad]) return;
-        // Pressure over the press threshold: 0 at 800 to 127 at 12,000 (provisional, like Enaga's thresholds).
-        int pressure = reading <= 800 ? 0 : reading >= 12000 ? 127 : int((reading - 800) * 127 / 11200);
-        if (pressure - pad_pressure_[pad] >= 2 || pad_pressure_[pad] - pressure >= 2) {
-            pad_pressure_[pad] = pressure;
-            send(NoteEvent::pressure, pad, pad_note_[pad], pressure);
-        }
+    // Enaga's aftertouch: 0-127 while a pad is held, from the pad's own resting reading after the hit.
+    void on_pad_pressure(int pad, int pressure) override {
+        if (pad_held_[pad]) send(NoteEvent::pressure, pad, pad_note_[pad], pressure);
     }
 
     void draw(enaga::Canvas &canvas) override {
-        char text[24];
         canvas.clear();
-        entry_name(patch_, text);
-        canvas.text(0, 0, text, 15);
-        text_number(text, "V", int(engine_.active_voices));
-        canvas.text(80, 0, text, 8);
-        text_number(text, "", int(enaga::audio_load() / 10));
-        append(text, "%");
-        canvas.text(128 - 6 * length(text), 0, text, 8);
-
-        canvas.rect(0, 10, 128, 1, 4);
-        if (page_ == kPatchPage) draw_patches(canvas);
-        else draw_group(canvas);
-        if (octave_) {
-            text_number(text, octave_ > 0 ? "OCT+" : "OCT", octave_);
-            canvas.text(0, 92, text, 8);
+        char name[name_size + 4];
+        entry_name(patch_, name);
+        Line state;                               // voices playing and the audio load
+        state.add('V').number(int(engine_.active_voices)).add("  ").number(int(enaga::audio_load() / 10)).add('%');
+        enaga::ui::status_line(canvas, name, state);
+        if (page_ == kPatchPage) {
+            patches_.draw(canvas, 14, 92);
+            enaga::ui::text_right(canvas, 14, "F1+OK SAVE", 6);
+        } else {
+            draw_group(canvas);
         }
-        if (int32_t(message_until_ - now_) > 0) canvas.text(128 - 6 * length(message_), 92, message_, 15);
+        if (octave_) canvas.text(0, 92, Line("OCT").add(octave_ > 0 ? "+" : "").number(octave_), 8);
         draw_scope(canvas, 98, 30);
+        notice_.draw(canvas, 92);                 // over the octave and the scope's top, for a moment
     }
 
 private:
@@ -240,75 +241,60 @@ private:
         if (param == voice_mode) send(NoteEvent::all_off, 0, 0, 0);
     }
 
+    // The group's title, and the page with the group's place in it ("OSC 1/3"); then a row per knob as a
+    // ParamPage draws it: the letter, the name with a bar for the value's place, the value at the right (bright
+    // when it differs from the patch).
     void draw_group(enaga::Canvas &canvas) {
-        char text[24];
         const Page &page = kPages[page_];
         const Group &group = current_group();
         canvas.text(0, 14, group.title, 15);
-        text[0] = 0;                          // the page, and the group's place in it: "OSC 1/3"
-        append(text, page.name);
-        if (page.count > 1) {
-            text_number(text + length(text), " ", group_[page_] + 1);
-            append(text, "/");
-            text_number(text + length(text), "", page.count);
-        }
-        if (page.count > 1 || !same(page.name, group.title)) canvas.text(128 - 6 * length(text), 14, text, 6);
+        Line place(page.name);
+        if (page.count > 1) place.add(' ').number(group_[page_] + 1).add('/').number(page.count);
+        if (page.count > 1 || !same(page.name, group.title)) enaga::ui::text_right(canvas, 14, place, 6);
         for (int row = 0; row < group.count; row++) {
             int y = 26 + 13 * row, param = group.params[row];
             const ParamInfo &p = info(param);
             int value = engine_.values[param];
-            char label[2] = {char('A' + row), 0};
-            canvas.text(0, y, label, 6);
+            char letter[2] = {char('A' + row), 0}, text[8];
+            canvas.text(0, y, letter, 6);
             canvas.text(9, y, p.name, 12);
             format(param, value, text);
-            canvas.text(128 - 6 * length(text), y, text, value == patch_values_[param] ? 15 : 11);
-            int width = 40 * (value - p.min) / (p.max - p.min);   // a bar under the name
-            canvas.rect(9, y + 8, 40, 1, 2);
-            canvas.rect(9, y + 8, width, 1, 9);
+            enaga::ui::text_right(canvas, y, text, value == patch_values_[param] ? 15 : 11);
+            enaga::ui::bar(canvas, 9, y + 8, 40, value, p.min, p.max);
         }
     }
 
-    // The patch list: the chosen entry highlighted, the loaded one marked with a block, empty user slots dim.
-    void draw_patches(enaga::Canvas &canvas) {
-        char text[24];
-        canvas.text(0, 14, "PATCH", 15);
-        canvas.text(128 - 6 * 10, 14, "F1+OK SAVE", 6);
-        int first = choice_ - 3;
-        first = first < 0 ? 0 : first > entries() - 6 ? entries() - 6 : first;
-        for (int row = 0; row < 6; row++) {
-            int n = first + row, y = 26 + 11 * row;
-            bool empty = n >= patch_count && !user_used_[n - patch_count];
-            if (n == choice_) canvas.rect(0, y - 2, 128, 11, 3);
-            if (n == patch_) canvas.rect(1, y + 1, 4, 5, 15);   // the loaded one
-            entry_name(n, text);
-            canvas.text(9, y, text, empty ? 5 : n == choice_ ? 15 : 10);
-        }
+    // A PATCH list entry: "> BRASS" for the loaded one, "U3 BRASS" (a user slot and the name saved in it) or
+    // "U4 -" (an empty slot).
+    static void patch_label(int n, char *out, int size, void *user) {
+        const Synth *self = static_cast<const Synth *>(user);
+        char name[name_size + 4];
+        self->entry_name(n, name);
+        Line(n == self->patch_ ? "> " : "  ").add(name).copy_to(out, size);
     }
 
     // "BRASS", "U3 BRASS" (a user slot and the name saved in it) or "U4 -" (an empty slot).
-    void entry_name(int n, char *text) const {
+    void entry_name(int n, char *text) const {   // text: name_size + 4 bytes
         if (n < patch_count) {
             copy_name(text, patches[n].name);
             return;
         }
         int slot = n - patch_count;
-        text_number(text, "U", slot + 1);
-        append(text, " ");
-        append(text, n == patch_ ? name_ : user_used_[slot] ? user_name_[slot] : "-");
+        Line("U").number(slot + 1).add(' ').add(n == patch_ ? name_ : user_used_[slot] ? user_name_[slot] : "-")
+            .copy_to(text, name_size + 4);
     }
 
-    // The card's files: "<data folder>/USER 01.SYN" for slot 0, LAST.SYN for -1.
+    // The card's files: "<data folder>/USER 01.SYN" for slot 0, LAST.SYN for -1. (A path is longer than a Line,
+    // which holds a screen's line, so it is put together here.)
     static const char *path(int slot) {
         static char text[64];
-        text[0] = 0;
-        append(text, enaga::files::data_folder());
-        if (slot < 0) {
-            append(text, "/LAST.SYN");
-        } else {
-            append(text, slot < 9 ? "/USER 0" : "/USER ");
-            text_number(text + length(text), "", slot + 1);
-            append(text, ".SYN");
-        }
+        copy_name(text, enaga::files::data_folder(), sizeof text - 16);
+        Line file(slot < 0 ? "/LAST" : "/USER ");
+        if (slot >= 0) file.number(slot + 1, 2, '0');
+        file.add(".SYN");
+        int n = 0;
+        while (text[n]) n++;
+        file.copy_to(text + n, int(sizeof text) - n);
         return text;
     }
 
@@ -327,7 +313,7 @@ private:
         int32_t got = enaga::files::read_all(path(-1), file, sizeof file);
         if (!decode(file, got, name_, &entry, values, patch_values_)) return false;
         patch_ = entry >= 0 && entry < entries() ? entry : 0;
-        choice_ = patch_;
+        patches_.select(patch_);
         apply(values);
         return true;
     }
@@ -352,15 +338,10 @@ private:
         copy_name(user_name_[slot], name_);
         patch_ = n;
         for (int p = 0; p < param_count; p++) patch_values_[p] = values[p];
-        char text[24];
-        text_number(text, "SAVED U", slot + 1);
-        message(text);
+        message(Line("SAVED U").number(slot + 1));
     }
 
-    void message(const char *text) {          // shown for two seconds
-        copy_name(message_, text, sizeof message_);
-        message_until_ = now_ + 2000;
-    }
+    void message(const char *text) { notice_.show(text, 2000); }   // for two seconds
 
     void send(NoteEvent::Type type, int key, int note, int value) {
         engine_.post({type, uint8_t(key), uint8_t(note), uint8_t(value)});
@@ -428,11 +409,6 @@ private:
         }
     }
 
-    static int length(const char *s) {
-        int n = 0;
-        while (s[n]) n++;
-        return n;
-    }
     static bool same(const char *a, const char *b) {
         while (*a && *a == *b) a++, b++;
         return *a == *b;
@@ -442,33 +418,19 @@ private:
         while (i < size - 1 && in[i]) { out[i] = in[i]; i++; }
         out[i] = 0;
     }
-    static void append(char *text, const char *more) {
-        text += length(text);
-        while ((*text++ = *more++)) {}
-    }
-    static void text_number(char *text, const char *prefix, int value) {
-        while ((*text = *prefix++)) text++;
-        if (value < 0) { *text++ = '-'; value = -value; }
-        char digits[12];
-        int n = 0;
-        do { digits[n++] = char('0' + value % 10); value /= 10; } while (value);
-        while (n) *text++ = digits[--n];
-        *text = 0;
-    }
 
     Engine engine_;
-    int page_ = 0, patch_ = 0, choice_ = 0, octave_ = 0;   // patch_, choice_: PATCH list entries
+    int page_ = 0, patch_ = 0, octave_ = 0;   // patch_: the loaded PATCH list entry
+    enaga::ui::List patches_;                 // PATCH: its cursor is the entry chosen
+    enaga::ui::Notice notice_;
     char name_[name_size] = {};               // the loaded patch's name
     bool user_used_[user_slots] = {};
     char user_name_[user_slots][name_size] = {};
-    char message_[22] = {};
-    uint32_t now_ = 0, message_until_ = 0;
     bool function_ = false;                   // F1 held
     int16_t patch_values_[param_count] = {};  // the loaded patch, for knob-push resets
     int group_[kPageCount] = {};
     uint8_t pad_note_[15] = {}, step_note_[16] = {};
     bool pad_held_[15] = {};
-    int pad_pressure_[15] = {};
 };
 
 }  // namespace

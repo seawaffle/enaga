@@ -12,7 +12,7 @@ In the repository, `tests/test_api_docs.py` fails when a public name in `include
 | `<enaga/wav.hpp>` | `enaga::wav`: WAV headers |
 | `<enaga/settings.hpp>` | `enaga::Settings`: an app's own key/value settings |
 | `<enaga/midi.hpp>`, `<enaga/clock.hpp>` | `enaga::midi`: sending MIDI; `enaga::clock`: tempo, transport, ticks |
-| `<enaga/ui.hpp>` | `enaga::ui`: list, parameter page, dialog, text entry; text lines, the screen's frame, notices, bars and meters |
+| `<enaga/ui.hpp>` | `enaga::ui`: list, grid, parameter page, dialog, text entry, pad map, file browser; text lines, the screen's frame, notices, bars and meters |
 | `<enaga/bytes.hpp>` | `enaga::bytes`: numbers in packed data at any address |
 | `<enaga/dsp.hpp>` | `enaga::dsp`: math, oscillators, filters, envelopes, LFOs, delays, chorus, reverb |
 | `<enaga/abi.h>` | The C boundary under all of it: constants, events, the host and app tables, the package header |
@@ -257,8 +257,8 @@ fresh frame each time; Enaga sends it to the display by DMA after `draw` returns
 | `text(x, y, s, grey = 15)` | text in a 5 × 7 font, 6 pixels a character, `y` the top row |
 | `data()` | the pixels, `uint8_t[128 * 128]`, row-major: draw anything else here |
 
-The font has `A`-`Z` (lower case is shown as upper case), `0`-`9`, space and `! # + - . / : = ? % >`; other
-characters are left blank.
+The font has `A`-`Z` (lower case is shown as upper case), `0`-`9`, space and `! # + - . / : = ? % > < ( ) , _ ' *
+[ ]`; any other character is shown as `?`.
 
 ## LEDs
 
@@ -583,8 +583,8 @@ SRC MIDI, CLOCK OUT and MIDI THRU both on would send the clock twice.
 
 ## UI toolkit
 
-`<enaga/ui.hpp>`, as `enaga::ui::`: a list, a page of parameters on the knobs, a confirmation dialog and text
-entry, and around them the pieces every screen needs: text built without printf, a status line and key hints,
+`<enaga/ui.hpp>`, as `enaga::ui::`: a list and a grid, a page of parameters on the knobs, a confirmation dialog,
+text entry, a map of the pads and a file browser, and around them the pieces every screen needs: text built without printf, a status line and key hints,
 a message shown for a moment, bars and meters. They're drawn on the `Canvas` with Enaga's font, so apps look
 alike, and are header-only, with nothing in the firmware. `examples/widgets` uses all of them.
 
@@ -625,15 +625,25 @@ void draw(enaga::Canvas &canvas) override { canvas.clear(); list.draw(canvas); }
 - **Setting up:** construct it, or call `set(title, params, count, values)`, with an array of `Param` and the
   app's own `int` values, one per parameter. The page only changes those values.
 - **Changes:** after `Action::changed`, `changed()` is the parameter. `set_value(param, value)` sets one from the
-  app, clamped. `value(param)` reads one.
-- **Groups from the app:** `groups()`, `group()` and `show_group(n)`.
+  app, clamped. `value(param)` reads one. `set_values(values)` swaps in another array for the same parameters
+  (another track's, say) and keeps the group on show; `set` starts again at the first group.
+- **Speed:** one detent moves a parameter by its `step`. When a parameter has more than
+  `ParamPage::wide_steps` (100) steps, turning it quickly moves it further: a detent within 60 ms of the last one
+  the same way counts three, within 30 ms eight. `set_acceleration(false)` turns that off. (The times are first
+  guesses, to be tried on a unit.)
+- **Groups from the app:** `groups()`, `group()` and `show_group(n)`. `set_group_names(names)`, a name for each
+  group, shows them as tabs on the title line, the current one lit, in place of "group/groups" (which stays when
+  the names do not fit beside the title).
+- **Columns:** `set_columns(true)` puts the four side by side, each with its letter, name, value and a bar, in
+  place of rows. Names and values then show five characters each, so keep them short.
 - **Drawing:** `draw(canvas, top)` shows the title and "group/groups". Then a row per knob: its letter, the name
   with a bar for the value's place in its range, and the value at the right, brighter when it is not the
   initial one.
 - **A `Param`** has, in this order, `name` (12 characters show), `min`, `max` and `initial`, and how to show the
   value: `labels` (a name per step from `min`), `format`, a `void (*)(int value, char *out)` writing up to 12
-  characters and a terminating 0, or the number with an optional `unit`. So
-  `{"CUTOFF", 0, 127, 64, nullptr, hertz}` or `{"LEVEL", 0, 100, 80, nullptr, nullptr, "%"}`. The page's
+  characters and a terminating 0, or the number with an optional `unit`; then `step`, how far a detent moves it
+  (1). So `{"CUTOFF", 0, 127, 64, nullptr, hertz}`, or with designated initialisers
+  `{.name = "DELAY", .min = 0, .max = 2000, .initial = 250, .unit = "MS", .step = 10}`. The page's
   `format(param, out)` gives the text shown.
 
 **`Dialog`**: a question in a box over the screen.
@@ -651,6 +661,40 @@ void draw(enaga::Canvas &canvas) override { canvas.clear(); list.draw(canvas); }
 - **Answering:** OK gives `chosen` and CLR `no`, both closing it. While it is `active()` it takes every key.
 - **Reading:** `text()` is the text without trailing spaces, and `cursor()` the position.
 - `draw(canvas, top)` shows the title, the text in boxes with the cursor's lit, and the controls.
+
+**`Grid`**: cells in rows and columns, such as a bank of patterns or sound slots; a `List` in two dimensions.
+- `set_items(names, count, columns)`, or `set_items(count, columns, label, user)` with a `Label` function as in
+  `List`; `set_title`. Up to `Grid::max_cells` (64) cells.
+- **Movement:** the arrow keys move the cursor, stopping at the edges; VALUE moves it through the cells in order.
+  OK gives `chosen`, CLR `back`. `cursor()`, `select(cell)`, `count()`, `columns()`.
+- **Lights:** `light(cell, on)` fills a cell (a slot that holds something, a pattern that is playing); `lit(cell)`
+  and `clear_lights()`.
+- `draw(canvas, top, bottom)`: the title, then as many rows of cells (`cell_height`, 12 px) as fit, scrolled to
+  the cursor's row. Each cell is its share of the screen's width, and its label shows as many characters as fit
+  (four in a quarter). The cursor's cell is framed.
+
+**`PadMap`**: the fifteen pads as they lie on the panel, for a screen that says what each pad does. Two staggered
+rows like a piano's keys: eight below (pads 0, 2, ... 14, left to right) and seven above (pads 1, 3, ... 13), each
+upper pad over the gap between two lower ones.
+- `label(pad, text)` (two characters show), `light(pad, grey)` (0 dark to 15), `select(pad)` to frame one (-1 for
+  none) and `selected()`. The map takes no events: the app sets it, from `on_pad_press` and `on_pad_release`, say.
+- `draw(canvas, top)` draws the upper row at `top` and the lower one under it, `PadMap::height` (28) pixels in all.
+- `PadMap::x(pad)` and `PadMap::upper(pad)` give a pad's place, for drawing more over it; each pad is
+  `cell_width` (16) by `cell_height` (14) pixels.
+
+**`FileBrowser`**: choosing a file on the card.
+- `open(folder, extension)` lists `folder` (`"/SAMPLES"`) in the background through the file service. With an
+  extension (`".WAV"`, any case) only those files show. Folders always show, first, ending in `/`; then files,
+  each sorted by name ignoring case. Names show as `Line::shown` makes them.
+- **Keys:** UP / DOWN or VALUE move. OK on a folder goes into it (`moved`); OK on a file gives `chosen`, and
+  `path()` is its full path. CLR goes back up, and in the folder `open` started from gives `back`.
+- **Reading:** `folder()`, `count()`, `cursor()`, `name(index)`, `is_folder(index)`; `loading()` while a listing
+  runs, and `error()` (`ENAGA_FILE_OK` or the listing's error).
+- `draw(canvas, top, bottom)`: the folder (its end, if long) and the entries; `LOADING`, `EMPTY` or the error's
+  name instead when there is nothing to list.
+- Up to `FileBrowser::max_entries` (128) entries a folder. Names of `name_bytes` (64) bytes or more are left out,
+  as the browser could not give their path; paths are at most `path_bytes` (256). It holds about 9 KB: make it a member of the app, which also keeps it
+  alive while a listing runs.
 
 **`Line`**: a line of text built in place, with no printf. It holds at most `Line::capacity` characters (21, the
 screen's line), and anything past that is cut off. Each call returns the line, so calls chain, and a `Line` passes
@@ -677,7 +721,8 @@ canvas.text(0, 20, line);
 - `text()`, `length()`, `room()` (characters left), and `copy_to(out, size)` for a buffer such as a `Param`'s
   `format` output.
 
-`drawable(c)` says whether the font has a character; it draws any other as `?`.
+`drawable(c)` says whether the font has a character (lower case letters count, drawn as upper case); it draws any
+other as `?`.
 
 **The screen's frame.** A status line at the top, key hints on the bottom line, and the widgets between them:
 - `status_line(canvas, left, right)`: `left` bright, `right` (optional) dim at the right edge, and a rule under
@@ -706,8 +751,7 @@ canvas.text(0, 20, line);
   the block's peak passed from `audio` to `update` and a peak mark that holds for a second.
 
 **Layout helpers.** `screen_width` (128), `char_width` (6, the font's advance), `line_chars` (21 to a line), and
-`text_right(canvas, y, text, grey, x_end)` for right-aligned text. The font has A-Z, 0-9, space and
-`! # + - . / : = ? % >`.
+`text_right(canvas, y, text, grey, x_end)` for right-aligned text. The font is listed under "Display" above.
 
 ## DSP library
 
@@ -962,8 +1006,15 @@ The `_memory` functions give the floats of zeroed memory the `_init` functions n
   `<algorithm>`, `<span>`, `<optional>`, `<variant>`, `<type_traits>`, `<bit>`, `<atomic>`, `<numbers>`,
   `<cstdint>` and the like. No allocating containers (`std::vector`, `std::string`), no iostreams.
 - **Memory:** `new`, `delete`, `malloc` and `free` work on the app's heap (everything above the image, about
-  124 MiB). Running out calls `fatal("out of memory")`. `memcpy`, `memmove`, `memset`, `memcmp` and `strlen` are
-  there; the rest of libc is not.
+  124 MiB). Running out calls `fatal("out of memory")`.
+- **Strings:** there is no C library and no `<string.h>`. `<enaga/string.h>` declares what the runtime provides:
+  `memcpy`, `memmove`, `memset`, `memcmp`, `strlen`, `strcmp`, `strncmp`, `strchr` and `strrchr`. The rest of
+  libc is not there (a call to it fails at link time as an undefined reference). `enaga::ui::Line` formats numbers
+  without printf.
+- **64-bit integers** work, division included: the C674x divides in software, and the runtime has its own
+  64-bit division (`__c6xabi_divlli` and the like) because libgcc's would pull in the C++ unwinder, which an app
+  cannot link. If a link fails with `undefined reference to __exidx_start`, some other libgcc helper has done
+  the same; report it.
 - **No libm:** use the DSP library's math.
 - **Stack:** a function's frame is limited to 16 KiB, and VLAs and `alloca` are refused at build time (Enaga's
   interrupt entry uses the 16 KiB below the stack pointer). Put large arrays in statics or on the heap.

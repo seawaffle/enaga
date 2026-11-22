@@ -193,17 +193,19 @@ void settings_draw(void)
 {
     int k, y;
     gfx_clear(0);
-    gfx_text(0, 0, "SETTINGS", 15);
-    /* Nine rows fit; the list scrolls to keep the cursor on screen. */
+    ui_title("SETTINGS");
+    /* Eight rows fit; the list scrolls to keep the cursor on screen, with marks at the right when there is more. */
     static int top;
     if (settings_cursor < top) top = settings_cursor;
-    if (settings_cursor > top + 8) top = settings_cursor - 8;
-    for (k = top, y = 22; k < SETTINGS_COUNT && k < top + 9; k++, y += 9) {
+    if (settings_cursor > top + 7) top = settings_cursor - 7;
+    for (k = top, y = 15; k < SETTINGS_COUNT && k < top + 8; k++, y += 11) {
         int here = k == settings_cursor;
-        if (here) gfx_text(0, y, ">", 15);
-        gfx_text(8, y, table[k].name, here ? 15 : 8);
+        if (here) ui_cursor_bar(y - 2, 10);
+        gfx_text(3, y, table[k].name, here ? 15 : 10);
         gfx_text(74, y, table[k].labels[table[k].first + settings_value[k]], here ? 15 : 10);
     }
-    gfx_text(0, 110, "LEFT RIGHT: CHANGE", 6);
-    gfx_text(0, 119, "OK: BACK", 6);
+    if (top > 0) { gfx_pixel(126, 13, 8); gfx_pixel(127, 13, 8); gfx_pixel(126, 14, 8); gfx_pixel(127, 14, 8); }
+    if (top + 8 < SETTINGS_COUNT) { gfx_pixel(126, 98, 8); gfx_pixel(127, 98, 8); gfx_pixel(126, 99, 8); gfx_pixel(127, 99, 8); }
+    ui_hint("LEFT RIGHT: CHANGE", 1);
+    ui_hint("OK: BACK", 0);
 }

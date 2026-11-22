@@ -403,11 +403,21 @@ emulator where it can be, and the ones that need the unit collect into a session
      mark) and `meter_db` (an amplitude on a dB scale, as a meter's fraction).
    - api.md says LED writes go out only when a level changes, so apps need no copy of their own.
    Tested on the host (tests/ui/host.cpp); `examples/widgets` uses them and drops its own number formatting.
-6. **UI toolkit, third part: larger widgets.** A grid that mirrors the pads (4 x 4 cells with labels, selected
-   and lit states); a file browser on `List` and the file service (folders, back up, a file type); a four-column
-   layout and page tabs for `ParamPage`. Each with a host test and a page in an example. The 16-step grid stays
-   with apps: every sequencer draws its own.
-7. **Exit.** On a unit: copy an app over USB DRIVE and run it; play audio from a DAW through the unit and record
+6. (**Done** 2026-11-22, see the log.) **UI toolkit, third part: larger widgets.** A map of the pads as they lie
+   (two staggered rows of 8 and 7, not a 4 x 4 grid as first written here), and a `Grid` of cells for banks and
+   slots, both with labels, a selection and lit states; a file browser on `List` and the file service (folders,
+   back up, a file type); a four-column layout and page tabs for `ParamPage`. Each with a host test and a page in
+   an example. The 16-step grid stays with apps: every sequencer draws its own.
+7. (**Done** 2026-11-22, see the log.) **What the first outside apps ran into.** A developer writing an app on
+   0.2.0 listed what they had to work around: 64-bit division failing to link; no `<string.h>`; no number
+   formatting (step 5's `Line`); `ParamPage` without a step size or faster turning for wide ranges, and resetting
+   its group when values are swapped; characters missing from the font; and the emulator script's fixed card,
+   keys-only input, no way to run an app's `stop()`, and an unstated `audio.wav` format. All but the formatting are
+   this step.
+8. (**Done** 2026-11-22, see the log.) **Enaga's own screens and the synth on the newer work.** The synth draws
+   with the toolkit where it fits (the status line, a `List` of patches, bars, a `Notice`, `Line` for its text)
+   and takes pressure from Enaga's aftertouch; the menu, SETTINGS and USB DRIVE pages share the toolkit's frame.
+9. **Exit.** On a unit: copy an app over USB DRIVE and run it; play audio from a DAW through the unit and record
    the unit into it; the battery mark falls with the batteries and the unit switches
    itself off cleanly.
 
@@ -463,7 +473,7 @@ of the input routes, which need equipment. The exit test passed as a simulation 
 downloads); a person doing it moves to E6. USB uses test IDs until pid.codes grants one.
 
 E5 ("E5 plan"): steps 1-4 (battery, SYNC polarity, USB DRIVE, USB audio) are done on the emulator and merged
-(2026-11-22); the exit, step 7, is a unit session over checklist steps 19-21, with 16, 17 and 7 still owed from E4.
+(2026-11-22); the exit, step 9, is a unit session over checklist steps 19-21, with 16, 17 and 7 still owed from E4.
 Its card is staged by `tools/unit_card.py` (the dry run, steps 1-10, passes 141/141).
 
 ## Open items
@@ -1830,4 +1840,78 @@ when a level changes.
 - Tests: tests/ui/host.cpp checks each piece's text and pixels (including a notice across the millisecond
   counter's wrap); `tests/test_widgets.py` adds the notice on the screen and gone after 1.5 s, and the meters
   dim in silence and lit with input on the emulator.
+
+### UI toolkit, third part, E5 step 6 (2026-11-22)
+
+`Grid`, `PadMap`, `FileBrowser`, and tabs and columns for `ParamPage`, in `<enaga/ui.hpp>`.
+- **The pads are not a grid.** The plan said a 4 x 4 grid mirroring the pads; the panel has 15 pads in two
+  staggered rows (hardware.md "Panel MCU"), so `PadMap` draws them that way, 16 px cells with the upper row offset
+  by half a cell, and the general case, cells moved with the arrows, is its own widget, `Grid`.
+- `Grid` keeps its lights in a 64-bit mask, hence `max_cells` 64. Right and left stop at a row's ends; VALUE runs
+  through all cells in order.
+- `FileBrowser` sorts as entries arrive (insertion into an index array; the file service lists in directory
+  order). A listing still running when the browser moves on (OK into a folder, CLR, a new `open`) would deliver
+  its entries into the new folder's list; requests run in order, so the browser counts the listings outstanding
+  at the move and drops entries until that many have finished. Names of 64 bytes or more are left out rather
+  than kept cut short, since a cut name gives a path that does not open.
+- `ParamPage` tabs fall back to "2/3" when the names do not fit beside the title. Columns show five characters of
+  name and value; `examples/widgets` now shows CUTOFF above 1 kHz as `4.5K` so it fits.
+- `examples/widgets`: F7 PADS (the map labelled as a keyboard, lit by velocity while held), F8 FILES (from the
+  root), F1 switching SOUNDS between list and grid and EDIT between rows and columns, and EDIT's groups as tabs.
+- Tests: tests/ui/host.cpp (also run under the address and undefined-behaviour sanitizers while writing) checks
+  grid movement, scrolling and drawing, the pads' places, tabs and columns, and the browser against a hand-driven
+  file service: sorting, filtering, going in and up, errors, late listings and over-long names.
+  `tests/test_widgets.py` adds the grid, the tabs and columns, pads lighting the map, and browsing a card with
+  `/SAMPLES/Drums/kick_01.wav` on the emulator.
+
+### What the first outside apps ran into, E5 step 7 (2026-11-22)
+
+A list from a developer who wrote an app on 0.2.0, worked through in order.
+- **64-bit division.** libgcc's `_divdi3.o` and its relatives carry unwind tables naming
+  `__c6xabi_unwind_cpp_pr3`, which pulls in libgcc's unwinder, whose `__exidx_start` / `__exidx_end` the app
+  linker script never defines (it discards `.c6xabi.exidx`): `undefined reference to __exidx_start`, far from the
+  cause. Defining the symbols would link the unwinder into every app that divides; instead the runtime defines
+  `__c6xabi_divlli`, `__c6xabi_divull`, `__c6xabi_remlli` and `__c6xabi_remull` (shift and subtract, a zero
+  divisor is `fatal`), which come before libgcc, so its objects are never linked. libgcc's other helpers
+  (shifts, multiplies, float) carry no unwind references. cxxcheck had an `int64` division check all along, but
+  on constants the compiler folded; it now divides `volatile` values, signed and unsigned, and the old runtime
+  fails to link it exactly as reported.
+- **Strings.** `<enaga/string.h>` declares the runtime's `memcpy`, `memmove`, `memset`, `memcmp`, `strlen`, and
+  the new `strcmp`, `strncmp`, `strchr`, `strrchr`. Not a plain `<string.h>` in Enaga's include folder: that
+  would also shadow the system's in host builds of Enaga's headers (tests/ui). cxxcheck checks each.
+- **`ParamPage` speed.** `Param::step` (per detent), and acceleration for parameters of more than 100 steps:
+  turning the same parameter the same way within 60 ms counts three, within 30 ms eight. Encoder events come
+  once a main-loop pass with the detents since, so the page times them itself (`enaga::ms`). It follows the
+  parameter, not the knob, so flipping groups starts afresh. The times are guesses for the unit to settle; the
+  widget tests now turn at 80 ms a detent for exact values, and check a 12 ms spin separately.
+  `set_values` swaps the value array and keeps the group.
+- **Font.** `< ( ) , _ ' * [ ]` added (drawn for Enaga, in the font's 5 x 7 style). Lower case always drew as
+  upper case, so `ui::drawable` now says so; api.md had said other characters are left blank, when they draw as
+  `?`. `Line::shown` keeps `_` now.
+- **Emulator script.** `Emulation(card_mib=...)`, `turn()` (moved from the dry run, which still exports it),
+  `power_off()` and `card_file()`; the command line's `--card-mib`, `--file`, `--turn`, `--power-off` and `--get`,
+  and `--help` shows the whole description, `audio.wav`'s format included. `Emulation` now sets the encoders'
+  pins at rest itself.
+
+### Enaga's screens and the synth on the newer work, E5 step 8 (2026-11-22)
+
+What steps 5-7 offer, put to use where Enaga and its example drew things by hand.
+- **The synth** (an exception to "bug fixes only", as its job is to show how an app is written): the status line
+  (patch, voices, load), the PATCH list as a `ui::List` (UP / DOWN now move it as well as VALUE, and it stops at
+  the ends rather than wrapping; the loaded patch is marked `>` rather than with a block, and empty slots are no
+  longer dimmed), `ui::bar`, a `Notice` for its messages, and `Line` in place of its own number and text helpers,
+  in `params.cpp`'s formatting too. Paths stay hand-built: a `Line` is a screen's line, shorter than a path.
+  Pressure now comes from `on_pad_pressure` (Enaga's aftertouch, from the pad's resting reading after the hit)
+  rather than the synth's own curve over raw readings, which began at the press threshold, so a hard hit no
+  longer read as pressure.
+- **Not** `ParamPage`: the synth's groups hold two to four parameters picked from one table, and their values are
+  `int16_t` in the engine, written with single stores the audio context reads. `ParamPage` wants four to a group
+  in order and an `int` array; the synth draws its rows the same way instead.
+- **The menu, SETTINGS and USB DRIVE pages** (C, in the firmware, so not the C++ toolkit): `ui_title`,
+  `ui_hint` and `ui_cursor_bar` in `menu.c` draw the toolkit's frame: a rule under the title, hints on the bottom
+  rows (120 and 110), and the lit bar for the current line. SETTINGS now marks its line with the bar instead of
+  `>`, at 11 px a row like a `List` (eight on screen, with the same marks when there is more).
+- **The template** shows the frame too: a status line with the note playing (`Line::note`), the parameter page
+  under it and a key hint at the bottom; its ATTACK and RELEASE (0-2000 and 0-4000 ms) now speed up when turned
+  quickly. getting-started.md's rules point at `Line` and `<enaga/string.h>`.
 

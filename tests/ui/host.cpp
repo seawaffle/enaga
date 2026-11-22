@@ -16,7 +16,32 @@ std::vector<Drawn> g_drawn;
 void host_text(uint8_t *, int x, int y, const char *text, uint8_t grey) { g_drawn.push_back({x, y, text, grey}); }
 uint32_t g_ms = 1000;
 uint32_t host_ms() { return g_ms; }
-enaga_host_t g_host = [] { enaga_host_t h{}; h.text = host_text; h.ms = host_ms; return h; }();
+
+// The file service's listing, by hand: each request is kept, and the test delivers its entries and its end.
+struct Listing { std::string path; enaga_file_entry_t entry; enaga_file_done_t done; void *user; };
+std::vector<Listing> g_listings;
+int32_t g_list_result = ENAGA_FILE_OK;
+int32_t host_file_list(const char *path, enaga_file_entry_t entry, enaga_file_done_t done, void *user) {
+    if (g_list_result < 0) return g_list_result;
+    g_listings.push_back({path, entry, done, user});
+    return ENAGA_FILE_OK;
+}
+void deliver(size_t request, std::vector<std::pair<const char *, bool>> entries, int32_t result = -1) {
+    Listing &l = g_listings[request];
+    for (auto &[name, folder] : entries) {
+        enaga_file_info_t info{};
+        std::snprintf(info.name, sizeof info.name, "%s", name);
+        info.flags = folder ? ENAGA_FILE_FOLDER : 0;
+        l.entry(l.user, &info);
+    }
+    l.done(l.user, result < 0 && result != -1 ? result : int32_t(entries.size()));
+}
+
+enaga_host_t g_host = [] {
+    enaga_host_t h{};
+    h.text = host_text; h.ms = host_ms; h.file_list = host_file_list;
+    return h;
+}();
 uint8_t g_pixels[ENAGA_SCREEN_W * ENAGA_SCREEN_H];
 
 int failures = 0;
@@ -181,7 +206,8 @@ static void test_line() {
     check(same(Line().hex(0x3C, 2).add(' ').hex(0xBEEF, 4), "3C BEEF"), "line: hex");
     check(same(Line().note(60), "C4") && same(Line().note(61), "C#4") && same(Line().note(0), "C-1")
           && same(Line().note(127), "G9") && same(Line().note(69), "A4"), "line: note names");
-    check(same(Line().shown("kick_01.wav"), "KICK-01.WAV"), "line: outside text made drawable");
+    check(same(Line().shown("kick_01.wav"), "KICK_01.WAV"), "line: outside text made drawable");
+    check(same(Line().shown("a\tb~c\xC3\xA9"), "A-B-C--"), "line: what the font lacks shown as '-'");
     check(same(Line().shown("abcdef", 3), "ABC"), "line: outside text cut at max");
     Line long_line("ABCDEFGHIJKLMNOPQRS");                 // 19 of 21
     check(!long_line.add_if_fits(" XYZ") && long_line.length() == 19, "line: a part that does not fit is left out");
@@ -191,8 +217,8 @@ static void test_line() {
     char small[5];
     Line("CUTOFF").copy_to(small, sizeof small);
     check(same(small, "CUTO"), "line: copy_to cuts to the buffer");
-    for (const char *p = "AZ09 !#+-./:=?%>"; *p; p++) check(drawable(*p), "drawable: the font's characters");
-    check(!drawable('a') && !drawable('_') && !drawable(','), "drawable: others are not");
+    for (const char *p = "AZaz09 !#+-./:=?%><(),_'*[]"; *p; p++) check(drawable(*p), "drawable: the font's characters");
+    check(!drawable('~') && !drawable('"') && !drawable(';') && !drawable('\xC3'), "drawable: others are not");
 }
 
 static void test_frame_and_notice() {
@@ -259,8 +285,227 @@ static void test_bars_and_meters() {
     check(meter_db(2.0f) == 1.0f, "meter_db: over full scale");
 }
 
+static void test_grid() {
+    static const char *const names[] = {"A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4", "C1", "C2"};
+    Grid grid;
+    grid.set_title("BANK");
+    grid.set_items(names, 10, 4);
+    check(grid.key(ENAGA_KEY_LEFT, true) == Action::none && grid.key(ENAGA_KEY_UP, true) == Action::none,
+          "grid: stops at the top left");
+    check(grid.key(ENAGA_KEY_RIGHT, true) == Action::moved && grid.cursor() == 1, "grid: right");
+    check(grid.key(ENAGA_KEY_DOWN, true) == Action::moved && grid.cursor() == 5, "grid: down a row");
+    check(grid.key(ENAGA_KEY_DOWN, true) == Action::moved && grid.cursor() == 9, "grid: down to the short last row");
+    check(grid.key(ENAGA_KEY_RIGHT, true) == Action::none, "grid: no cell to the right in the last row");
+    grid.select(3);
+    check(grid.key(ENAGA_KEY_RIGHT, true) == Action::none, "grid: right stops at the row's end, no wrap");
+    check(grid.key(ENAGA_KEY_DOWN, true) == Action::moved && grid.cursor() == 7, "grid: down from the corner");
+    check(grid.key(ENAGA_KEY_DOWN, true) == Action::none, "grid: nothing under it");
+    check(grid.encoder(4, 1) == Action::moved && grid.cursor() == 8, "grid: VALUE goes on to the next row");
+    check(grid.encoder(0, 1) == Action::none, "grid: knobs are not the grid's");
+    check(grid.key(ENAGA_KEY_OK, true) == Action::chosen && grid.key(ENAGA_KEY_CLR, true) == Action::back,
+          "grid: OK and CLR");
+    grid.light(2, true);
+    grid.light(70, true);
+    check(grid.lit(2) && !grid.lit(3) && !grid.lit(70), "grid: lights, and none past max_cells");
+    blank();
+    enaga::Canvas canvas(g_pixels);
+    grid.select(1);
+    grid.draw(canvas);
+    check(row(0) == "BANK" && row(14) == "A1|A2|A3|A4", "grid: title and a row of cells");
+    const Drawn *a3 = find("A3"), *a2 = find("A2"), *a1 = find("A1");
+    check(a3 && a3->grey == 0 && px(66, 13) == 9, "grid: a lit cell is filled, its label dark");
+    check(a2 && a2->grey == 15 && px(32, 11) == 15, "grid: the cursor's cell framed and bright");
+    check(a1 && a1->grey == 10 && px(2, 13) == 2 && a2->x == 34, "grid: others dim; cells a quarter wide");
+    grid.clear_lights();
+    check(!grid.lit(2), "grid: clear_lights");
+
+    Grid many;                                            // scrolling: 16 rows of 4 in 3 visible rows
+    many.set_items(64, 4, [](int i, char *out, int size, void *) { std::snprintf(out, size, "%02d", i); }, nullptr);
+    many.select(63);
+    blank();
+    many.draw(canvas, 0, 36);
+    check(find("63") && find("55") && !find("51"), "grid: scrolled to the cursor's row");
+    Grid narrow;
+    narrow.set_items(names, 3, 8);
+    blank();
+    narrow.draw(canvas);
+    check(find("A1") && find("A1")->text == "A1" && px(16, 2) == 0, "grid: a narrow cell shows what fits");
+}
+
+static void test_pad_map() {
+    PadMap pads;
+    check(PadMap::x(0) == 0 && PadMap::x(14) == 112 && PadMap::x(1) == 8 && PadMap::x(13) == 104,
+          "pads: lower and upper rows staggered");
+    check(!PadMap::upper(0) && PadMap::upper(1) && !PadMap::upper(14), "pads: odd pads above");
+    pads.label(0, "C");
+    pads.label(1, "C#X");
+    pads.label(99, "NO");
+    pads.light(1, 12);
+    pads.light(2, 200);
+    pads.select(2);
+    check(pads.selected() == 2, "pads: select");
+    blank();
+    enaga::Canvas canvas(g_pixels);
+    pads.draw(canvas, 40);
+    const Drawn *c = find("C"), *cs = find("C#");
+    check(c && c->x == 2 && c->y == 40 + 14 + 4 && c->grey == 15, "pads: a dark lower pad's label");
+    check(cs && cs->x == 10 && cs->y == 44 && cs->grey == 0, "pads: a lit upper pad, label cut to two");
+    check(px(9, 41) == 12 && px(1, 55) == 2, "pads: their light");
+    check(px(16, 54) == 15 && px(31, 67) == 15 && px(32, 54) == 0, "pads: the selected pad framed");
+    check(px(17, 55) == 15, "pads: light clamped at 15");
+    pads.select(-3);
+    check(pads.selected() == -1, "pads: none selected");
+}
+
+static void test_param_tabs_and_columns() {
+    static const Param params[] = {
+        {"CUTOFF", 0, 127, 64}, {"RESONANCE", 0, 100, 0}, {"DRIVE", 0, 10, 0}, {"MODE", 0, 2, 0},
+        {"ATTACK", 0, 2000, 10, nullptr, nullptr, "MS"},
+    };
+    static const char *const names[] = {"FLT", "ENV"};
+    int values[5] = {64, 0, 0, 0, 10};
+    ParamPage page("SYNTH", params, 5, values);
+    page.set_group_names(names);
+    blank();
+    enaga::Canvas canvas(g_pixels);
+    page.draw(canvas);
+    check(row(0) == "SYNTH|FLT|ENV", "tabs: the group names on the title line");
+    check(find("FLT")->grey == 15 && find("ENV")->grey == 6 && find("ENV")->x == ENAGA_SCREEN_W - 18,
+          "tabs: the current one lit, right-aligned");
+    ParamPage long_title("A LONG PAGE TITLE", params, 5, values);
+    long_title.set_group_names(names);
+    blank();
+    long_title.draw(canvas);
+    check(row(0) == "A LONG PAGE TITLE|1/2", "tabs: 1/2 when the names do not fit");
+
+    page.set_columns(true);
+    page.encoder(0, 5);
+    blank();
+    page.draw(canvas);
+    check(row(14) == "A|B|C|D", "columns: the knob letters across");
+    check(row(25) == "CUTOF|RESON|DRIVE|MODE", "columns: names, five characters");
+    check(row(38) == "69|0|0|0" && find("69")->x == 0 && find("69")->grey == 15, "columns: values under them");
+    check(px(0, 48) == 9 && px(27, 48) == 2 && px(32, 48) == 2, "columns: bars under each");
+    page.key(ENAGA_KEY_SELECT_RIGHT, true);
+    blank();
+    page.draw(canvas);
+    check(row(25) == "ATTAC" && row(38) == "10MS", "columns: a short last group");
+}
+
+static void test_file_browser() {
+    g_listings.clear();
+    static FileBrowser browser;                           // large: not on the stack
+    browser.open("/SAMPLES", ".wav");
+    check(g_listings.size() == 1 && g_listings[0].path == "/SAMPLES" && browser.loading(), "files: listing asked for");
+    blank();
+    enaga::Canvas canvas(g_pixels);
+    browser.draw(canvas);
+    check(row(0) == "/SAMPLES" && find("LOADING"), "files: loading");
+    check(browser.key(ENAGA_KEY_OK, true) == Action::none, "files: OK does nothing while loading");
+    deliver(0, {{"snare.WAV", false}, {"Kicks", true}, {"notes.txt", false}, {"bass.wav", false}, {"Amb", true}});
+    check(!browser.loading() && browser.count() == 4, "files: the listing, other files left out");
+    check(std::string(browser.name(0)) == "Amb" && browser.is_folder(1) && std::string(browser.name(2)) == "bass.wav"
+          && std::string(browser.name(3)) == "snare.WAV", "files: folders first, then by name in any case");
+    blank();
+    browser.draw(canvas);
+    check(find("AMB/") && find("KICKS/") && find("BASS.WAV"), "files: shown upper case, folders with '/'");
+    browser.key(ENAGA_KEY_DOWN, true);
+    browser.key(ENAGA_KEY_DOWN, true);
+    check(browser.key(ENAGA_KEY_OK, true) == Action::chosen && std::string(browser.path()) == "/SAMPLES/bass.wav",
+          "files: OK on a file chooses it, with its path");
+    browser.key(ENAGA_KEY_UP, true);
+    check(browser.key(ENAGA_KEY_OK, true) == Action::moved && std::string(browser.folder()) == "/SAMPLES/Kicks"
+          && g_listings.size() == 2 && browser.loading(), "files: OK on a folder goes in");
+    deliver(1, {});
+    blank();
+    browser.draw(canvas);
+    check(row(0) == "/SAMPLES/KICKS" && find("EMPTY"), "files: an empty folder");
+    check(browser.key(ENAGA_KEY_CLR, true) == Action::moved && std::string(browser.folder()) == "/SAMPLES",
+          "files: CLR goes back up");
+    check(browser.key(ENAGA_KEY_CLR, true) == Action::back, "files: CLR at the start gives back");
+    // Moving on while a listing runs: its entries are not the new folder's.
+    deliver(2, {{"old.wav", false}});
+    browser.open("/SAMPLES", ".wav");                     // a fresh listing
+    browser.key(ENAGA_KEY_DOWN, true);
+    browser.key(ENAGA_KEY_OK, true);                      // nothing yet: OK does nothing
+    browser.open("/RECORD");
+    check(g_listings.size() == 5, "files: two listings asked for");
+    deliver(3, {{"stale.wav", false}});                   // the /SAMPLES one, finishing late
+    check(browser.loading() && browser.count() == 0, "files: a late listing is not shown");
+    deliver(4, {{"take 1.wav", false}, {"x.raw", false}});
+    check(!browser.loading() && browser.count() == 2 && std::string(browser.name(0)) == "take 1.wav",
+          "files: the new folder's, with no extension filter");
+    g_list_result = ENAGA_FILE_NO_CARD;
+    browser.open("/SAMPLES");
+    blank();
+    browser.draw(canvas);
+    check(browser.error() == ENAGA_FILE_NO_CARD && find("NO CARD") && !browser.loading(), "files: an error shown");
+    g_list_result = ENAGA_FILE_OK;
+    browser.open("/");
+    deliver(5, {{"SAMPLES", true}}, ENAGA_FILE_CARD_ERROR);
+    check(browser.error() == ENAGA_FILE_CARD_ERROR, "files: an error at the end of a listing");
+    std::string longname(70, 'a');
+    browser.open("/");
+    deliver(6, {{longname.c_str(), false}, {"ok", false}});
+    check(browser.count() == 1, "files: a name too long to keep is left out");
+}
+
+static void test_param_steps_and_speed() {
+    static const Param params[] = {
+        {.name = "TEMPO", .min = 20, .max = 300, .initial = 120, .unit = "BPM"},
+        {.name = "DELAY", .min = 0, .max = 2000, .initial = 250, .unit = "MS", .step = 10},
+        {.name = "MIX", .min = 0, .max = 100, .initial = 50},
+    };
+    int values[3] = {120, 250, 50};
+    ParamPage page("FX", params, 3, values);
+    g_ms = 10000;
+    page.encoder(1, 1);
+    check(values[1] == 260, "speed: a step of 10 a detent");
+    g_ms += 200;
+    page.encoder(0, 1);
+    check(values[0] == 121, "speed: one detent, turned slowly");
+    g_ms += 100; page.encoder(0, 1);
+    check(values[0] == 122, "speed: 100 ms later, still one");
+    g_ms += 40; page.encoder(0, 1);
+    check(values[0] == 125, "speed: 40 ms later, three");
+    g_ms += 10; page.encoder(0, 1);
+    check(values[0] == 133, "speed: 10 ms later, eight");
+    g_ms += 10; page.encoder(0, -1);
+    check(values[0] == 132, "speed: turning back starts again at one");
+    g_ms += 10; page.encoder(1, -1);
+    check(values[1] == 250, "speed: another knob starts at one");
+    g_ms += 10; page.encoder(1, -1);
+    check(values[1] == 170, "speed: then eight steps of 10 (2000 / 10 = 200 steps: wide)");
+    g_ms += 10; page.encoder(2, 1);
+    g_ms += 10; page.encoder(2, 1);
+    check(values[2] == 52, "speed: a range of 100 is not wide: never faster");
+    page.set_acceleration(false);
+    g_ms += 10; page.encoder(0, 1);
+    g_ms += 10; page.encoder(0, 1);
+    check(values[0] == 134, "speed: off");
+    page.encoder(0, 1000);
+    check(values[0] == 300, "speed: clamped");
+    page.set_acceleration(true);
+    page.key(ENAGA_KEY_PUSH_B, true);
+    check(values[1] == 250, "speed: a push still resets");
+
+    static const Param many[] = {{"A", 0, 9, 0}, {"B", 0, 9, 0}, {"C", 0, 9, 0}, {"D", 0, 9, 0}, {"E", 0, 9, 0}};
+    int first[5] = {}, second[5] = {1, 2, 3, 4, 5};
+    ParamPage tracks("TRACK", many, 5, first);
+    tracks.key(ENAGA_KEY_SELECT_RIGHT, true);
+    tracks.set_values(second);
+    check(tracks.group() == 1 && tracks.value(4) == 5, "set_values: other values, the same group");
+    tracks.encoder(0, 1);
+    check(second[4] == 6 && first[4] == 0, "set_values: turns change the new array");
+}
+
 int main() {
     test_line();
+    test_param_steps_and_speed();
+    test_grid();
+    test_pad_map();
+    test_param_tabs_and_columns();
+    test_file_browser();
     test_frame_and_notice();
     test_bars_and_meters();
     test_list();

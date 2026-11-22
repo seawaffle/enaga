@@ -1,6 +1,7 @@
 #include "params.hpp"
 
 #include <enaga/dsp/math.hpp>
+#include <enaga/ui.hpp>
 
 namespace synth {
 namespace {
@@ -99,24 +100,10 @@ constexpr ParamInfo kAfterMod[] = {
 static_assert(sizeof kTable / sizeof kTable[0] == mod_first, "parameter table out of step with Param");
 static_assert(sizeof kAfterMod / sizeof kAfterMod[0] == param_count - mod_last - 1, "parameter table out of step");
 
-void append(char *&out, const char *text) { while (*text) *out++ = *text++; }
-void append_int(char *&out, int value) {
-    if (value < 0) { *out++ = '-'; value = -value; }
-    char digits[12];
-    int n = 0;
-    do { digits[n++] = char('0' + value % 10); value /= 10; } while (value);
-    while (n) *out++ = digits[--n];
-}
 // value with one decimal when under 10: "4.5", "12"
-void append_short(char *&out, float value) {
-    if (value < 9.95f) {
-        int tenths = int(value * 10.0f + 0.5f);
-        append_int(out, tenths / 10);
-        *out++ = '.';
-        *out++ = char('0' + tenths % 10);
-    } else {
-        append_int(out, int(value + 0.5f));
-    }
+void add_short(enaga::ui::Line &line, float value) {
+    if (value < 9.95f) line.fixed(int(value * 10.0f + 0.5f), 1);
+    else line.number(int(value + 0.5f));
 }
 
 }  // namespace
@@ -135,36 +122,36 @@ float delay_s(int value) { return 0.01f * enaga::dsp::exp2(float(value) * 0.0569
 
 void format(int param, int value, char *text) {
     const ParamInfo &p = info(param);
-    char *out = text;
+    enaga::ui::Line line;
     switch (p.unit) {
-    case Unit::number: append_int(out, value); break;
+    case Unit::number: line.number(value); break;
     case Unit::signed_:
-        if (value > 0) *out++ = '+';
-        append_int(out, value);
+        if (value > 0) line.add('+');
+        line.number(value);
         break;
-    case Unit::choice: append(out, p.choices[value]); break;
+    case Unit::choice: line.add(p.choices[value]); break;
     case Unit::time:
     case Unit::decay:
     case Unit::delay_time: {
         float s = p.unit == Unit::time ? seconds(value) : p.unit == Unit::decay ? decay_s(value) : delay_s(value);
         if ((param == voice_glide || param == lfo1_fade || param == lfo2_fade) && value == 0) {
-            append(out, "OFF");
+            line.add("OFF");
             break;
         }
-        if (s < 1.0f) { append_short(out, s * 1000.0f); append(out, "MS"); }
-        else { append_short(out, s); *out++ = 'S'; }
+        if (s < 1.0f) { add_short(line, s * 1000.0f); line.add("MS"); }
+        else { add_short(line, s); line.add('S'); }
         break;
     }
     case Unit::cutoff:
     case Unit::rate: {
         float hz = p.unit == Unit::cutoff ? cutoff_hz(value) : rate_hz(value);
-        if (hz >= 1000.0f) { append_short(out, hz * 0.001f); append(out, "K"); }
-        else append_short(out, hz);
-        append(out, "HZ");
+        if (hz >= 1000.0f) { add_short(line, hz * 0.001f); line.add('K'); }
+        else add_short(line, hz);
+        line.add("HZ");
         break;
     }
     }
-    *out = 0;
+    line.copy_to(text, 8);
 }
 
 }  // namespace synth
