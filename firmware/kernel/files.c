@@ -257,25 +257,30 @@ static u32 size32(FSIZE_t size) { return size > 0xFFFFFFFFu ? 0xFFFFFFFFu : (u32
 
 /* ---- mounting and the card -------------------------------------------------------------------------------- */
 
-/* Once a start-up: the CSD as read and the size taken from it ("CSD 400E0032 5B590000 ..." high word first, then
- * "CARD 62333952 SECTORS"), so a USB DRIVE size that is wrong can be traced to the register or the parse. */
+/* Once a start-up, for a card other than a CSD 1.0 one whose size was read (the only kind the emulator has): the CSD
+ * as read, high word first, over two lines of the status page's 21 characters ("CSD 400E0032 5B590000",
+ * "CSD 76B27F80 0A404000"), and the size taken from it ("CARD 62333952 SECTORS"). A USB DRIVE size that is wrong
+ * can then be traced to the register or the parse. */
 static void log_card_size(void)
 {
     static const char hex[] = "0123456789ABCDEF";
     static int done;
-    char line[40] = "CSD ";
-    int n = 4, w, i;
-    if (done) return;
+    char line[24];
+    int n, w, i;
+    if (done || (sd_csd[3] >> 30 == 0 && sd_sectors)) return;
     done = 1;
-    for (w = 3; w >= 0; w--) {
+    for (w = 3; w >= 0; w -= 2) {
+        n = 0;
+        line[n++] = 'C'; line[n++] = 'S'; line[n++] = 'D'; line[n++] = ' ';
         for (i = 28; i >= 0; i -= 4) line[n++] = hex[sd_csd[w] >> i & 15];
-        if (w) line[n++] = ' ';
+        line[n++] = ' ';
+        for (i = 28; i >= 0; i -= 4) line[n++] = hex[sd_csd[w - 1] >> i & 15];
+        line[n] = 0;
+        log_line(line);
     }
-    line[n] = 0;
-    log_line(line);
-    n = put_dec(line, 5, (int)sd_sectors);
     line[0] = 'C'; line[1] = 'A'; line[2] = 'R'; line[3] = 'D'; line[4] = ' ';
-    for (i = 0; " SECTORS"[i]; i++) line[n++] = " SECTORS"[i];
+    n = put_dec(line, 5, (int)sd_sectors);
+    for (i = 0; " SECTORS"[i] && n < 21; i++) line[n++] = " SECTORS"[i];
     line[n] = 0;
     log_line(line);
 }
