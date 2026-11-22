@@ -18,7 +18,8 @@
 // between body_top and body_bottom), Notice shows a message for a moment, and bar and meter draw levels.
 //
 // Widgets keep no pointers to the app beyond what it hands them (item names, parameters, values), which must
-// outlive the widget. Main context only. Text is upper case: the font has A-Z, 0-9, space and ! # + - . / : = ? % >.
+// outlive the widget. Main context only. Text is upper case: the font has A-Z (lower case draws as upper case), 0-9,
+// space and ! # + - . / : = ? % > < ( ) , _ ' * [ ].
 #pragma once
 
 #include <enaga/app.hpp>
@@ -71,10 +72,10 @@ inline void text_right(Canvas &canvas, int y, const char *text, uint8_t grey = 1
 
 // ---- Text -------------------------------------------------------------------------------------------------------
 
-// Whether Enaga's font has a character; it draws any other as '?'.
+// Whether Enaga's font has a character (lower case letters draw as upper case); it draws any other as '?'.
 inline bool drawable(char c) {
-    if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) return true;
-    for (const char *p = " !#+-./:=?%>"; *p; p++) if (*p == c) return true;
+    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) return true;
+    for (const char *p = " !#+-./:=?%><(),_'*[]"; *p; p++) if (*p == c) return true;
     return false;
 }
 
@@ -132,7 +133,7 @@ public:
         return number(octave);
     }
     // Text from outside the app, a file name, say, as the font can draw it: lower case raised, anything else the
-    // font lacks shown as '-', at most `max` characters. "kick_01.wav" becomes "KICK-01.WAV".
+    // font lacks shown as '-', at most `max` characters. "kick (1)é.wav" becomes "KICK (1)--.WAV" (é is two bytes).
     Line &shown(const char *text, int max = capacity) {
         for (int i = 0; text && text[i] && i < max; i++) {
             char c = text[i] >= 'a' && text[i] <= 'z' ? char(text[i] - 'a' + 'A') : text[i];
@@ -483,18 +484,22 @@ private:
 
 // ---- ParamPage --------------------------------------------------------------------------------------------------
 
-// One parameter: a name (up to 12 characters show), a range, the value a knob push returns to, and how to show the
-// value: names for each step from min (`labels`), a function, or the number with an optional unit.
+// One parameter: a name (up to 12 characters show), a range, the value a knob push returns to, how to show the
+// value (names for each step from min, `labels`; a function; or the number with an optional unit) and how far one
+// detent moves it. Designated initialisers name the ones wanted: {.name = "TEMPO", .min = 20, .max = 300,
+// .initial = 120, .unit = "BPM"}.
 struct Param {
     const char *name;
     int min, max, initial;
     const char *const *labels = nullptr;      // labels[value - min]
     void (*format)(int value, char *out) = nullptr;   // out holds at least 12 characters
     const char *unit = nullptr;               // after the number: "MS", "%"
+    int step = 1;                             // per detent, before acceleration
 };
 
 // Parameters on the knobs: the page's parameters in groups of four, in order, A-D on knobs A-D. The selection
-// buttons flip between groups; turning a knob changes its parameter (clamped); pushing it returns the parameter to
+// buttons flip between groups; turning a knob changes its parameter by its step a detent (clamped), faster when
+// the knob turns quickly and the range is wide (more than wide_steps steps); pushing it returns the parameter to
 // its initial value. Values live in the app's array, one per parameter, and the page only changes them.
 class ParamPage {
 public:
@@ -503,6 +508,11 @@ public:
     void set(const char *title, const Param *params, int count, int *values) {
         title_ = title; params_ = params; count_ = count; values_ = values; group_ = 0; changed_ = -1;
     }
+    // Other values for the same parameters (another track's, say), keeping the group shown.
+    void set_values(int *values) { values_ = values; }
+    // Turning quickly moves a wide parameter further a detent: on by default.
+    void set_acceleration(bool on) { accelerate_ = on; }
+    static constexpr int wide_steps = 100;
     // A name for each group (groups() of them), shown as tabs on the title line in place of "1/3".
     void set_group_names(const char *const *names) { group_names_ = names; }
     // Columns: the four parameters side by side, each with its name, value and bar, rather than in rows. Names and
@@ -541,8 +551,11 @@ public:
 
     Action encoder(int encoder, int delta) {
         int param = group_ * 4 + encoder;
-        if (encoder > 3 || param >= count_) return Action::none;   // VALUE and knobs past the group's end
-        return set_value(param, values_[param] + delta) ? Action::changed : Action::none;
+        if (encoder > 3 || param >= count_ || !delta) return Action::none;   // VALUE and knobs past the group's end
+        const Param &p = params_[param];
+        int step = p.step > 0 ? p.step : 1;
+        return set_value(param, values_[param] + delta * step * speed(param, delta, (p.max - p.min) / step))
+            ? Action::changed : Action::none;
     }
 
     // The value as shown: a label, the format function's text, or the number and unit.
@@ -582,6 +595,17 @@ public:
     }
 
 private:
+    // How many detents one counts for: 1, or more when the same parameter turns the same way again soon after (a
+    // quick spin) and it has more than wide_steps steps. Times between detents: under 30 ms 8, under 60 ms 3.
+    int speed(int param, int delta, int steps) {
+        uint32_t now = enaga::ms();
+        bool again = param == last_param_ && (delta > 0) == (last_delta_ > 0);
+        uint32_t gap = now - last_ms_;
+        last_param_ = param; last_delta_ = delta; last_ms_ = now;
+        if (!accelerate_ || !again || steps <= wide_steps) return 1;
+        return gap < 30 ? 8 : gap < 60 ? 3 : 1;
+    }
+
     // Tabs when the groups have names and they fit beside the title, else "2/3".
     void draw_groups(Canvas &canvas, int top) const {
         int chars = 0;
@@ -625,7 +649,9 @@ private:
     const Param *params_ = nullptr;
     int count_ = 0, group_ = 0, changed_ = -1;
     int *values_ = nullptr;
-    bool columns_ = false;
+    bool columns_ = false, accelerate_ = true;
+    int last_param_ = -1, last_delta_ = 0;
+    uint32_t last_ms_ = 0;
 };
 
 // ---- Dialog -----------------------------------------------------------------------------------------------------

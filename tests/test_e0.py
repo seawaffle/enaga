@@ -82,7 +82,10 @@ class E0(unittest.TestCase):
         self.assertEqual(result["log"], [
             "global constructed", "global 42", "virtual -32", "heap 3969", "static 303", "static constructions 1",
             "sorted first -4", "sorted last 17", "sum 33", "optional 5", "max 17",
-            f"int64 div {big // 977}", f"int64 mod {big % 977}", "float milli 666", "double micro 142857",
+            f"int64 div {big // 977}", f"int64 mod {big % 977}", f"int64 negative div {-(big // 977)}",
+            f"int64 negative mod {-(big % 977)}", f"uint64 div {0xFEDCBA9876543210 // 0x123456789}",
+            f"uint64 mod {0xFEDCBA9876543210 % 0x123456789}", "strcmp 1", "strncmp 1", "strchr 7", "strrchr 12",
+            "strchr end 1", "float milli 666", "double micro 142857",
             "update 10", "update 20", "update 30", "stop after updates 3"])
 
     def test_package_header(self):

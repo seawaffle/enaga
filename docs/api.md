@@ -257,8 +257,8 @@ fresh frame each time; Enaga sends it to the display by DMA after `draw` returns
 | `text(x, y, s, grey = 15)` | text in a 5 × 7 font, 6 pixels a character, `y` the top row |
 | `data()` | the pixels, `uint8_t[128 * 128]`, row-major: draw anything else here |
 
-The font has `A`-`Z` (lower case is shown as upper case), `0`-`9`, space and `! # + - . / : = ? % >`; other
-characters are left blank.
+The font has `A`-`Z` (lower case is shown as upper case), `0`-`9`, space and `! # + - . / : = ? % > < ( ) , _ ' *
+[ ]`; any other character is shown as `?`.
 
 ## LEDs
 
@@ -625,7 +625,12 @@ void draw(enaga::Canvas &canvas) override { canvas.clear(); list.draw(canvas); }
 - **Setting up:** construct it, or call `set(title, params, count, values)`, with an array of `Param` and the
   app's own `int` values, one per parameter. The page only changes those values.
 - **Changes:** after `Action::changed`, `changed()` is the parameter. `set_value(param, value)` sets one from the
-  app, clamped. `value(param)` reads one.
+  app, clamped. `value(param)` reads one. `set_values(values)` swaps in another array for the same parameters
+  (another track's, say) and keeps the group on show; `set` starts again at the first group.
+- **Speed:** one detent moves a parameter by its `step`. When a parameter has more than
+  `ParamPage::wide_steps` (100) steps, turning it quickly moves it further: a detent within 60 ms of the last one
+  the same way counts three, within 30 ms eight. `set_acceleration(false)` turns that off. (The times are first
+  guesses, to be tried on a unit.)
 - **Groups from the app:** `groups()`, `group()` and `show_group(n)`. `set_group_names(names)`, a name for each
   group, shows them as tabs on the title line, the current one lit, in place of "group/groups" (which stays when
   the names do not fit beside the title).
@@ -636,8 +641,9 @@ void draw(enaga::Canvas &canvas) override { canvas.clear(); list.draw(canvas); }
   initial one.
 - **A `Param`** has, in this order, `name` (12 characters show), `min`, `max` and `initial`, and how to show the
   value: `labels` (a name per step from `min`), `format`, a `void (*)(int value, char *out)` writing up to 12
-  characters and a terminating 0, or the number with an optional `unit`. So
-  `{"CUTOFF", 0, 127, 64, nullptr, hertz}` or `{"LEVEL", 0, 100, 80, nullptr, nullptr, "%"}`. The page's
+  characters and a terminating 0, or the number with an optional `unit`; then `step`, how far a detent moves it
+  (1). So `{"CUTOFF", 0, 127, 64, nullptr, hertz}`, or with designated initialisers
+  `{.name = "DELAY", .min = 0, .max = 2000, .initial = 250, .unit = "MS", .step = 10}`. The page's
   `format(param, out)` gives the text shown.
 
 **`Dialog`**: a question in a box over the screen.
@@ -715,7 +721,8 @@ canvas.text(0, 20, line);
 - `text()`, `length()`, `room()` (characters left), and `copy_to(out, size)` for a buffer such as a `Param`'s
   `format` output.
 
-`drawable(c)` says whether the font has a character; it draws any other as `?`.
+`drawable(c)` says whether the font has a character (lower case letters count, drawn as upper case); it draws any
+other as `?`.
 
 **The screen's frame.** A status line at the top, key hints on the bottom line, and the widgets between them:
 - `status_line(canvas, left, right)`: `left` bright, `right` (optional) dim at the right edge, and a rule under
@@ -744,8 +751,7 @@ canvas.text(0, 20, line);
   the block's peak passed from `audio` to `update` and a peak mark that holds for a second.
 
 **Layout helpers.** `screen_width` (128), `char_width` (6, the font's advance), `line_chars` (21 to a line), and
-`text_right(canvas, y, text, grey, x_end)` for right-aligned text. The font has A-Z, 0-9, space and
-`! # + - . / : = ? % >`.
+`text_right(canvas, y, text, grey, x_end)` for right-aligned text. The font is listed under "Display" above.
 
 ## DSP library
 
@@ -1000,8 +1006,15 @@ The `_memory` functions give the floats of zeroed memory the `_init` functions n
   `<algorithm>`, `<span>`, `<optional>`, `<variant>`, `<type_traits>`, `<bit>`, `<atomic>`, `<numbers>`,
   `<cstdint>` and the like. No allocating containers (`std::vector`, `std::string`), no iostreams.
 - **Memory:** `new`, `delete`, `malloc` and `free` work on the app's heap (everything above the image, about
-  124 MiB). Running out calls `fatal("out of memory")`. `memcpy`, `memmove`, `memset`, `memcmp` and `strlen` are
-  there; the rest of libc is not.
+  124 MiB). Running out calls `fatal("out of memory")`.
+- **Strings:** there is no C library and no `<string.h>`. `<enaga/string.h>` declares what the runtime provides:
+  `memcpy`, `memmove`, `memset`, `memcmp`, `strlen`, `strcmp`, `strncmp`, `strchr` and `strrchr`. The rest of
+  libc is not there (a call to it fails at link time as an undefined reference). `enaga::ui::Line` formats numbers
+  without printf.
+- **64-bit integers** work, division included: the C674x divides in software, and the runtime has its own
+  64-bit division (`__c6xabi_divlli` and the like) because libgcc's would pull in the C++ unwinder, which an app
+  cannot link. If a link fails with `undefined reference to __exidx_start`, some other libgcc helper has done
+  the same; report it.
 - **No libm:** use the DSP library's math.
 - **Stack:** a function's frame is limited to 16 KiB, and VLAs and `alloca` are refused at build time (Enaga's
   interrupt entry uses the 16 KiB below the stack pointer). Put large arrays in statics or on the heap.

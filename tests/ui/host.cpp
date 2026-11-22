@@ -206,7 +206,8 @@ static void test_line() {
     check(same(Line().hex(0x3C, 2).add(' ').hex(0xBEEF, 4), "3C BEEF"), "line: hex");
     check(same(Line().note(60), "C4") && same(Line().note(61), "C#4") && same(Line().note(0), "C-1")
           && same(Line().note(127), "G9") && same(Line().note(69), "A4"), "line: note names");
-    check(same(Line().shown("kick_01.wav"), "KICK-01.WAV"), "line: outside text made drawable");
+    check(same(Line().shown("kick_01.wav"), "KICK_01.WAV"), "line: outside text made drawable");
+    check(same(Line().shown("a\tb~c\xC3\xA9"), "A-B-C--"), "line: what the font lacks shown as '-'");
     check(same(Line().shown("abcdef", 3), "ABC"), "line: outside text cut at max");
     Line long_line("ABCDEFGHIJKLMNOPQRS");                 // 19 of 21
     check(!long_line.add_if_fits(" XYZ") && long_line.length() == 19, "line: a part that does not fit is left out");
@@ -216,8 +217,8 @@ static void test_line() {
     char small[5];
     Line("CUTOFF").copy_to(small, sizeof small);
     check(same(small, "CUTO"), "line: copy_to cuts to the buffer");
-    for (const char *p = "AZ09 !#+-./:=?%>"; *p; p++) check(drawable(*p), "drawable: the font's characters");
-    check(!drawable('a') && !drawable('_') && !drawable(','), "drawable: others are not");
+    for (const char *p = "AZaz09 !#+-./:=?%><(),_'*[]"; *p; p++) check(drawable(*p), "drawable: the font's characters");
+    check(!drawable('~') && !drawable('"') && !drawable(';') && !drawable('\xC3'), "drawable: others are not");
 }
 
 static void test_frame_and_notice() {
@@ -449,8 +450,58 @@ static void test_file_browser() {
     check(browser.count() == 1, "files: a name too long to keep is left out");
 }
 
+static void test_param_steps_and_speed() {
+    static const Param params[] = {
+        {.name = "TEMPO", .min = 20, .max = 300, .initial = 120, .unit = "BPM"},
+        {.name = "DELAY", .min = 0, .max = 2000, .initial = 250, .unit = "MS", .step = 10},
+        {.name = "MIX", .min = 0, .max = 100, .initial = 50},
+    };
+    int values[3] = {120, 250, 50};
+    ParamPage page("FX", params, 3, values);
+    g_ms = 10000;
+    page.encoder(1, 1);
+    check(values[1] == 260, "speed: a step of 10 a detent");
+    g_ms += 200;
+    page.encoder(0, 1);
+    check(values[0] == 121, "speed: one detent, turned slowly");
+    g_ms += 100; page.encoder(0, 1);
+    check(values[0] == 122, "speed: 100 ms later, still one");
+    g_ms += 40; page.encoder(0, 1);
+    check(values[0] == 125, "speed: 40 ms later, three");
+    g_ms += 10; page.encoder(0, 1);
+    check(values[0] == 133, "speed: 10 ms later, eight");
+    g_ms += 10; page.encoder(0, -1);
+    check(values[0] == 132, "speed: turning back starts again at one");
+    g_ms += 10; page.encoder(1, -1);
+    check(values[1] == 250, "speed: another knob starts at one");
+    g_ms += 10; page.encoder(1, -1);
+    check(values[1] == 170, "speed: then eight steps of 10 (2000 / 10 = 200 steps: wide)");
+    g_ms += 10; page.encoder(2, 1);
+    g_ms += 10; page.encoder(2, 1);
+    check(values[2] == 52, "speed: a range of 100 is not wide: never faster");
+    page.set_acceleration(false);
+    g_ms += 10; page.encoder(0, 1);
+    g_ms += 10; page.encoder(0, 1);
+    check(values[0] == 134, "speed: off");
+    page.encoder(0, 1000);
+    check(values[0] == 300, "speed: clamped");
+    page.set_acceleration(true);
+    page.key(ENAGA_KEY_PUSH_B, true);
+    check(values[1] == 250, "speed: a push still resets");
+
+    static const Param many[] = {{"A", 0, 9, 0}, {"B", 0, 9, 0}, {"C", 0, 9, 0}, {"D", 0, 9, 0}, {"E", 0, 9, 0}};
+    int first[5] = {}, second[5] = {1, 2, 3, 4, 5};
+    ParamPage tracks("TRACK", many, 5, first);
+    tracks.key(ENAGA_KEY_SELECT_RIGHT, true);
+    tracks.set_values(second);
+    check(tracks.group() == 1 && tracks.value(4) == 5, "set_values: other values, the same group");
+    tracks.encoder(0, 1);
+    check(second[4] == 6 && first[4] == 0, "set_values: turns change the new array");
+}
+
 int main() {
     test_line();
+    test_param_steps_and_speed();
     test_grid();
     test_pad_map();
     test_param_tabs_and_columns();

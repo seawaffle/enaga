@@ -19,7 +19,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "tests"))
 import paths  # noqa: E402
 import unit_card  # noqa: E402
-from emulate import Emulation  # noqa: E402
+from emulate import ENCODER_PINS, Emulation, turn  # noqa: E402  (ENCODER_PINS, turn: used by tests too)
 from test_e1 import E1, component, samples  # noqa: E402
 
 OUT = paths.BUILD / "unit-dry-run"
@@ -33,7 +33,6 @@ KEY_NAMES = {0: "PUSH B", 1: "PUSH A", 2: "PUSH C", 3: "PUSH D", 4: "PUSH VALUE"
              24: "LEFT", 25: "DOWN", 26: "F2", 27: "F4", 28: "F8", 29: "F6", 30: "CLR", 31: "OCTAVE R",
              **{STEP1 + n: f"STEP {n + 1}" for n in range(16)}}
 BUTTONS = dict(zip((27, 21, 26, 20, 28, 19, 29, 22, 30, 23), E1.LED_BUTTONS))   # key -> (a, b, c) of its green
-ENCODER_PINS = [((3, 14), (3, 15)), ((3, 12), (3, 10)), ((5, 2), (5, 0)), ((5, 5), (5, 4)), ((5, 7), (5, 8))]
 HANDOVER = {0x01840000: 0, 0x01840020: 4, 0x01840040: 3}
 HANDOVER_MARS = {17, 128, 192, 193, 194, 195, 199}
 
@@ -88,16 +87,6 @@ def press(emu, key, hold_ms=30):
     emu.run(hold_ms * MS)
     emu.key(key, False)
     emu.run(30 * MS)
-
-
-def turn(emu, encoder, detents):
-    (ba, pa), (bb, pb) = ENCODER_PINS[encoder]
-    sequence = (2, 0, 1, 3) if detents > 0 else (1, 0, 2, 3)   # phase = pin A | pin B << 1; 3 is rest
-    for _ in range(abs(detents)):
-        for phase in sequence:
-            emu.cpu.gpio_input(ba, pa, phase & 1)
-            emu.cpu.gpio_input(bb, pb, phase >> 1 & 1)
-            emu.run(3 * MS)
 
 
 def mcu_traffic(emu, ms, pressed=None):

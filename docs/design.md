@@ -408,7 +408,13 @@ emulator where it can be, and the ones that need the unit collect into a session
    slots, both with labels, a selection and lit states; a file browser on `List` and the file service (folders,
    back up, a file type); a four-column layout and page tabs for `ParamPage`. Each with a host test and a page in
    an example. The 16-step grid stays with apps: every sequencer draws its own.
-7. **Exit.** On a unit: copy an app over USB DRIVE and run it; play audio from a DAW through the unit and record
+7. (**Done** 2026-11-22, see the log.) **What the first outside apps ran into.** A developer writing an app on
+   0.2.0 listed what they had to work around: 64-bit division failing to link; no `<string.h>`; no number
+   formatting (step 5's `Line`); `ParamPage` without a step size or faster turning for wide ranges, and resetting
+   its group when values are swapped; characters missing from the font; and the emulator script's fixed card,
+   keys-only input, no way to run an app's `stop()`, and an unstated `audio.wav` format. All but the formatting are
+   this step.
+8. **Exit.** On a unit: copy an app over USB DRIVE and run it; play audio from a DAW through the unit and record
    the unit into it; the battery mark falls with the batteries and the unit switches
    itself off cleanly.
 
@@ -464,7 +470,7 @@ of the input routes, which need equipment. The exit test passed as a simulation 
 downloads); a person doing it moves to E6. USB uses test IDs until pid.codes grants one.
 
 E5 ("E5 plan"): steps 1-4 (battery, SYNC polarity, USB DRIVE, USB audio) are done on the emulator and merged
-(2026-11-22); the exit, step 7, is a unit session over checklist steps 19-21, with 16, 17 and 7 still owed from E4.
+(2026-11-22); the exit, step 8, is a unit session over checklist steps 19-21, with 16, 17 and 7 still owed from E4.
 Its card is staged by `tools/unit_card.py` (the dry run, steps 1-10, passes 141/141).
 
 ## Open items
@@ -1854,4 +1860,33 @@ when a level changes.
   file service: sorting, filtering, going in and up, errors, late listings and over-long names.
   `tests/test_widgets.py` adds the grid, the tabs and columns, pads lighting the map, and browsing a card with
   `/SAMPLES/Drums/kick_01.wav` on the emulator.
+
+### What the first outside apps ran into, E5 step 7 (2026-11-22)
+
+A list from a developer who wrote an app on 0.2.0, worked through in order.
+- **64-bit division.** libgcc's `_divdi3.o` and its relatives carry unwind tables naming
+  `__c6xabi_unwind_cpp_pr3`, which pulls in libgcc's unwinder, whose `__exidx_start` / `__exidx_end` the app
+  linker script never defines (it discards `.c6xabi.exidx`): `undefined reference to __exidx_start`, far from the
+  cause. Defining the symbols would link the unwinder into every app that divides; instead the runtime defines
+  `__c6xabi_divlli`, `__c6xabi_divull`, `__c6xabi_remlli` and `__c6xabi_remull` (shift and subtract, a zero
+  divisor is `fatal`), which come before libgcc, so its objects are never linked. libgcc's other helpers
+  (shifts, multiplies, float) carry no unwind references. cxxcheck had an `int64` division check all along, but
+  on constants the compiler folded; it now divides `volatile` values, signed and unsigned, and the old runtime
+  fails to link it exactly as reported.
+- **Strings.** `<enaga/string.h>` declares the runtime's `memcpy`, `memmove`, `memset`, `memcmp`, `strlen`, and
+  the new `strcmp`, `strncmp`, `strchr`, `strrchr`. Not a plain `<string.h>` in Enaga's include folder: that
+  would also shadow the system's in host builds of Enaga's headers (tests/ui). cxxcheck checks each.
+- **`ParamPage` speed.** `Param::step` (per detent), and acceleration for parameters of more than 100 steps:
+  turning the same parameter the same way within 60 ms counts three, within 30 ms eight. Encoder events come
+  once a main-loop pass with the detents since, so the page times them itself (`enaga::ms`). It follows the
+  parameter, not the knob, so flipping groups starts afresh. The times are guesses for the unit to settle; the
+  widget tests now turn at 80 ms a detent for exact values, and check a 12 ms spin separately.
+  `set_values` swaps the value array and keeps the group.
+- **Font.** `< ( ) , _ ' * [ ]` added (drawn for Enaga, in the font's 5 x 7 style). Lower case always drew as
+  upper case, so `ui::drawable` now says so; api.md had said other characters are left blank, when they draw as
+  `?`. `Line::shown` keeps `_` now.
+- **Emulator script.** `Emulation(card_mib=...)`, `turn()` (moved from the dry run, which still exports it),
+  `power_off()` and `card_file()`; the command line's `--card-mib`, `--file`, `--turn`, `--power-off` and `--get`,
+  and `--help` shows the whole description, `audio.wav`'s format included. `Emulation` now sets the encoders'
+  pins at rest itself.
 

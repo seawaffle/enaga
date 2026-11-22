@@ -16,7 +16,6 @@ sys.path.insert(0, str(ENAGA / "tools"))
 
 import build_app  # noqa: E402
 import paths  # noqa: E402
-from unit_dry_run import ENCODER_PINS, turn  # noqa: E402
 
 BOOT = 300_000_000
 MS = 372_000
@@ -37,9 +36,6 @@ class Widgets(unittest.TestCase):
         self.emu = Emulation(ENAGA / "examples" / "widgets", card_files={
             "/SAMPLES/Drums/kick_01.wav": card / "kick.wav", "/SAMPLES/notes.txt": card / "notes.txt"})
         self.addCleanup(self.emu.close)
-        for pins in ENCODER_PINS:                    # at rest both encoder pins are high
-            for bank, pin in pins:
-                self.emu.cpu.gpio_input(bank, pin, True)
         if self._testMethodName == "test_the_levels_page_meters_the_input":     # set before the codec starts
             self.emu.cpu.audio_input(struct.pack("<II", 0x20000000, 0x10000000) * 64, loop=True)
         self.assertIsNone(self.emu.run(BOOT)["error"])
@@ -50,8 +46,8 @@ class Widgets(unittest.TestCase):
         self.emu.key(key, False)
         self.assertIsNone(self.emu.run(20 * MS)["error"])
 
-    def turn(self, encoder, detents):               # through the encoder's quadrature pins (tools/unit_dry_run.py)
-        turn(self.emu, encoder, detents)
+    def turn(self, encoder, detents, phase_ms=20):  # 80 ms a detent: deliberate, so a ParamPage does not speed up
+        self.emu.turn(encoder, detents, phase_ms)
         self.assertIsNone(self.emu.run(10 * MS)["error"])
 
     def log(self):
@@ -77,6 +73,10 @@ class Widgets(unittest.TestCase):
         self.press(SELECT_RIGHT)                     # the second group: RELEASE on knob A
         self.turn(KNOB_A, -2)
         self.assertEqual(self.log()[-1], "CHANGED 4 298")
+        self.turn(KNOB_A, 5, phase_ms=3)             # a quick spin, 12 ms a detent: 1 + 4 x 8
+        self.assertEqual(self.log()[-1], "CHANGED 4 331")
+        self.turn(KNOB_B, 5, phase_ms=3)             # LEVEL, 0-100: not wide, never faster
+        self.assertEqual(self.log()[-1], "CHANGED 5 85")
 
         self.press(F4)                               # text entry, starting from MY SOUND
         self.turn(KNOB_B, 1)                         # M -> N
@@ -166,7 +166,7 @@ class Widgets(unittest.TestCase):
         self.press(OK)                                                      # DRUMS/ first, then NOTES.TXT
         self.assertIsNone(self.emu.run(300 * MS)["error"])
         self.press(OK)
-        self.assertEqual(self.log()[-1], "FILE KICK-01.WAV")
+        self.assertEqual(self.log()[-1], "FILE KICK_01.WAV")
         self.press(CLR); self.press(CLR)                                    # back up to the root
         self.assertIsNone(self.emu.run(300 * MS)["error"])
         self.press(DOWN); self.press(OK)
