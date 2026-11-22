@@ -55,7 +55,8 @@ one package. `--name` is the display name in the Enaga menu (default: the direct
 characters, shown upper case); `--app-version` is a number stored in the package. On the card the package goes at
 `/ENAGA/APPS/<NAME>/APP.ENA`, `<NAME>` a folder name of up to 8 letters, digits, `_` or `-`. With Enaga on the unit,
 the menu's USB DRIVE page shows the card to a computer as a USB drive, so packages can be copied without taking the
-card out (the running app is stopped first; eject the drive on the computer to finish). That folder name is the app's **package name**, which
+card out (the running app is stopped first; eject the drive on the computer to finish, or press OK on the unit,
+which waits until the computer has stopped writing). Choosing the app afterwards loads the new package. That folder name is the app's **package name**, which
 also names its data folder (`/ENAGA/DATA/<NAME>`), so keep it when updating the app.
 
 **The icon.** An optional `icon.txt` in the directory is the app's icon in the Enaga menu, shown beside its name:

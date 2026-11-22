@@ -376,7 +376,7 @@ emulator where it can be, and the ones that need the unit collect into a session
    SYNC OUT's idle level. Small; the unit with a falling-edge device checks it.
 3. (**Done** on the emulator 2026-11-21, see the log; the unit to come.) **USB mass storage.** The card as a USB drive, so apps and samples go on without taking the card out. The SD
    card cannot be used by FatFs and by the computer at once. *Decided (2026-11-21):* a USB DRIVE page in the Enaga menu that
-   stops the app, unmounts the card and hands it to the computer until it is ejected (or OK is pressed), then
+   stops the app, unmounts the card and hands it to the computer until it is ejected (or OK is pressed, which waits for the writes to stop), then
    remounts and goes back to the menu; rather than a drive that appears while apps run (files would fail
    underneath them, and a computer writes whenever it likes). Class: bulk-only transport, SCSI transparent,
    on top of the existing SD driver, added to the USB MIDI device as a composite (TinyUSB's MSC class). Testing:
@@ -462,7 +462,9 @@ Its card is staged by `tools/unit_card.py` (the dry run, steps 1-10, passes 141/
   about 2 ms would still cost packets.
 - USB DRIVE: the card's size from its CSD is checked only on the emulator's SDSC card (CSD 1.0); an SDHC or SDXC
   card (CSD 2.0) is first read on the unit. Whether each computer's eject sends START STOP UNIT (which closes the
-  page by itself) is to see on Windows, macOS and Linux; OK ends it either way. Speed over full-speed USB is
+  page by itself) is to see on Windows, macOS and Linux; OK ends it either way, after 2 s with no writes. That
+  covers a cache flushed within a second or so of the copy (macOS; Linux desktops mount removable FAT drives with
+  `flush`); a computer that holds writes longer would still lose them, so ejecting stays the safe way. Speed over full-speed USB is
   unmeasured (checklist step 20).
 - SYNC polarity: POL IN RISE arms the pin's falling edge, as the stock RISE does, on the reading that the board
   inverts SYNC IN; nothing has shown that on a unit. Only the phase depends on it (by the other device's pulse
@@ -1783,3 +1785,14 @@ user's request: `usb_iso_stream_out` / `_in`, ISOUPDATE, SOF every millisecond).
   emulator, gaps alternating 5.25 / 6.75 ms in a 12 ms pattern), and a 6.75 ms gap could catch two openings in a
   row, a genuine release. Twelve openings 10 ms apart now: never two in a row, and several sampled; the test fails
   again if the debounce is removed (checked). The firmware is unchanged.
+
+### USB DRIVE: OK waits for the writes (2026-11-22)
+
+macOS and Linux keep a copy's writes in memory and send them a moment after the copy looks finished, so OK on the
+USB DRIVE page could end the drive in the middle of them and cut the file short. OK now starts a wait: the page
+shows WAITING FOR THE WRITES TO FINISH and ends once the computer has written nothing for 2 s (at once if it wrote
+nothing at all); OK or CLR again ends it at once. The quiet time is measured in `menu_service` from the write
+count, so `usb.c` is unchanged. *Decided:* no automatic restart of the app afterwards; the menu stays, and choosing
+the app loads the new package, as leaving the menu always works. `tests/test_usb_drive.py`: OK waits while a write
+arrives late, restarts the wait on another, ends 2 s after the last; OK twice ends it at once. Checklist step 20
+gains copying over the running app and pressing OK.
