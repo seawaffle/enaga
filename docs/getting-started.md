@@ -93,7 +93,8 @@ Things to try in `app.cpp`, building and copying again after each:
 The rules that matter most:
 - **Two contexts.** The main context gets events and draws; `audio()` runs every 64 frames (1.33 ms) and must
   never wait. Share state between them in single words, each written by one side only, as the template does.
-- **No libc or libm.** Use the DSP library's math (`enaga::dsp::exp2`, `semitones`, `sin_turns` and the rest).
+- **No libc or libm.** Use the DSP library's math (`enaga::dsp::exp2`, `semitones`, `sin_turns` and the rest),
+  `enaga::ui::Line` to put numbers into text, and `<enaga/string.h>` for `strcmp`, `memcpy` and their kin.
 - **Allocate in `init()`.** `new` works, but never in `audio()`.
 - **Packed data** (file formats, SysEx) at odd addresses: read and write it with `<enaga/bytes.hpp>`. A misaligned
   32-bit access on this processor does not fault; it silently uses the wrong address.

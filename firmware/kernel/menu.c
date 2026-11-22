@@ -198,6 +198,15 @@ static void fill(int x, int y, int w, int h, u8 grey)
     for (j = y; j < y + h; j++) for (i = x; i < x + w; i++) gfx_pixel(i, j, grey);
 }
 
+/* The frame <enaga/ui.hpp> gives apps (status_line, hint_line, List's cursor), so Enaga's pages look like theirs. */
+void ui_title(const char *title)
+{
+    gfx_text(0, 0, title, 15);
+    fill(0, 9, CANVAS_W, 1, 3);
+}
+void ui_hint(const char *text, int row) { gfx_text(0, CANVAS_H - 8 - 10 * row, text, 6); }
+void ui_cursor_bar(int y, int h) { fill(0, y, CANVAS_W - 4, h, 3); }
+
 /* On batteries, a battery at the top right with one bar per level (power.c); nothing on USB or adapter power. */
 static void draw_battery(int x, int y)
 {
@@ -230,7 +239,7 @@ static void drive_draw(void)
 {
     char line[32];
     gfx_clear(0);
-    gfx_text(0, 0, "USB DRIVE", 15);
+    ui_title("USB DRIVE");
     draw_battery(CANVAS_W - 16, 0);
     if (!usb_configured()) gfx_text(0, 20, "CONNECT A USB CABLE", 12);
     else if (!usb_drive_read_sectors) gfx_text(0, 20, "WAITING FOR THE", 12);
@@ -244,11 +253,11 @@ static void drive_draw(void)
     if (drive_stopping) {
         gfx_text(0, 84, "WAITING FOR THE", 12);
         gfx_text(0, 93, "WRITES TO FINISH", 12);
-        gfx_text(0, 119, "OK AGAIN: STOP NOW", 6);
+        ui_hint("OK AGAIN: STOP NOW", 0);
     } else {
         gfx_text(0, 84, "EJECT IT ON THE", 8);
         gfx_text(0, 93, "COMPUTER TO FINISH", 8);
-        gfx_text(0, 119, "OK: STOP", 6);
+        ui_hint("OK: STOP", 0);
     }
 }
 
@@ -258,7 +267,7 @@ void menu_draw(void)
     if (menu_settings) { settings_draw(); return; }
     if (menu_drive) { drive_draw(); return; }
     gfx_clear(0);
-    gfx_text(0, 0, "ENAGA", 15);
+    ui_title("ENAGA");
     gfx_text(36, 0, ENAGA_VERSION, 6);
     draw_battery(CANVAS_W - 16, 0);
     if (menu_message[0]) gfx_text(0, 12, menu_message, 12);
@@ -266,7 +275,7 @@ void menu_draw(void)
     for (i = menu_top, y = MENU_TOP; i <= LINE_STATUS && i < menu_top + MENU_ROWS; i++, y += MENU_LINE) {
         int running = i < menu_count && app_current && same(menu_names[i], app_folder);
         char shown[16];                       /* 15 characters: from x = 22 to the running mark */
-        if (i == menu_cursor) fill(0, y, CANVAS_W - 4, MENU_LINE - 1, 3);
+        if (i == menu_cursor) ui_cursor_bar(y, MENU_LINE - 1);
         if (i == LINE_SETTINGS) draw_builtin(1, y + 1, icon_settings);
         else if (i == LINE_DRIVE) draw_builtin(1, y + 1, icon_drive);
         else if (i == LINE_STATUS) draw_builtin(1, y + 1, icon_status);

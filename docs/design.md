@@ -414,7 +414,10 @@ emulator where it can be, and the ones that need the unit collect into a session
    its group when values are swapped; characters missing from the font; and the emulator script's fixed card,
    keys-only input, no way to run an app's `stop()`, and an unstated `audio.wav` format. All but the formatting are
    this step.
-8. **Exit.** On a unit: copy an app over USB DRIVE and run it; play audio from a DAW through the unit and record
+8. (**Done** 2026-11-22, see the log.) **Enaga's own screens and the synth on the newer work.** The synth draws
+   with the toolkit where it fits (the status line, a `List` of patches, bars, a `Notice`, `Line` for its text)
+   and takes pressure from Enaga's aftertouch; the menu, SETTINGS and USB DRIVE pages share the toolkit's frame.
+9. **Exit.** On a unit: copy an app over USB DRIVE and run it; play audio from a DAW through the unit and record
    the unit into it; the battery mark falls with the batteries and the unit switches
    itself off cleanly.
 
@@ -470,7 +473,7 @@ of the input routes, which need equipment. The exit test passed as a simulation 
 downloads); a person doing it moves to E6. USB uses test IDs until pid.codes grants one.
 
 E5 ("E5 plan"): steps 1-4 (battery, SYNC polarity, USB DRIVE, USB audio) are done on the emulator and merged
-(2026-11-22); the exit, step 8, is a unit session over checklist steps 19-21, with 16, 17 and 7 still owed from E4.
+(2026-11-22); the exit, step 9, is a unit session over checklist steps 19-21, with 16, 17 and 7 still owed from E4.
 Its card is staged by `tools/unit_card.py` (the dry run, steps 1-10, passes 141/141).
 
 ## Open items
@@ -1889,4 +1892,26 @@ A list from a developer who wrote an app on 0.2.0, worked through in order.
   `power_off()` and `card_file()`; the command line's `--card-mib`, `--file`, `--turn`, `--power-off` and `--get`,
   and `--help` shows the whole description, `audio.wav`'s format included. `Emulation` now sets the encoders'
   pins at rest itself.
+
+### Enaga's screens and the synth on the newer work, E5 step 8 (2026-11-22)
+
+What steps 5-7 offer, put to use where Enaga and its example drew things by hand.
+- **The synth** (an exception to "bug fixes only", as its job is to show how an app is written): the status line
+  (patch, voices, load), the PATCH list as a `ui::List` (UP / DOWN now move it as well as VALUE, and it stops at
+  the ends rather than wrapping; the loaded patch is marked `>` rather than with a block, and empty slots are no
+  longer dimmed), `ui::bar`, a `Notice` for its messages, and `Line` in place of its own number and text helpers,
+  in `params.cpp`'s formatting too. Paths stay hand-built: a `Line` is a screen's line, shorter than a path.
+  Pressure now comes from `on_pad_pressure` (Enaga's aftertouch, from the pad's resting reading after the hit)
+  rather than the synth's own curve over raw readings, which began at the press threshold, so a hard hit no
+  longer read as pressure.
+- **Not** `ParamPage`: the synth's groups hold two to four parameters picked from one table, and their values are
+  `int16_t` in the engine, written with single stores the audio context reads. `ParamPage` wants four to a group
+  in order and an `int` array; the synth draws its rows the same way instead.
+- **The menu, SETTINGS and USB DRIVE pages** (C, in the firmware, so not the C++ toolkit): `ui_title`,
+  `ui_hint` and `ui_cursor_bar` in `menu.c` draw the toolkit's frame: a rule under the title, hints on the bottom
+  rows (120 and 110), and the lit bar for the current line. SETTINGS now marks its line with the bar instead of
+  `>`, at 11 px a row like a `List` (eight on screen, with the same marks when there is more).
+- **The template** shows the frame too: a status line with the note playing (`Line::note`), the parameter page
+  under it and a key hint at the bottom; its ATTACK and RELEASE (0-2000 and 0-4000 ms) now speed up when turned
+  quickly. getting-started.md's rules point at `Line` and `<enaga/string.h>`.
 

@@ -1,5 +1,6 @@
 // My app: a starting point for an Enaga app (docs/getting-started.md). A one-voice synth: the pads and MIDI notes
-// play it, and the four knobs set its wave, attack, release and level on a parameter page (<enaga/ui.hpp>).
+// play it, and the four knobs set its wave, attack, release and level on a parameter page. The screen comes from
+// <enaga/ui.hpp>: a status line with the note playing, the page, and a key hint at the bottom.
 //
 // Two contexts run this code (docs/api.md, "The two contexts"): the main context gets the events and draws; the
 // audio context runs audio() every 64 frames. They share a few words below, each written by one side only.
@@ -28,7 +29,7 @@ class MyApp : public enaga::App {
 public:
     bool init() override {
         for (int i = 0; i < kParamCount; i++) values_[i] = kParams[i].initial;
-        page_.set("MY APP", kParams, kParamCount, values_);
+        page_.set("SOUND", kParams, kParamCount, values_);
         return true;
     }
 
@@ -51,8 +52,11 @@ public:
 
     void draw(enaga::Canvas &canvas) override {
         canvas.clear();
-        page_.draw(canvas, 0);
-        canvas.text(0, 120, note_ >= 0 ? "PLAYING" : "PLAY A PAD", note_ >= 0 ? 15 : 5);
+        enaga::ui::Line playing;
+        if (note_ >= 0) playing.add("PLAYING ").note(note_);   // "PLAYING C3"
+        enaga::ui::status_line(canvas, "MY APP", playing);
+        page_.draw(canvas, enaga::ui::body_top);
+        enaga::ui::hint_line(canvas, note_ >= 0 ? "PUSH A KNOB: RESET IT" : "PLAY A PAD");
     }
 
     // ---- audio context ----

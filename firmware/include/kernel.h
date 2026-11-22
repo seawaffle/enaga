@@ -120,6 +120,11 @@ void menu_open(const char *message);          /* message: a line under the title
 void menu_close(void);                        /* back to the running app (none: stays) */
 void menu_event(const enaga_event_t *event);
 void menu_draw(void);
+/* The Enaga screens' frame, as apps' <enaga/ui.hpp> draws it: a title with a rule under it, key hints on the
+ * bottom line (row 0) or the rows above it, a lit bar behind a list's current line. */
+void ui_title(const char *title);
+void ui_hint(const char *text, int row);
+void ui_cursor_bar(int y, int h);
 void menu_service(u32 ms);                    /* main loop: the USB DRIVE page's end */
 extern int menu_drive;                        /* the USB DRIVE page is open: the card is the computer's */
 /* power.c: the battery level and the switch-off when it is empty */
