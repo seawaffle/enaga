@@ -646,5 +646,22 @@ unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it mut
     - **Both at once** for five minutes: no clicks or dropouts either way. Note the computer and its sample rate
       setting (48 kHz).
     - USB MIDI and USB DRIVE still work alongside. Unplug while playing: nothing crashes; plug back in and it plays.
+22. **The UI toolkit and the newer screens (E5 steps 5-8).** Copy `widgets/ENAGA/APPS/WIDGETS` into the card's
+    `/ENAGA/APPS`, with a few `.WAV` files in a `/SAMPLES` folder.
+    - **Menu and SETTINGS:** a thin rule under each title, the current line on a lit bar (SETTINGS too, which used
+      `>`), hints on the bottom lines. Note anything cut off or overlapping.
+    - **WIDGETS:** F2-F8 are its pages. F6 LEVELS: a signal into INPUT moves the meters, with a peak mark that holds
+      about a second; knob A moves PAN either side of a centre mark. F7 PADS: each pad lights its own cell (lower
+      row C D E F G A B C, upper row C# D# F# G# A#), so the map matches the panel; note any cell that lights for
+      the wrong pad. F8 FILES: OK into SAMPLES, the WAV files listed (folders first), OK on one shows it picked,
+      CLR goes back up.
+    - **Turning speed:** F3 EDIT, F1 for columns or not; knob D (ATTACK, 0-2000 MS): turned slowly it moves 1 a
+      detent, spun quickly it moves much further (3 or 8 a detent). Is the speed-up comfortable, too eager or too
+      timid? LEVEL (0-100) never speeds up.
+    - **Font:** F4 NAME shows the character set as you step through it; the new `< ( ) , _ ' * [ ]` are in file
+      names on the FILES page if the card has such names (`KICK_01.WAV`).
+    - **Synth:** F1 + F2, PATCH: UP / DOWN move as well as VALUE, the loaded patch marked `>`; a saved patch shows
+      SAVED U1 on a bar over the scope for two seconds. Pressure: hold a pad and press harder with a modulation
+      slot set to PRESS (MOD page): it should respond only after the hit, not to the hit itself.
 
 Afterwards the official update restores the unit ("Installing and recovery").
