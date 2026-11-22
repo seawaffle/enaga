@@ -1915,3 +1915,18 @@ What steps 5-7 offer, put to use where Enaga and its example drew things by hand
   under it and a key hint at the bottom; its ATTACK and RELEASE (0-2000 and 0-4000 ms) now speed up when turned
   quickly. getting-started.md's rules point at `Line` and `<enaga/string.h>`.
 
+### USB audio on a computer: refused requests hung it (2026-11-22, unit session)
+
+On the unit the computer listed the audio device, but playing to it hung the player and Audacity could not record.
+On the emulator, the request computers send as a stream starts, SET_CUR of the endpoint's sampling frequency
+(UAC1 5.2.3.2.3.1, sent although the descriptor offers no controls), timed out rather than stalled. Two faults:
+- **Refused requests never stalled.** TinyUSB's MUSB port leaves the SETUP's RXRDY parked when the request has no
+  data stage or an OUT one, and its EP0 stall wrote SendStall without servicing it; the core went on NAKing, and
+  the computer's control transfer timed out (seconds, then a hang). The stall now services RXRDY too (vendored
+  README); `tests/test_usb.py` refuses a request of each shape and expects a stall and a working device after,
+  and fails on the old code. The emulator's host had only ever sent requests the device knew.
+- **The sampling frequency was refused.** `usb_audio.c` now accepts SET_CUR (a rate other than 48,000 is logged,
+  not refused mid-transfer) and answers GET_CUR / MIN / MAX / RES with 48,000. Anything else for the audio
+  interfaces or endpoints is refused and logged on the status page as `USB REQ <type> <request> <value> <index>`
+  (the first eight), so the next surprise shows itself. `tests/test_usb_audio.py` covers both.
+

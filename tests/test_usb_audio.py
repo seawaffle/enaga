@@ -109,6 +109,24 @@ class UsbAudio(unittest.TestCase):
         self.assertIn(bytes([9, 5, EP_IN, 0x05]), config)                       # isochronous, asynchronous
         self.assertIn(bytes([9, 4, 4, 0, 2, 8, 6, 0x50]), config)               # the drive is interface 4
 
+    def test_sampling_rate_requests(self):
+        # What computers send as a stream starts (UAC1 5.2.3.2.3.1): the endpoint's sampling frequency, 3 bytes.
+        rate = (48000).to_bytes(3, "little")
+        for ep in (EP_OUT, EP_IN):
+            self.assertEqual(self.emu.cpu.usb_control((0x22, 0x01, 0x0100, ep), rate)["status"], "ok")   # SET_CUR
+            for request in (0x81, 0x82, 0x83):                                  # GET_CUR, GET_MIN, GET_MAX
+                result = self.emu.cpu.usb_control((0xA2, request, 0x0100, ep), 3)
+                self.assertEqual((result["status"], bytes(result["data"])), ("ok", rate), hex(request))
+        self.assertEqual(self.emu.cpu.usb_control((0x22, 0x01, 0x0100, EP_OUT),
+                                                  (44100).to_bytes(3, "little"))["status"], "ok")   # taken, but
+        self.assertIn("USB REQ 22 01 0100 0003", self.emu.report()["log"])     # logged: 48 kHz is the only rate
+        self.assertEqual(self.emu.cpu.usb_control((0x22, 0x01, 0x0200, EP_OUT), b"\0")["status"], "stall")  # pitch
+        self.assertIn("USB REQ 22 01 0200 0003", self.emu.report()["log"])  # what is refused, logged
+        self.usb_input()                                                        # and streams still start
+        self.start()
+        rows = self.stream([48] * 300)
+        self.assertGreater(sum(1 for r in rows if r["status"] == "data"), 290)
+
     def test_the_computers_audio_comes_back_through_the_app(self):
         self.usb_input()
         self.start()

@@ -76,6 +76,18 @@ class Usb(unittest.TestCase):
         s = self.emu.cpu.usb_state()
         self.assertEqual((s["configuration"], s["stalls"], s["errors"], s["toggle_errors"]), (1, 0, 0, 0))
 
+    def test_a_refused_request_stalls_and_the_device_answers_on(self):
+        # A request the device does not know must stall in every shape, not leave the computer waiting: with no
+        # data stage, with data from the computer, and with data to it. (The first two once timed out: the
+        # MUSB port's stall left the SETUP's RXRDY parked, dcd_musb.c dcd_edpt_stall.)
+        self.start()
+        for setup, data in [((0x40, 0x55, 0, 0), None), ((0x41, 0x55, 0, 1), b"\1\2\3"),
+                            ((0xC0, 0x55, 0, 0), 4), ((0x21, 0x0B, 1, 0), None)]:
+            result = self.emu.cpu.usb_control(setup, data)
+            self.assertEqual(result["status"], "stall", setup)
+            product = self.emu.cpu.usb_control((0x80, 6, 0x0302, 0x0409), 64)   # and the next request works
+            self.assertEqual(product["status"], "ok", setup)
+
     def test_product_name_follows_the_device(self):
         self.start(bootloader_file="Lofi-12 XT.bin")
         product = self.emu.cpu.usb_control((0x80, 6, 0x0302, 0x0409), 64)

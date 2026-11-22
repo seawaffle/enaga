@@ -931,8 +931,11 @@ void dcd_edpt_stall(uint8_t rhport, uint8_t ep_addr) {
       } else {
         // Forcing EP0 to IDLE: any RXRDY parked by the aborted transfer's flow control is stale,
         // clear it so the next SETUP IRQ is not gated off.
+        /* Enaga: and service it with the stall. A request with no data stage, or an OUT one, leaves its SETUP's
+         * RXRDY parked (pipe0_start_setup); SendStall alone then never goes out, the core NAKs the host's next
+         * packet for good, and the host's control transfer times out instead of seeing a stall. */
+        ep_csr->csr0l = pipe0->rxrdy_consumed ? (MUSB_CSRL0_STALL | MUSB_CSRL0_RXRDYC) : MUSB_CSRL0_STALL;
         pipe0->rxrdy_consumed = false;
-        ep_csr->csr0l = MUSB_CSRL0_STALL;
       }
     }
   } else {

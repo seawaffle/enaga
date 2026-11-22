@@ -16,7 +16,12 @@
  *     terminal 3 -> USB streaming terminal 4, endpoint 0x83, asynchronous. Both 196 bytes (49 frames at most).
  *     No feature unit, so computers use their own volume.
  *   - This file is a TinyUSB class driver for interfaces 2 and 3: it claims them, allocates their FIFOs
- *     (double-buffered) and answers SET_INTERFACE. Alternate setting 1 starts a stream, 0 stops it.
+ *     (double-buffered) and answers SET_INTERFACE. Alternate setting 1 starts a stream, 0 stops it. Computers also
+ *     set and read each endpoint's sampling frequency as a stream starts (UAC1 5.2.3.2.3.1), although the
+ *     descriptor offers no controls: SET_CUR is accepted (another rate than 48,000 is logged, as below) and the
+ *     GETs answer 48,000. Any other request
+ *     for these interfaces or endpoints is refused (a stall) and logged ("USB REQ 22 01 0200 0003": request type,
+ *     request, value, index), so a computer's surprise shows on the status page.
  *   - Packets do not go through TinyUSB's transfers, which finish in the main loop (about 850 passes a second, less
  *     while an app draws). They are moved in the USB interrupt on every SOF (1 ms; the SOF interrupt is on while
  *     a stream runs): the OUT packet that arrived in the last frame is read from the FIFO, and the IN packet for
@@ -239,13 +244,54 @@ static uint16_t uac_open(uint8_t rhport, tusb_desc_interface_t const *itf, uint1
     return (uint16_t)(p - (const uint8_t *)itf);
 }
 
+/* A request refused: logged (the first few), and a stall. */
+static bool refuse(tusb_control_request_t const *request)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    static u32 logged;
+    char line[] = "USB REQ tt rr vvvv iiii";
+    u32 fields[4] = {request->bmRequestType, request->bRequest, request->wValue, request->wIndex};
+    int at[4] = {8, 11, 14, 19}, digits[4] = {2, 2, 4, 4}, f, d;
+    if (logged >= 8) return false;
+    logged++;
+    for (f = 0; f < 4; f++)
+        for (d = 0; d < digits[f]; d++) line[at[f] + d] = hex[(fields[f] >> (4 * (digits[f] - 1 - d))) & 15];
+    log_line(line);
+    return false;
+}
+
+/* The sampling frequency control of an endpoint (UAC1 5.2.3.2.3.1): 3 bytes, little-endian Hz. One rate. */
+static bool sampling_frequency(uint8_t rhport, uint8_t stage, tusb_control_request_t const *request)
+{
+    static uint8_t rate[3];
+    if (request->wLength != 3) return refuse(request);
+    if (request->bRequest == AUDIO10_CS_REQ_SET_CUR) {
+        if (stage == CONTROL_STAGE_SETUP) return tud_control_xfer(rhport, request, rate, 3);
+        if (stage == CONTROL_STAGE_DATA && (rate[0] | rate[1] << 8 | rate[2] << 16) != 48000u)
+            refuse(request);                  /* logged; accepted all the same, as refusing mid-transfer would hang */
+        return true;
+    }
+    if (request->bRequest == AUDIO10_CS_REQ_GET_CUR || request->bRequest == AUDIO10_CS_REQ_GET_MIN ||
+        request->bRequest == AUDIO10_CS_REQ_GET_MAX || request->bRequest == AUDIO10_CS_REQ_GET_RES) {
+        if (stage != CONTROL_STAGE_SETUP) return true;
+        rate[0] = 48000u & 0xFF; rate[1] = (48000u >> 8) & 0xFF; rate[2] = 0;
+        if (request->bRequest == AUDIO10_CS_REQ_GET_RES) rate[0] = rate[1] = 0;   /* no steps: one rate */
+        return tud_control_xfer(rhport, request, rate, 3);
+    }
+    return refuse(request);
+}
+
 static bool uac_control(uint8_t rhport, uint8_t stage, tusb_control_request_t const *request)
 {
     u32 itf = tu_u16_low(request->wIndex), alt = request->wValue;
     static uint8_t current;
+    if (request->bmRequestType_bit.type == TUSB_REQ_TYPE_CLASS &&
+        request->bmRequestType_bit.recipient == TUSB_REQ_RCPT_ENDPOINT &&
+        (itf == USB_AUDIO_EP_OUT || itf == USB_AUDIO_EP_IN) && tu_u16_high(request->wValue) == 0x01)
+        return sampling_frequency(rhport, stage, request);
     if (request->bmRequestType_bit.type != TUSB_REQ_TYPE_STANDARD ||
         request->bmRequestType_bit.recipient != TUSB_REQ_RCPT_INTERFACE || (itf != ITF_OUT && itf != ITF_IN))
-        return false;                          /* no class requests: no controls are offered */
+        return stage == CONTROL_STAGE_SETUP ? refuse(request) : false;
     if (request->bRequest == TUSB_REQ_GET_INTERFACE) {
         if (stage != CONTROL_STAGE_SETUP) return true;
         current = itf == ITF_OUT ? out_alt : in_alt;
