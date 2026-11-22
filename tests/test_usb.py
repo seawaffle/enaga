@@ -65,11 +65,12 @@ class Usb(unittest.TestCase):
         r = self.start()
         self.assertEqual((r["vendor"], r["product"]), (0xCAFE, 0x4011))   # TinyUSB's test IDs until pid.codes
         self.assertEqual([(e["address"], e["type"], e["max_packet"]) for e in r["endpoints"]],
-                         [(EP_OUT, "bulk", 64), (EP_IN, "bulk", 64), (0x02, "bulk", 64), (0x82, "bulk", 64)])
+                         [(EP_OUT, "bulk", 64), (EP_IN, "bulk", 64), (0x03, "isochronous", 196),
+                          (0x83, "isochronous", 196), (0x02, "bulk", 64), (0x82, "bulk", 64)])   # MIDI, audio, drive
         config = r["configuration"]
         self.assertEqual(config[9 + 5:9 + 7], bytes([1, 1]))              # interface 0: audio control
         self.assertIn(bytes([9, 4, 1, 0, 2, 1, 3]), config)               # interface 1: MIDI streaming, 2 endpoints
-        self.assertIn(bytes([9, 4, 2, 0, 2, 8, 6, 0x50]), config)         # interface 2: mass storage, SCSI, bulk-only
+        self.assertIn(bytes([9, 4, 4, 0, 2, 8, 6, 0x50]), config)         # interface 4: mass storage (2, 3: audio)
         product = self.emu.cpu.usb_control((0x80, 6, 0x0302, 0x0409), 64)
         self.assertEqual(bytes(product["data"][2::2]).decode(), "Enaga SmplTrek")
         s = self.emu.cpu.usb_state()

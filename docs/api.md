@@ -177,12 +177,20 @@ the input goes back to stereo line, NORMAL, which is also what an app starts wit
 | `ENAGA_INPUT_DYNAMIC_MIC` | INPUT R through the mic preamplifier | both channels | preamplifier off | preamplifier on | preamplifier, +21 dB in the codec |
 | `ENAGA_INPUT_LINE_STEREO` | INPUT L and R | left and right | -20 dB PAD | no PAD | as NORMAL |
 | `ENAGA_INPUT_LINE_MONO` | INPUT L | both channels | -20 dB PAD | no PAD | as NORMAL |
+| `ENAGA_INPUT_USB` | the computer's audio over USB | left and right; silent while the computer sends none | one level | | |
 
 The levels are `ENAGA_INPUT_LOW`, `ENAGA_INPUT_NORMAL` (the default argument) and `ENAGA_INPUT_HIGH`. The
 built-in microphone is heard only with headphones in, a rule every original firmware keeps against feedback
 from the speaker; Enaga applies it, so apps need not. The front-end gains are the original firmware's
 settings. The values in dB come from its manual and code and have not been measured; the PAD's -20 dB is the
 manual's figure.
+
+**USB audio.** Plugged into a computer, the unit is also a class-compliant USB audio interface: 48 kHz, 16-bit,
+stereo each way, no driver needed. `ENAGA_INPUT_USB` makes what the computer plays the app's `in`; the jacks' input
+route is left as it was. What the app writes to `out` goes to the computer whenever it records from the unit,
+before VOLUME, with no app code, whatever the input. The computer's clock and the unit's differ slightly; Enaga
+resamples what the computer sends to match, so nothing is dropped or repeated. The round trip (computer to `in`,
+`out` back to the computer) adds about 9 ms of buffering.
 
 ## Input
 
