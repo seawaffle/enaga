@@ -61,8 +61,9 @@ int  clock_control(u32 command, int value);
 void clock_state(enaga_clock_state_t *state);
 u32  clock_ticks(enaga_clock_tick_t *out, u32 max);
 void clock_source_changed(void);
+void clock_sync_polarity_changed(void);
 void clock_app_stopped(void);
-extern int clock_source_setting, clock_out_setting, sync_out_setting;
+extern int clock_source_setting, clock_out_setting, sync_out_setting, sync_in_polarity_setting, sync_out_polarity_setting;
 int  midi_poll(u32 ms);
 void midi_usb_byte(u8 byte, u32 ms);          /* usb.c: one received USB MIDI byte */
 int  midi_out_bytes(u32 ports, const u8 *data, u32 bytes);   /* 0 = the MIDI OUT routing; all or nothing, but a stalled USB host is skipped */

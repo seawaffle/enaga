@@ -284,7 +284,7 @@ In `<enaga/app.hpp>`. Main context.
 | `enaga::system::battery()` | the battery: 0-4 (4 full) while the unit runs on batteries, -1 on USB or adapter power. It follows the voltage over several seconds, using the user's BATTERY setting (ALKALINE, NiMH, LITHIUM). At 0 Enaga shows a warning and, if the level stays there for 30 seconds, switches the unit off, stopping the app as POWER does, so its `stop()` and file closing run before the supply gives out |
 | `enaga::system::device()` | which device Enaga runs on: `ENAGA_DEVICE_SMPLTREK`, `ENAGA_DEVICE_LOFI12XT`, `ENAGA_DEVICE_CYDRUMS` or `ENAGA_DEVICE_UNKNOWN`. The three have the same board and controls in the same places; use it for what differs, such as labels printed on the panel |
 
-Volume, brightness, pad sensitivity, AUTO OFF, SPEAKER and BATTERY are the user's settings, in the Enaga menu; apps
+Volume, brightness, pad sensitivity, AUTO OFF, SPEAKER, POL IN, POL OUT and BATTERY are the user's settings, in the Enaga menu; apps
 do not set them.
 
 ## Files
@@ -562,6 +562,9 @@ position in ticks.
 - **CLOCK OUT on:** MIDI clock every 4 ticks (24 to the quarter note), START, STOP, and Song Position Pointer
   before CONTINUE or on a locate while stopped.
 - **SYNC OUT on** (the default): a 15 ms pulse every 48 ticks, at least 60 ms apart.
+
+**Polarity.** The user's POL IN and POL OUT settings (RISE or FALL, both RISE by default) choose the SYNC IN edge
+that counts and which way SYNC OUT pulses, with the original firmware's meaning for each label. Apps never see them.
 
 Both are sent from the audio interrupt: exact on average, and late by less than one block (1.33 ms). With CLOCK
 SRC MIDI, CLOCK OUT and MIDI THRU both on would send the clock twice.

@@ -113,6 +113,8 @@ changed.
 | CLOCK SRC | INT, MIDI, SYNC (INT) | who drives the tempo clock: the app, MIDI clock at MIDI IN, or SYNC IN pulses |
 | CLOCK OUT | OFF, ON (OFF) | MIDI clock and transport at MIDI OUT, following the clock |
 | SYNC OUT | ON, OFF (ON) | pulses at SYNC OUT, 2 to the quarter note |
+| POL IN | RISE, FALL (RISE) | the SYNC IN edge that counts, with the original firmware's meaning of each label |
+| POL OUT | RISE, FALL (RISE) | SYNC OUT's pulse: RISE idles low and pulses high, FALL the other way round |
 
 The SETTINGS page shows nine rows and scrolls to keep the cursor on screen.
 
@@ -370,7 +372,7 @@ emulator where it can be, and the ones that need the unit collect into a session
    and `enaga::system::battery()` for apps (level, or -1 on USB or adapter power). At the lowest level: a warning,
    then a clean switch-off that closes the app's files first, so a fading battery never cuts a card write. The
    thresholds are the stock ones; the voltages behind them want a reading on the unit with each battery type.
-2. **SYNC IN polarity.** The stock POLARITY IN setting (rising or falling edges, HW-27), and POLARITY OUT for
+2. (**Done** on the emulator 2026-11-21, see the log; the unit to come.) **SYNC IN polarity.** The stock POLARITY IN setting (rising or falling edges, HW-27), and POLARITY OUT for
    SYNC OUT's idle level. Small; the unit with a falling-edge device checks it.
 3. **USB mass storage.** The card as a USB drive, so apps and samples go on without taking the card out. The SD
    card cannot be used by FatFs and by the computer at once. *Decided (2026-11-21):* a USB DRIVE page in the Enaga menu that
@@ -449,6 +451,9 @@ downloads); a person doing it moves to E6. USB uses test IDs until pid.codes gra
   the pid.codes product ID (vendor 0x1209) is granted. The request is in, and its timing is pid.codes'; releases
   ship with the test IDs until then (0.2.0 did, and its notes say so).
 
+- SYNC polarity: POL IN RISE arms the pin's falling edge, as the stock RISE does, on the reading that the board
+  inverts SYNC IN; nothing has shown that on a unit. Only the phase depends on it (by the other device's pulse
+  width), not the tempo. A scope on the jack settles it (checklist step 17).
 - Battery: the raw thresholds are the original firmware's; their voltages, and whether 30 s at level 0 is a
   sensible time before switching off, want readings on the unit with each battery type (checklist step 19).
 - STEP 4 crash (unit session 5): pressing STEP 4 on CHECK's MIDI page once crashed, with USB connected to a
@@ -1679,3 +1684,20 @@ readings under 2000 ignored.
 - `tests/test_battery.py` (an app that logs the level and saves a file in `stop()`): thresholds and hysteresis,
   readings under 2000, the power source, the BATTERY setting, the menu mark, the switch-off with the file saved,
   and a recovery that cancels it.
+
+### SYNC polarity, E5 step 2 (2026-11-21)
+
+POL IN and POL OUT settings (RISE, FALL; both RISE by default), as the original firmware's POLARITY IN and OUT
+(smpltrek-re HW-27; docs/hardware.md "SYNC IN / SYNC OUT").
+- Which label is which value was not written down in smpltrek-re's docs beyond a note in its emulator README, so
+  the stock settings row (0xC15B9E80) was read: value 0 shows RISE, 1 FALL. Stock value 0 arms GP7[8]'s *falling*
+  edge, so RISE on the stock unit is the pin's falling edge, presumably the jack's rising edge through an inverting
+  input. Enaga follows the stock meaning of each label. Before this, Enaga armed the pin's rising edge, so with
+  a device whose pulse reaches the pin inverted it counted the end of each pulse: same tempo, late by the pulse
+  width. That is the new default's only change in behaviour.
+- POL OUT RISE idles SYNC OUT low and pulses high (as before); FALL idles high and pulses low.
+- `clock_sync_polarity_changed()` re-arms the edge (clearing any edge pending from the change) and re-drives
+  SYNC OUT, at start-up and whenever either setting changes.
+- `tests/test_clock.py` `SyncPolarity`: RISE counts the pin's falling edge and not its rising one, FALL the other
+  way round, and POL OUT FALL idles high with 15 ms low pulses. The settings come from `SETTINGS.TXT`, through
+  the same apply as the SETTINGS page.

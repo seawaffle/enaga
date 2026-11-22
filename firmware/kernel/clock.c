@@ -10,7 +10,7 @@
  *         Pointer. Taken from the bytes in UART0's interrupt (clock_midi_byte), in their order, not from the main
  *         loop's parser. The tempo is the mean interval of the last 24 clocks, kept while stopped (many
  *         sequencers send clock all the time), so a START runs at the right tempo from its first tick.
- *   SYNC  pulses at SYNC IN (GP7[8], rising edges, GPIO bank 7 interrupt): 48 ticks per pulse (2 to the quarter
+ *   SYNC  pulses at SYNC IN (GP7[8], the edge POL IN picks, GPIO bank 7 interrupt): 48 ticks per pulse (2 to the quarter
  *         note). The first pulse starts the clock; none for over 2.5 intervals (at least 100 ms; 2 s before the
  *         second pulse gives an interval) stops it. The tempo is the mean of the last 2 intervals.
  * Following an outside clock is as the original firmware does it (smpltrek-re HW-41): the clock runs at the derived
@@ -20,7 +20,12 @@
  * Out, whatever the source (so the unit can also bridge SYNC to MIDI): with CLOCK OUT on, MIDI clock every 4 ticks,
  * START, STOP, and Song Position Pointer then CONTINUE (as Lofi-12 XT); with SYNC OUT on, a 15 ms pulse on GP7[9]
  * every 48 ticks, no closer than 60 ms (the original firmware's pulse, HW-27). Both are sent from the audio
- * interrupt, so they are exact on average and late by less than one block (1.33 ms). */
+ * interrupt, so they are exact on average and late by less than one block (1.33 ms).
+ *
+ * Polarity, as the original firmware's POLARITY IN and OUT (smpltrek-re HW-27; the labels from its settings row):
+ * POL IN RISE (0, the default) arms the *falling* edge of GP7[8] and FALL the rising one, so the board presumably
+ * inverts SYNC IN between the jack and the pin; Enaga keeps the stock meaning of each label rather than guess. POL
+ * OUT RISE (0) idles GP7[9] low and pulses it high, FALL idles high and pulses low. Neither is checked on the unit. */
 
 #define FRAMES_PER_SECOND 48000.0f
 #define CYCLES_PER_FRAME (TICKS_PER_MS / 48u)           /* 7,750 */
@@ -40,6 +45,7 @@
 
 int clock_source_setting = ENAGA_CLOCK_INTERNAL;
 int clock_out_setting, sync_out_setting = 1;
+int sync_in_polarity_setting, sync_out_polarity_setting;   /* POL IN / POL OUT: 0 RISE, 1 FALL */
 
 static volatile u8 running, waiting;                    /* waiting: started by MIDI, no clock yet */
 static volatile u32 whole;                              /* position: whole + frac ticks */
@@ -90,10 +96,25 @@ static void send_position(u32 ticks)                    /* SPP: sixteenths, 24 t
     midi_out(m, 3);
 }
 
-static void sync_pin(int high)
+static void sync_pin(int pulse)                         /* 1: the pulse's level, 0: idle (POL OUT) */
 {
-    if (high) gpio_set(7, 9); else gpio_clr(7, 9);
-    sync_out_high = (u8)high;
+    if (pulse != sync_out_polarity_setting) gpio_set(7, 9); else gpio_clr(7, 9);
+    sync_out_high = (u8)pulse;
+}
+
+void clock_sync_polarity_changed(void)                  /* the settings: re-arm SYNC IN, re-drive SYNC OUT */
+{
+    u32 gie = irq_global_disable();
+    if (sync_in_polarity_setting) {                     /* FALL: the pin's rising edge */
+        REG32(GPIO_PAIR3 + 0x20) = SYNC_IN_BIT;         /* CLR_FAL_TRIG */
+        REG32(GPIO_PAIR3 + 0x14) = SYNC_IN_BIT;         /* SET_RIS_TRIG */
+    } else {                                            /* RISE: the pin's falling edge */
+        REG32(GPIO_PAIR3 + 0x18) = SYNC_IN_BIT;         /* CLR_RIS_TRIG */
+        REG32(GPIO_PAIR3 + 0x1C) = SYNC_IN_BIT;         /* SET_FAL_TRIG */
+    }
+    REG32(GPIO_PAIR3 + 0x24) = SYNC_IN_BIT;             /* no stale edge from the change */
+    sync_pin(sync_out_high);
+    if (gie) irq_global_enable();
 }
 
 void clock_init(void)
@@ -103,8 +124,7 @@ void clock_init(void)
     gpio_dir_output(7, 9);
     sync_pin(0);
     REG32(GPIO_PAIR3) |= SYNC_IN_BIT;                   /* input */
-    REG32(GPIO_PAIR3 + 0x14) = SYNC_IN_BIT;             /* rising edges */
-    REG32(GPIO_PAIR3 + 0x24) = SYNC_IN_BIT;             /* nothing pending */
+    clock_sync_polarity_changed();                      /* the edge; nothing pending */
     REG32(GPIO_BINTEN) |= 1u << 7;
 }
 
