@@ -257,6 +257,29 @@ static u32 size32(FSIZE_t size) { return size > 0xFFFFFFFFu ? 0xFFFFFFFFu : (u32
 
 /* ---- mounting and the card -------------------------------------------------------------------------------- */
 
+/* Once a start-up: the CSD as read and the size taken from it ("CSD 400E0032 5B590000 ..." high word first, then
+ * "CARD 62333952 SECTORS"), so a USB DRIVE size that is wrong can be traced to the register or the parse. */
+static void log_card_size(void)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    static int done;
+    char line[40] = "CSD ";
+    int n = 4, w, i;
+    if (done) return;
+    done = 1;
+    for (w = 3; w >= 0; w--) {
+        for (i = 28; i >= 0; i -= 4) line[n++] = hex[sd_csd[w] >> i & 15];
+        if (w) line[n++] = ' ';
+    }
+    line[n] = 0;
+    log_line(line);
+    n = put_dec(line, 5, (int)sd_sectors);
+    line[0] = 'C'; line[1] = 'A'; line[2] = 'R'; line[3] = 'D'; line[4] = ' ';
+    for (i = 0; " SECTORS"[i]; i++) line[n++] = " SECTORS"[i];
+    line[n] = 0;
+    log_line(line);
+}
+
 int files_mount(void)                         /* FR_OK or the FatFs error */
 {
     FRESULT r = f_mount(&fs, "", 1);
@@ -270,6 +293,7 @@ int files_mount(void)                         /* FR_OK or the FatFs error */
         }
     }
     mounted = r == FR_OK;
+    if (mounted) log_card_size();
     return r;
 }
 

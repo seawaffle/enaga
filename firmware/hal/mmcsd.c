@@ -58,6 +58,7 @@
 static int high_capacity, card_ready;
 static u32 rca;
 u32 sd_sectors;                            /* the card's size in 512-byte sectors, from its CSD (0: unknown) */
+u32 sd_csd[4];
 static u32 status;                 /* MMCST0 bits seen since the command was issued and not yet consumed */
 static u32 last_st;                /* what the last command's wait returned, for the error report */
 int sd_error;
@@ -214,6 +215,7 @@ int sd_init(void)
         u32 w[4], c_size;
         w[0] = REG32(MMC + MMCRSP01); w[1] = REG32(MMC + MMCRSP23);   /* CSD bits 31-0 ... */
         w[2] = REG32(MMC + MMCRSP45); w[3] = REG32(MMC + MMCRSP67);   /* ... 127-96, as Linux's davinci_mmc reads them */
+        for (c_size = 0; c_size < 4; c_size++) sd_csd[c_size] = w[c_size];
         if ((w[3] >> 30) == 1) {                                /* CSD 2.0 (SDHC, SDXC): C_SIZE bits 69-48 */
             c_size = (w[1] >> 16) | ((w[2] & 0x3F) << 16);
             sd_sectors = (c_size + 1) << 10;
