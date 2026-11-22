@@ -184,6 +184,9 @@ int sd_init(void)
     u32 st, ocr, i;
     card_ready = 0;
     last_st = 0;
+    rca = 0;                                  /* until CMD3 gives one: a reset card answers CMD55 only for RCA 0. A
+                                                 * second sd_init (a remount after USB DRIVE, a new card) once sent the
+                                                 * old RCA and got no answer to ACMD41: MOUNT 3 -2 00000010 */
     if (!sd_present()) return fail(-1);
     controller_init();
     delay_us(2000);

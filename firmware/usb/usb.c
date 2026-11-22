@@ -48,6 +48,10 @@ int enaga_usb_phy_start(void)                  /* the original firmware's order 
     while (!(REG32(ENAGA_CFGCHIP2) & (1u << 17)))   /* USB0PHYCLKGD: within 10 ms on the unit (HW-59) */
         if (tsc_read() - start > 50u * TICKS_PER_MS) return -1;
     REG32(ENAGA_USB0_INTCLRR) = ENAGA_USB0_SOURCES;
+    REG8(ENAGA_USB0 + 0x401) = 0x00;           /* POWER: HSENAB off. It is on after reset, and the original firmware
+                                                * writes 0x40 here; left on, the core chirps and a computer runs it at
+                                                * high speed, where the full-speed descriptors mean other things
+                                                * (bInterval 1 = 125 us, bulk at 64 bytes): unit session 6 */
     REG8(ENAGA_USB0 + 0x40B) = 0x27;           /* INTRUSBE: suspend, resume, reset, disconnect (no SOF) */
     REG32(ENAGA_USB0_INTMSKSETR) = ENAGA_USB0_SOURCES;
     usb_phy_status = 0;

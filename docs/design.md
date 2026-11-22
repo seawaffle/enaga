@@ -506,6 +506,20 @@ Its card is staged by `tools/unit_card.py` (the dry run, steps 1-10, passes 141/
     ends); drive read / write failures log the SD driver's code, command and status (`DRV R -3 C18 0008`). The
     emulator never delivers such an interrupt, so `test_large_reads_as_windows_makes_them` (128-sector reads) is
     coverage, not a reproduction.
+  - Round 2 (`FINDINGS2.md`): **Windows ran the unit at high speed** (USB Device Tree Viewer, the xHCI trace's
+    DeviceSpeed 2). The core's POWER.HSENAB is on after reset and nothing cleared it (the original firmware writes
+    POWER = 0x40; TinyUSB only ORs SOFTCONN in), so the core chirped. At high speed the full-speed descriptors mean
+    other things: isochronous bInterval 1 is 125 us, so usbaudio's 10-packet URBs are not whole frames and the
+    stack rejects them (USBD_STATUS_INVALID_PARAMETER, never dispatched); bulk at 64 bytes is illegal there (the
+    drive's BABBLE). `enaga_usb_phy_start` now clears HSENAB. The drive's photo showed no USB TX BUSY line: the
+    TX guard (kept, harmless) was not the cause. Windows groups interfaces 0-3 as one usbaudio function (the AC
+    header's baInterfaceNr), so MIDI is usbaudio's, with no MIDI child; worth checking once audio works.
+  - **The remount failure was the SD driver**: `sd_init` kept the RCA from the last start-up and sent it with
+    CMD55 before ACMD41; a card just reset answers CMD55 only for RCA 0, hence `MOUNT 3 -2 00000010` after every
+    USB DRIVE and the power-cycle retry. It now starts from RCA 0; `test_ok_ends_it` checks the CMD55 arguments in
+    the emulator's SD trace (the emulator's card answers both RCAs) and fails on the old code.
+  - For the emulator (via the user, smpltrek-re): POWER resets with HSENAB set on the real core, and a host
+    could then run the device at high speed; a card in idle or ready state should answer CMD55 only for RCA 0.
   - Earlier plan: the user started a Claude session on the Windows PC with a read-only brief: raw sectors 0-63 and
     the partition start over USB vs a card reader, a USBPcap capture of drive mount / playback / recording, and
     scripted play / record tests. Debug from its evidence. Also ask whether STATUS showed a crash row.

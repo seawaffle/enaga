@@ -187,6 +187,14 @@ class UsbDrive(unittest.TestCase):
         self.assertEqual(self.emu.word("menu_drive"), 0)
         self.assertEqual(self.emu.text("menu_message", 40), "USB DRIVE ENDED")
         self.assertEqual(self.ready(), (2, 0x3A))
+        # The card mounted again from reset: every CMD55 between its CMD0 and CMD3 carries RCA 0. (A real card
+        # answers nothing else then; the emulator's answers its own RCA too, so check the commands themselves.
+        # The old RCA once went out, and the remount failed on the unit: MOUNT 3 -2 00000010.)
+        trace = [(t["command"], t["argument"]) for t in self.emu.cpu.sd_state()["trace"]]
+        reset = max(i for i, (c, _) in enumerate(trace) if c == 0)
+        addressed = next(i for i, (c, _) in enumerate(trace) if c == 3 and i > reset)
+        self.assertEqual({a for c, a in trace[reset:addressed] if c == 55}, {0})
+        self.assertNotIn("MOUNT", " ".join(self.emu.report()["log"]))
 
     def test_ok_waits_for_the_writes_to_stop(self):
         self.open_drive()

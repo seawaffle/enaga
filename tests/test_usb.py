@@ -75,6 +75,9 @@ class Usb(unittest.TestCase):
         self.assertEqual(bytes(product["data"][2::2]).decode(), "Enaga SmplTrek")
         s = self.emu.cpu.usb_state()
         self.assertEqual((s["configuration"], s["stalls"], s["errors"], s["toggle_errors"]), (1, 0, 0, 0))
+        # Full speed, as the descriptors are written: POWER's HSENAB (on after the core's reset) must be off, or a
+        # computer runs the unit at high speed (unit session 6; the emulator's host is full speed only).
+        self.assertEqual(self.emu.cpu.read(0x01E00401, 1)[0] & 0x60, 0x40)   # SOFTCONN on, HSENAB off
 
     def test_a_refused_request_stalls_and_the_device_answers_on(self):
         # A request the device does not know must stall in every shape, not leave the computer waiting: with no
