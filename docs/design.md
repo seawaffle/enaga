@@ -478,6 +478,25 @@ Its card is staged by `tools/unit_card.py` (the dry run, steps 1-10, passes 141/
 
 ## Open items
 
+- **Unit session 6 (2026-11-22, E5 exit, in progress; Windows host): USB DRIVE and USB audio fail on the unit.**
+  Build under test: `a24ba51d` (branch `usb-audio-requests`, c9df676), card a 4 GB Toshiba microSDHC in a PNY
+  adapter.
+  - USB DRIVE: Windows lists the drive but asks to format it, with endless errors until the page is ended. Ending
+    it leaves the card unusable until the unit is switched off: `MOUNT 3 -2 00000010`, `SD CYCLED MOUNT 3` (ACMD41
+    no response after CMD8 answered). The size is right: `CSD 400E0032 5B590000`, `CSD 1D177F80 0A40008D`,
+    `CARD 7626752 SECTORS` (CSD 2.0, C_SIZE 7447). Ruled out: size, MSC offset handling, caches (sd_read copies
+    by CPU, no DMA). Untested ideas: what data Windows gets back (misaligned accesses in FIFO code, which the
+    emulator may not model as the C674x does; bulk IN on the real MUSB), and what leaves the card unanswering.
+  - USB audio: after the request fix (9775a5e) the streams start (`USB AUDIO OUT ON`, `IN ON` / `OFF`), but a
+    video player playing to the unit still hangs; Audacity records silence (CHECK plays nothing unless STEP 1-3,
+    so that may be right). The `UA O.. I..` STATUS line never appeared: either packets never moved and the
+    streams were off when looked at, or a crash record took its row. Suspect: the SOF interrupt reaching the CPU
+    through the TI wrapper on the real chip (the emulator gates SOF by the core's INTRUSBE; ENAGA_USB0_SOURCES
+    includes USB bits 16-24).
+  - Next: the user is starting a Claude session on the Windows PC with a read-only brief: raw sectors 0-63 and
+    the partition start over USB vs a card reader, a USBPcap capture of drive mount / playback / recording, and
+    scripted play / record tests. Debug from its evidence. Also ask whether STATUS showed a crash row.
+
 - USB IDs: the device uses TinyUSB's test vendor and product IDs (0xCAFE / 0x4011, `firmware/usb/usb.c`) until
   the pid.codes product ID (vendor 0x1209) is granted. The request is in, and its timing is pid.codes'; releases
   ship with the test IDs until then (0.2.0 did, and its notes say so).
