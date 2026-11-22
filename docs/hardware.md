@@ -412,7 +412,8 @@ full-speed USB MIDI, audio and mass storage device with TinyUSB (`firmware/third
   (HW-18, HW-40). Tested on the emulator's isochronous streams, including a computer clock 1000 ppm fast and slow.
 - **Mass storage (USB DRIVE, E5):** bulk-only transport, SCSI, one removable drive that is the whole SD card,
   16 sectors per SD command. No medium except while the menu's USB DRIVE page is open; then UNIT ATTENTION
-  (medium changed) and the card. START STOP UNIT with START clear (eject) ends the page. The size comes from the
+  (medium changed) and the card. START STOP UNIT with START clear (eject) ends the page; so does OK on the page,
+  once the computer has written nothing for 2 s (OK again ends it at once). The size comes from the
   card's CSD (CMD9, read during `sd_init`; CSD 1.0 and 2.0), which the emulator's SDSC card exercises; an SDHC card
   is first read on the unit.
 - **Bring-up:** as the original firmware (smpltrek-re HW-12):
@@ -628,6 +629,10 @@ unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it mut
       should close by itself with USB DRIVE EJECTED and the menu list the new app. If it stays open after the
       eject, note which computer, and press OK.
     - Start the copied app. Open USB DRIVE again and check the large file is whole (compare it on the computer).
+    - **OK without ejecting** (on macOS or Linux, which cache writes): rebuild the running app with a visible
+      change, open USB DRIVE, copy its `APP.ENA` over the old one and press OK as soon as the copy looks done. The
+      page should show WAITING FOR THE WRITES TO FINISH for a moment, then close with USB DRIVE ENDED; choosing
+      the app runs the new build. Note how long the wait was, and whether the computer complains about the eject.
     - Pull the cable while the page is open: the menu comes back with USB UNPLUGGED.
     - USB MIDI still works alongside (step 18) before and after.
     Each of Windows, macOS and Linux if available. Report anything the computer says (on Linux, `dmesg`).

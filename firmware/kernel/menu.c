@@ -26,6 +26,9 @@ int menu_status;                              /* 1: showing the status page */
 static int menu_settings;                     /* 1: showing the settings page */
 int menu_drive;                               /* 1: showing the USB DRIVE page, the card shared */
 static int drive_host_seen;                   /* a host had configured the device while the page was open */
+static int drive_stopping;                    /* OK pressed: ends once the computer has stopped writing */
+static u32 drive_written_seen, drive_write_ms;   /* the write count last seen, and when it last changed */
+#define DRIVE_QUIET_MS 2000                   /* macOS and Linux cache writes and send them a moment later */
 static char menu_names[MENU_APPS][APPS_FOLDER];
 char menu_titles[MENU_APPS][ENAGA_NAME_BYTES];
 static u8 menu_icons[MENU_APPS][ENAGA_ICON_BYTES];
@@ -86,7 +89,8 @@ static void drive_open(void)
     files_release();
     usb_drive_read_sectors = usb_drive_written_sectors = 0;
     usb_drive_share(1);
-    drive_host_seen = 0;
+    drive_host_seen = drive_stopping = 0;
+    drive_written_seen = 0;
     menu_drive = 1;
     log_line("USB DRIVE ON");
 }
@@ -101,11 +105,16 @@ static void drive_close(const char *why)
 
 void menu_service(u32 ms)
 {
-    (void)ms;
     if (!menu_drive) return;
     if (usb_configured()) drive_host_seen = 1;
+    if (usb_drive_written_sectors != drive_written_seen) {
+        drive_written_seen = usb_drive_written_sectors;
+        drive_write_ms = ms;
+    }
     if (usb_drive_ejected()) drive_close("USB DRIVE EJECTED");
     else if (drive_host_seen && !usb_configured()) drive_close("USB UNPLUGGED");
+    else if (drive_stopping && (!drive_written_seen || ms - drive_write_ms >= DRIVE_QUIET_MS))
+        drive_close("USB DRIVE ENDED");
 }
 
 static void choose(void)
@@ -122,8 +131,10 @@ void menu_event(const enaga_event_t *e)
 {
     if (menu_settings) { if (settings_event(e)) menu_settings = 0; return; }
     if (menu_drive) {
-        if (e->type == ENAGA_EVENT_KEY && e->value && (e->id == ENAGA_KEY_OK || e->id == ENAGA_KEY_CLR))
-            drive_close("USB DRIVE ENDED");
+        if (e->type == ENAGA_EVENT_KEY && e->value && (e->id == ENAGA_KEY_OK || e->id == ENAGA_KEY_CLR)) {
+            if (drive_stopping) drive_close("USB DRIVE ENDED");   /* pressed again: now, writes or not */
+            else drive_stopping = 1;
+        }
         return;
     }
     if (e->type == ENAGA_EVENT_ENCODER && e->id == 4) { if (!menu_status) move(e->value); return; }
@@ -230,9 +241,15 @@ static void drive_draw(void)
     kib(line, "WRITTEN ", usb_drive_written_sectors);
     gfx_text(0, 57, line, 10);
     if (usb_drive_errors) gfx_text(0, 66, "CARD ERRORS", 12);
-    gfx_text(0, 84, "EJECT IT ON THE", 8);
-    gfx_text(0, 93, "COMPUTER TO FINISH", 8);
-    gfx_text(0, 119, "OK: STOP NOW", 6);
+    if (drive_stopping) {
+        gfx_text(0, 84, "WAITING FOR THE", 12);
+        gfx_text(0, 93, "WRITES TO FINISH", 12);
+        gfx_text(0, 119, "OK AGAIN: STOP NOW", 6);
+    } else {
+        gfx_text(0, 84, "EJECT IT ON THE", 8);
+        gfx_text(0, 93, "COMPUTER TO FINISH", 8);
+        gfx_text(0, 119, "OK: STOP", 6);
+    }
 }
 
 void menu_draw(void)

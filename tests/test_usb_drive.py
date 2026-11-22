@@ -1,7 +1,8 @@
 """USB DRIVE (E5 step 3) on the emulator's USB host: the SD card as a USB mass storage drive (bulk-only transport,
 SCSI) beside USB MIDI. No medium until the menu's USB DRIVE page shares it; opening the page stops the app (its stop()
 saves a file); the computer reads and writes sectors; ejecting ends it, the card is mounted again and the menu lists
-an app copied over. OK and unplugging end it too.
+an app copied over. OK and unplugging end it too; OK once the computer has written nothing for 2 s (macOS and
+Linux send cached writes a moment after a copy seems done), or at once when pressed again.
 
 The host side here writes a file the way a computer does: the file is added to a copy of the card image offline
 (tools/card.py), and the sectors that changed are written over USB.
@@ -173,6 +174,32 @@ class UsbDrive(unittest.TestCase):
         self.assertEqual(self.emu.word("menu_drive"), 0)
         self.assertEqual(self.emu.text("menu_message", 40), "USB DRIVE ENDED")
         self.assertEqual(self.ready(), (2, 0x3A))
+
+    def test_ok_waits_for_the_writes_to_stop(self):
+        self.open_drive()
+        self.assertIs(self.ready() == (6, 0x28) and self.ready(), True)
+        sector = self.read(100, 1)
+        self.write(100, sector)                                                 # a computer writing late
+        self.press(OK)
+        self.assertEqual(self.emu.word("menu_drive"), 1)                        # waits: written moments ago
+        self.run_ms(1000)
+        self.write(100, sector)                                                 # still writing: the wait restarts
+        self.run_ms(1500)
+        self.assertEqual(self.emu.word("menu_drive"), 1)
+        self.assertIs(self.ready(), True)                                       # and the card is still its
+        self.run_ms(600)
+        self.assertEqual(self.emu.word("menu_drive"), 0)                        # 2 s with no writes: ended
+        self.assertEqual(self.emu.text("menu_message", 40), "USB DRIVE ENDED")
+        self.assertEqual(self.ready(), (2, 0x3A))
+
+    def test_ok_twice_ends_it_at_once(self):
+        self.open_drive()
+        self.assertIs(self.ready() == (6, 0x28) and self.ready(), True)
+        self.write(100, self.read(100, 1))
+        self.press(OK)
+        self.assertEqual(self.emu.word("menu_drive"), 1)
+        self.press(OK)
+        self.assertEqual(self.emu.word("menu_drive"), 0)
 
     def test_unplugging_ends_it(self):
         self.open_drive()
