@@ -1,11 +1,13 @@
 """The tempo clock, transport and SYNC (E4 step 4) on the emulator: the app's internal clock with MIDI clock and
 SYNC OUT pulses timed from it, Song Position Pointer before CONTINUE, following MIDI clock and following SYNC IN
-pulses (and bridging them to MIDI clock), and the app's ticks arriving in order whatever the source.
+pulses (and bridging them to MIDI clock), the app's ticks arriving in order whatever the source, and the POL IN /
+POL OUT settings (E5 step 2).
 
     ENAGA_EMULATOR=/path/to/emulator python3 -B -m unittest tests.test_clock
 """
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -167,6 +169,60 @@ class Clock(unittest.TestCase):
         data, _ = self.sent()
         self.assertEqual(data.count(0xF8), (n + 3) // 4)              # MIDI clock every 4 ticks
         self.assertEqual(data[-1], 0xFC)
+
+
+@unittest.skipUnless(paths.emulator_present() and build_app.tools_present(), "needs ENAGA_EMULATOR and the toolchain")
+class SyncPolarity(unittest.TestCase):
+    """POL IN RISE (the default) counts the pin's falling edge, FALL its rising edge, as the original firmware's
+    values do (smpltrek-re HW-27); POL OUT FALL idles SYNC OUT high and pulses it low. The settings come from
+    SETTINGS.TXT, so they go through the same apply as the menu."""
+
+    def start(self, settings=b""):
+        from emulate import Emulation
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "SETTINGS.TXT"
+        path.write_bytes(settings)
+        self.emu = Emulation(HERE / "apps" / "clock", card_files={"/ENAGA/SETTINGS.TXT": path})
+        self.addCleanup(self.emu.close)
+        self.assertIsNone(self.emu.run(BOOT)["error"])
+
+    def run_ms(self, ms):
+        self.assertIsNone(self.emu.run(int(ms * MS))["error"])
+
+    def edges(self, pulse_high):                     # (edges 5 ms into a 15 ms pulse, edges after it)
+        self.emu.cpu.gpio_input(7, 8, not pulse_high)  # the idle level, before SYNC IN is listened to
+        self.run_ms(5)
+        self.emu.cpu.write(self.emu.names["clock_source_setting"], (2).to_bytes(4, "little"))
+        self.emu.cpu.sync_in(120, 1, active_high=pulse_high)
+        self.run_ms(5)
+        during = self.emu.word("pulse_edges")
+        self.run_ms(20)
+        return during, self.emu.word("pulse_edges")
+
+    def test_pol_in_rise_counts_the_pins_falling_edge(self):
+        self.start()
+        self.assertEqual(self.edges(pulse_high=True), (0, 1))     # the pulse's end
+        self.start()
+        self.assertEqual(self.edges(pulse_high=False), (1, 1))    # the pulse's start
+
+    def test_pol_in_fall_counts_the_pins_rising_edge(self):
+        self.start(b"POL IN=FALL\n")
+        self.assertEqual(self.edges(pulse_high=True), (1, 1))
+
+    def test_pol_out_fall_idles_high_and_pulses_low(self):
+        self.start(b"POL OUT=FALL\n")
+        _, before = self.emu.cpu.gpio_trace()
+        self.assertEqual(self.emu.cpu.gpio_trace(before - 1)[0][0]["high"], True)   # idle high after start-up
+        self.emu.key(STEP1, True)                    # START at 120 BPM
+        self.run_ms(10)
+        self.emu.key(STEP1, False)
+        self.run_ms(600)
+        rows, _ = self.emu.cpu.gpio_trace(before)
+        sync = [(r["cycles"], r["high"]) for r in rows if r["bank"] == 7 and r["pin"] == 9]
+        self.assertEqual([h for _, h in sync[:4]], [False, True, False, True])   # low for the pulse, then idle high
+        self.assertTrue(2 <= len(sync) // 2 <= 3, sync)                         # 2 a beat
+        self.assertLess(abs((sync[1][0] - sync[0][0]) / MS - 15), BLOCK_MS + 0.1)
 
 
 if __name__ == "__main__":

@@ -382,12 +382,14 @@ a cable is the check (checklist step 16).
 
 GP7[8] (in) and GP7[9] (out), PINMUX17 nibbles 1 and 0 = 8, as the original firmware sets them (smpltrek-re
 HW-27).
-- **SYNC IN** takes rising edges through the GPIO bank 7 interrupt (event 72, CPU interrupt 9). Each edge's time
-  stamp feeds the clock (`firmware/kernel/clock.c`).
-- **SYNC OUT** idles low and pulses high for 15 ms, at least 60 ms apart. That is the original firmware's pulse
-  with its POLARITY OUT at the default.
-- **Not handled yet:** the original's polarity settings (falling edges in, active-low out). Enaga uses the
-  defaults.
+- **SYNC IN** takes one edge of GP7[8] through the GPIO bank 7 interrupt (event 72, CPU interrupt 9). Each edge's
+  time stamp feeds the clock (`firmware/kernel/clock.c`). Which edge is the POL IN setting, as the original
+  firmware's POLARITY IN: RISE (the default, value 0) arms the pin's *falling* edge, FALL its rising edge. So the
+  board presumably inverts SYNC IN between the jack and the pin, making RISE the jack's rising edge. Enaga keeps the
+  stock meaning of each label. (Before E5 Enaga armed the pin's rising edge whatever the setting.) The tempo does
+  not depend on the edge; only the phase does, by the width of the other device's pulse.
+- **SYNC OUT** pulses for 15 ms, at least 60 ms apart, as the original firmware. POL OUT RISE (the default) idles
+  the pin low and pulses it high; FALL idles high and pulses low.
 - **Not visible to code:** jack wiring and signal levels. The first unit session checks both directions with
   other gear (checklist step 17).
 
@@ -575,8 +577,12 @@ unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it mut
       tempo (within 0.5 BPM) and RUN with the beat counting; it stops when the sequencer stops. Continuing from
       the middle of a song resumes at the right beat (Song Position Pointer).
     - **SYNC in:** CLOCK SRC SYNC, a device's sync out into SYNC IN. CLK shows its tempo and runs while it plays,
-      stopping a moment after it stops. If nothing happens, the device may pulse the other way (falling edges):
-      note it, since the polarity setting is not built yet.
+      stopping a moment after it stops. Try POL IN FALL as well: it should follow just the same (the tempo does
+      not depend on the edge). If one setting does not follow at all, note which.
+    - **SYNC polarity, with a scope or a second device that shows its input:** POL OUT FALL turns SYNC OUT's
+      pulses upside down (idle high, 15 ms low); a device that steps on rising edges then steps 15 ms later, or
+      not at all. Set POL OUT back to RISE. With a scope on SYNC IN's jack and a device pulsing into it, note
+      whether the pulse at the jack is positive; the stock RISE label is taken to mean the jack's rising edge.
     Set CLOCK SRC back to INT and CLOCK OUT to OFF.
 18. **USB MIDI (CHECK, MIDI page):** connect the unit to a computer with a USB cable. It should appear as a MIDI
     device named "Enaga SmplTrek" with no driver (macOS: Audio MIDI Setup, MIDI window; Windows: a DAW's MIDI
