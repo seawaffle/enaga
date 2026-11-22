@@ -382,7 +382,7 @@ emulator where it can be, and the ones that need the unit collect into a session
    on top of the existing SD driver, added to the USB MIDI device as a composite (TinyUSB's MSC class). Testing:
    the emulator's scripted host speaks bulk transfers already; a host-side check reads and writes a FAT image
    through it. The unit with Windows, macOS and Linux checks it for real, including writing a large file.
-4. **USB audio.** As stock (HW-18, HW-40): class 1.0, 2 in / 2 out, 48 kHz, 16-bit, isochronous (OUT adaptive,
+4. (**Done** on the emulator 2026-11-21, see the log; the unit to come.) **USB audio.** As stock (HW-18, HW-40): class 1.0, 2 in / 2 out, 48 kHz, 16-bit, isochronous (OUT adaptive,
    IN asynchronous, 1 ms). *Decided (2026-11-21):* what apps see: the computer's audio arrives as a new input
    source (`enaga::system::input(ENAGA_INPUT_USB)`), so `audio()` gets it in place of the jacks; the unit's
    output goes to the computer as well as to the jacks, with no app code. A later step can mix both inputs. The
@@ -451,6 +451,11 @@ downloads); a person doing it moves to E6. USB uses test IDs until pid.codes gra
   the pid.codes product ID (vendor 0x1209) is granted. The request is in, and its timing is pid.codes'; releases
   ship with the test IDs until then (0.2.0 did, and its notes say so).
 
+- USB audio: clock drift is handled by resampling (OUT) and packet sizes (IN), not the stock PLL trim; the
+  emulator's clocks agree exactly, so drift was only simulated (packets of 47 / 49 frames). Whether a real
+  computer's rate against the codec's crystal stays inside the 2000 ppm the resampler allows, and whether it
+  clicks, is for the unit (checklist step 21). An app whose callback holds off the USB interrupt for more than
+  about 2 ms would still cost packets.
 - USB DRIVE: the card's size from its CSD is checked only on the emulator's SDSC card (CSD 1.0); an SDHC or SDXC
   card (CSD 2.0) is first read on the unit. Whether each computer's eject sends START STOP UNIT (which closes the
   page by itself) is to see on Windows, macOS and Linux; OK ends it either way. Speed over full-speed USB is
@@ -1735,3 +1740,42 @@ The SD card as a USB drive, from the menu's new USB DRIVE line (between SETTINGS
 - `tests/test_synth.py` pressed F1 and the second key of a chord at the same instant; which one the key scan
   saw first depended on where the firmware was in its scan, and this step's larger kernel moved that, so the synth
   saw F2 alone. The test now holds F1 15 ms first, as a hand does. Nothing in the synth changed.
+
+### USB audio, E5 step 4 (2026-11-21)
+
+USB Audio Class 1.0 beside MIDI and the drive, on the emulator's new isochronous streams (smpltrek-re, at the
+user's request: `usb_iso_stream_out` / `_in`, ISOUPDATE, SOF every millisecond).
+- **Descriptors:** one AudioControl interface (0) for the whole audio function, listing MIDI streaming (1) and the
+  audio streaming interfaces (2 out, 3 in); USB streaming terminal -> line out terminal, line in terminal -> USB
+  streaming terminal; no feature unit. Each streaming interface: alternate 0 empty, alternate 1 PCM 2 x 16 bits at
+  48 kHz, one isochronous endpoint of 196 bytes (0x03 adaptive, 0x83 asynchronous). The drive moved to interface 4.
+- **A class driver of Enaga's own** (`firmware/usb/usb_audio.c`, TinyUSB's app driver hook), not TinyUSB's audio
+  class (UAC2-first, and its transfers finish in the main loop, which runs about 850 times a second: too few for a
+  packet every millisecond). It claims interfaces 2 and 3, allocates their double-buffered FIFOs, and answers
+  SET_INTERFACE. The packets move in the USB interrupt on SOF through the driver's `sof` hook: OUT read from the
+  FIFO, IN loaded for the next frame (POWER.ISOUPDATE), the endpoints' own interrupts off. TinyUSB's MUSB
+  `dcd_sof_enable` was empty; it now sets the SOF interrupt enable (a marked local change).
+- **The app's side:** `ENAGA_INPUT_USB` (abi.h, value 5) makes the computer's audio the callback's `in`; the codec
+  route is left alone. The callback's `out` goes to the computer before VOLUME, whatever the input.
+- **Clocks:** OUT is resampled (linear interpolation) by a ratio that keeps its ring at 144 frames, the ratio
+  following the smoothed level (proportional, at most 2000 ppm); IN packets are 47, 48 or 49 frames to keep its ring
+  at 128, on a level averaged over about 32 packets. Both levels are taken at a steady phase: the frames the other
+  side made or used since its last packet or block are counted from the TSC, since 1 ms packets against 1.33 ms
+  blocks otherwise saw-tooth by up to a block and look like drift. The IN ring starts exactly at its target. Both
+  halves of the IN FIFO are kept loaded, so a SOF served up to a block late (the USB interrupt waits for the app's
+  callback) costs no packet: checked with an app whose callback takes 86% of the block, which loses packets when
+  only one half is loaded.
+- **A harness lesson:** asking the emulator for a set number of IN frames and stopping leaves one frame with no
+  packet and no token at each stop, 2000 ppm at 500-frame chunks, which looked like drift and pinned the
+  resampler. The tests stream as a computer does: tokens asked for well ahead, OUT packets kept in hand.
+- `tests/test_usb_audio.py` (with `tests/apps/input`, STEP 10 now the USB input, STEP 11 a heavy callback): the
+  descriptors; a 1 kHz sine and a counter sent to the unit come back through the app at their level, in order,
+  48 frames a packet, ratio 1.0; a computer 1000 ppm fast and then slow (a 49- or 47-frame packet in 20) is
+  followed (ratio 1 +- 1/960) with nothing lost; the output reaches the computer without the USB input; stopping
+  the OUT stream silences `in` and stopping IN stops loading; unplugging and replugging while streaming; the heavy
+  callback. `tests/test_usb.py` expects the new endpoints. CHECK's AUDIO page: STEP 14 chooses USB.
+- `tests/test_e1.py` `test_one_sample_opening_while_held_is_ignored` failed on this step's build: its 3 ms
+  openings 9 ms apart assumed key samples exactly 6 ms apart, but samples ride the main-loop passes (on the
+  emulator, gaps alternating 5.25 / 6.75 ms in a 12 ms pattern), and a 6.75 ms gap could catch two openings in a
+  row, a genuine release. Twelve openings 10 ms apart now: never two in a row, and several sampled; the test fails
+  again if the debounce is removed (checked). The firmware is unchanged.

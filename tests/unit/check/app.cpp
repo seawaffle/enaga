@@ -2,8 +2,8 @@
 // second to go to the next one (the press still counts on the panel page).
 //
 //   AUDIO  STEP 1: 750 Hz left only, STEP 2: 1500 Hz right only, STEP 3: 750 Hz both, STEP 4: off. VALUE: level.
-//          IN L/R: input peaks over the last half second, per mille of full scale. STEP 9-13 choose the input
-//          (built-in mic, Hi-Z, dynamic mic, stereo line, mono line) and B its level (LOW, NORMAL, HIGH).
+//          IN L/R: input peaks over the last half second, per mille of full scale. STEP 9-14 choose the input
+//          (built-in mic, Hi-Z, dynamic mic, stereo line, mono line, USB) and B its level (LOW, NORMAL, HIGH).
 //   LOAD   STEP 1: SYNTH voices (saw + biquad), STEP 2: SAMPLE voices (16-bit playback streaming through an
 //          8 MiB bank in DDR), STEP 3: GRAIN voices (as SAMPLE, but each voice jumps to a random place every
 //          block). STEP 5-8: 16, 64, 128, 256 voices; VALUE: voices +-1, A: +-8. Shows the highest load in the
@@ -148,7 +148,7 @@ public:
         }
         if (page_ == 2) enaga::button_led(key, 0, down ? ENAGA_LED_MAX : 0);
         if (page_ == 4) midi_key(key, down);
-        if (page_ == 0 && down && key >= ENAGA_KEY_STEP1 + 8 && key <= ENAGA_KEY_STEP1 + 12) {
+        if (page_ == 0 && down && key >= ENAGA_KEY_STEP1 + 8 && key <= ENAGA_KEY_STEP1 + 13) {   // STEP 14: USB
             input_source_ = key - ENAGA_KEY_STEP1 - 8;
             input_result_ = enaga::system::input(input_source_, input_level_);
         }
@@ -295,11 +295,11 @@ private:
         canvas.text(0, 68, (Line() << "IN R " << in_shown_[1]).str());
         canvas.rect(0, 80, int(in_shown_[0] / 8), 3, 15);
         canvas.rect(0, 86, int(in_shown_[1] / 8), 3, 15);
-        static const char *const kSources[5] = {"MIC", "HI-Z", "DYN MIC", "LINE ST", "LINE MONO"};
+        static const char *const kSources[6] = {"MIC", "HI-Z", "DYN MIC", "LINE ST", "LINE MONO", "USB"};
         static const char *const kLevels[3] = {"LOW", "NORM", "HIGH"};
         canvas.text(0, 98, (Line() << kSources[input_source_] << " " << kLevels[input_level_]
                                    << (input_result_ ? " ERR" : "")).str());
-        canvas.text(0, 110, "STEP 9-13 SRC  B LVL", 6);
+        canvas.text(0, 110, "STEP 9-14 SRC  B LVL", 6);
     }
 
     void draw_load(enaga::Canvas &canvas) {

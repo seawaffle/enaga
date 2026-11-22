@@ -751,10 +751,10 @@ void dcd_disconnect(uint8_t rhport)
 
 void dcd_sof_enable(uint8_t rhport, bool en)
 {
-  (void) rhport;
-  (void) en;
-
-  // TODO implement later
+  /* Enaga: the SOF interrupt on or off (TinyUSB left this to do); USB audio paces its packets on it */
+  musb_regs_t* musb_regs = MUSB_REGS(rhport);
+  if (en) musb_regs->intr_usben |= MUSB_IE_SOF;
+  else musb_regs->intr_usben &= (uint8_t) ~MUSB_IE_SOF;
 }
 
 //--------------------------------------------------------------------+

@@ -19,6 +19,9 @@
  * audio_fade_out ramps to silence before an app is stopped, each over AUDIO_FADE_BLOCKS blocks (about 11 ms), so
  * switching apps does not click; a change of volume ramps the same way. At full level the output is not touched.
  *
+ * USB audio (usb_audio.c): with the input source ENAGA_INPUT_USB the computer's audio is the callback's input; the
+ * callback's output goes to the computer while it records, before VOLUME and the fade.
+ *
  * Speaker: GP2[8] (active-high mute) is released when the SPEAKER setting is ON and the app has not muted it
  * (audio_speaker_apply). Plugging in headphones cuts the speaker in hardware, as in the original firmware (a
  * switched jack: smpltrek-re HW-15, confirmed on the unit in session 3). Switching it fades the output around it.
@@ -272,7 +275,7 @@ enum { SLOTS_STEREO, SLOTS_LEFT, SLOTS_RIGHT };
 #define INPUT_QUIET_BLOCKS 8u
 #define INPUT_QUIET_HOLD   0xFFFFFFFFu
 static volatile u32 input_quiet;             /* blocks of silence left; INPUT_QUIET_HOLD while switching */
-static volatile u8 input_slots = SLOTS_STEREO, input_mic;
+static volatile u8 input_slots = SLOTS_STEREO, input_mic, input_usb;
 static u8 input_source = ENAGA_INPUT_LINE_STEREO, input_level = ENAGA_INPUT_NORMAL;
 
 static void pin(unsigned bank, unsigned number, int high)
@@ -284,7 +287,13 @@ int audio_input(unsigned source, unsigned level)   /* main context */
 {
     u8 left = 0x84, right = 0x84, pga_left = 0, pga_right = 0, mic = 0xFF, slots = SLOTS_LEFT;
     int mic_switch = 0, line_front = 1, hiz_stage = 0, mic_stage = 0, pad = 0, failed = 0;
-    if (source > ENAGA_INPUT_LINE_MONO || level > ENAGA_INPUT_HIGH) return -1;
+    if (source > ENAGA_INPUT_USB || level > ENAGA_INPUT_HIGH) return -1;
+    if (source == ENAGA_INPUT_USB) {          /* the codec is left as it is */
+        input_usb = 1;
+        input_source = (u8)source; input_level = (u8)level;
+        return 0;
+    }
+    input_usb = 0;
     switch (source) {
     case ENAGA_INPUT_MIC:                     /* REC SRC 0 */
         mic = 0xF0; left = 0xFC; right = 0xF8; mic_switch = 1; break;
@@ -344,7 +353,9 @@ void audio_isr(void)
         u32 *tx;
         audio_callback_t fn = callback;
         if (input_quiet && input_quiet != INPUT_QUIET_HOLD) input_quiet--;
-        if (rx_done && !input_quiet && !(input_mic && !audio_headphones())) {
+        if (input_usb) {
+            usb_audio_read(in_block, FRAMES);
+        } else if (rx_done && !input_quiet && !(input_mic && !audio_headphones())) {
             const u32 *rx = in_buffer(REG32(PARAM(0) + 0x0C), rx_c) ? rx_d : rx_c;
             const u32 slots = input_slots;
             cache_inv((void *)rx, WORDS * 4);
@@ -366,6 +377,7 @@ void audio_isr(void)
             irq_nest_end(saved);
             audio_in_callback = 0;
         } else for (i = 0; i < WORDS; i++) out_block[i] = 0.0f;
+        usb_audio_write(out_block, FRAMES);   /* to the computer, before VOLUME */
         {                                     /* the level: a ramp across the block towards volume x fade */
             float from = audio_level, to = audio_volume * fade_target, step = 1.0f / AUDIO_FADE_BLOCKS;
             if (to > from + step) to = from + step;

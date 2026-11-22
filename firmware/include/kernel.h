@@ -76,6 +76,13 @@ int  usb_configured(void);                    /* a host has configured the devic
 u32  usb_midi_tx_free(void);
 int  usb_midi_stalled(void);                   /* the host has stopped taking MIDI out */
 int  usb_midi_send(const u8 *data, u32 bytes);
+void usb_audio_read(float *in, u32 frames);   /* audio interrupt: the computer's audio (ENAGA_INPUT_USB) */
+void usb_audio_write(const float *out, u32 frames);   /* audio interrupt: the app's output to the computer */
+int  usb_audio_out_streaming(void);
+int  usb_audio_in_streaming(void);
+extern u32 usb_audio_out_packets, usb_audio_out_overruns, usb_audio_out_underruns;
+extern u32 usb_audio_in_packets, usb_audio_in_late, usb_audio_in_underruns;
+extern float usb_audio_out_ratio;
 void usb_drive_share(int on);                 /* USB DRIVE: the SD card shown to the computer, or not */
 int  usb_drive_ejected(void);                 /* the computer ejected it */
 extern u32 usb_drive_read_sectors, usb_drive_written_sectors, usb_drive_errors;

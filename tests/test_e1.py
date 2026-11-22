@@ -334,17 +334,21 @@ class E1(unittest.TestCase):
 
     def test_one_sample_opening_while_held_is_ignored(self):
         # The original firmware's STEP keys release on the first open sample, so this gave a release and a new
-        # press there. 3 ms openings hold at most one 6 ms sample; 9 ms apart, two consecutive openings cover
-        # every sample phase between them, so at least one is sampled.
+        # press there. Samples are taken on the first main-loop pass 6 ms after the last; passes come with the
+        # audio blocks, so on the emulator the gaps alternate 5.25 and 6.75 ms, a pattern that repeats every 12 ms.
+        # 3 ms openings 10 ms apart: a gap of 6.75 ms cannot reach from one opening into the next (7 ms), so no two
+        # consecutive samples are open; and each opening falls 2 ms further along the 12 ms pattern, so of twelve,
+        # several are sampled. (9 ms apart, a 6.75 ms gap could catch two in a row, a real release; 12 ms apart,
+        # every opening falls at the same phase and none may be sampled.)
         with Emulation(HERE / "apps" / "keys") as emu:
             self.assertIsNone(emu.run(BOOT)["error"])
             emu.key(STEP1, True)
             emu.run(20 * MS)
-            for _ in range(4):
+            for _ in range(12):
                 emu.key(STEP1, False)
                 emu.run(3 * MS)
                 emu.key(STEP1, True)
-                emu.run(6 * MS)
+                emu.run(7 * MS)
             emu.run(20 * MS)
             self.assertEqual(self.key_events(emu), ["K32 1"])
             emu.key(STEP1, False)

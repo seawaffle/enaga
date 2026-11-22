@@ -72,7 +72,9 @@ enum enaga_input_source {
     ENAGA_INPUT_HIZ = 1,                    /* INPUT L as a high-impedance instrument input (guitar), both channels */
     ENAGA_INPUT_DYNAMIC_MIC = 2,            /* INPUT R through the microphone preamplifier, both channels */
     ENAGA_INPUT_LINE_STEREO = 3,            /* INPUT L and R as a stereo line input (the default) */
-    ENAGA_INPUT_LINE_MONO = 4               /* INPUT L as a mono line input, both channels */
+    ENAGA_INPUT_LINE_MONO = 4,              /* INPUT L as a mono line input, both channels */
+    ENAGA_INPUT_USB = 5                     /* the computer's audio over USB (silence while it sends none); the level
+                                             * is ignored. The jacks' route stays as it was */
 };
 enum enaga_input_level {
     ENAGA_INPUT_LOW = 0,                    /* Hi-Z and dynamic mic: no front-end gain; line: the -20 dB PAD */

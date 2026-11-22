@@ -396,10 +396,20 @@ HW-27).
 ## USB
 
 USB0 at `0x01E00000`: a Mentor MUSB core at +0x400 behind TI's wrapper (SPRUH79C chapter 33). Enaga runs it as a
-full-speed USB MIDI and mass storage device with TinyUSB (`firmware/third_party/tinyusb`). The C6748 port is
+full-speed USB MIDI, audio and mass storage device with TinyUSB (`firmware/third_party/tinyusb`). The C6748 port is
 `firmware/usb/musb_enaga.h` and the glue `firmware/usb/usb.c`.
 - **Unplugging:** the core's DISCON interrupt (the session ended) now tells TinyUSB the device is unplugged;
   TinyUSB left it unhandled, so the device stayed configured in its eyes until the next bus reset.
+- **Audio (E5):** USB Audio Class 1.0, as the original firmware: 2 channels of 16 bits at 48 kHz each way,
+  isochronous endpoints 0x03 (OUT, adaptive) and 0x83 (IN, asynchronous), 196 bytes, interfaces 2 and 3 under the
+  AudioControl interface that also holds MIDI (`firmware/usb/usb_audio.c`). Packets are moved in the USB interrupt
+  on every SOF, not through TinyUSB's transfers (which finish in the main loop): the SOF interrupt is on while a
+  stream runs (TinyUSB's `dcd_sof_enable` was empty for MUSB), POWER.ISOUPDATE holds an IN packet until the SOF,
+  both halves of the double-buffered IN FIFO are kept loaded so a SOF served late (behind the app's callback) costs
+  nothing, and the endpoints' own interrupts stay off. Clock drift: what the computer sends is resampled (linear
+  interpolation) by a ratio that keeps its ring at 3 ms; what goes to the computer is sent 47, 48 or 49 frames a
+  packet to keep its ring at two blocks. The original firmware trims the codec PLL from TIMER64P1 instead
+  (HW-18, HW-40). Tested on the emulator's isochronous streams, including a computer clock 1000 ppm fast and slow.
 - **Mass storage (USB DRIVE, E5):** bulk-only transport, SCSI, one removable drive that is the whole SD card,
   16 sectors per SD command. No medium except while the menu's USB DRIVE page is open; then UNIT ATTENTION
   (medium changed) and the card. START STOP UNIT with START clear (eject) ends the page. The size comes from the
@@ -418,8 +428,8 @@ full-speed USB MIDI and mass storage device with TinyUSB (`firmware/third_party/
   take its status from the port.
 - **FIFOs:** dynamic, in the core's 4 KiB. The core has no RX / TX_DOUBLE_PACKET_DISABLE registers (0x340 / 0x342,
   found on newer MUSB revisions); double buffering is the DPB bit of TXFIFOSZ / RXFIFOSZ.
-- **Endpoints and IDs:** the MIDI interface uses bulk endpoints 0x01 and 0x81 (64 bytes), the mass storage
-  interface (USB DRIVE, interface 2) 0x02 and 0x82. The USB IDs are
+- **Endpoints and IDs:** the MIDI interface uses bulk endpoints 0x01 and 0x81 (64 bytes), audio isochronous
+  0x03 and 0x83 (196 bytes), the mass storage interface (USB DRIVE, interface 4) 0x02 and 0x82. The USB IDs are
   TinyUSB's test values (0xCAFE / 0x4011) until a pid.codes product ID is granted.
 
 Tested on the emulator's USB model and scripted host (enumeration, MIDI both ways, clock, unplugging), and on the
@@ -621,5 +631,15 @@ unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it mut
     - Pull the cable while the page is open: the menu comes back with USB UNPLUGGED.
     - USB MIDI still works alongside (step 18) before and after.
     Each of Windows, macOS and Linux if available. Report anything the computer says (on Linux, `dmesg`).
+21. **USB audio (E5; CHECK, AUDIO page):** with USB connected, the computer should list an audio device "Enaga
+    SmplTrek" for both playback and recording, with no driver (Windows: Sound settings; macOS: Audio MIDI Setup;
+    Linux: `aplay -l` and `arecord -l`).
+    - **Playback:** STEP 14 (USB) chooses the computer as the input. Play music from the computer to the unit: the
+      IN L / IN R meters follow it. Stop: they fall to 0.
+    - **Recording:** record from the unit in a DAW (or Audacity) while STEP 1-3 play the tones: the tones arrive,
+      left only, right only, both. Listen for clicks over a minute or two.
+    - **Both at once** for five minutes: no clicks or dropouts either way. Note the computer and its sample rate
+      setting (48 kHz).
+    - USB MIDI and USB DRIVE still work alongside. Unplug while playing: nothing crashes; plug back in and it plays.
 
 Afterwards the official update restores the unit ("Installing and recovery").

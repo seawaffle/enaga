@@ -1,6 +1,7 @@
 #include "kernel.h"
 #include "tusb.h"
 #include "usb_c6748.h"
+#include "usb_audio.h"
 
 /* USB MIDI on the C6748's USB0 (docs/design.md "E4 plan", step 5), with TinyUSB (firmware/third_party/tinyusb; port
  * in musb_enaga.h). The unit is a class-compliant USB MIDI device with one cable, a full-speed bulk endpoint each
@@ -237,18 +238,51 @@ static const tusb_desc_device_t device_descriptor = {
 
 const uint8_t *tud_descriptor_device_cb(void) { return (const uint8_t *)&device_descriptor; }
 
-enum { ITF_MIDI_CONTROL, ITF_MIDI_STREAMING, ITF_DRIVE, ITF_COUNT };
+/* One AudioControl interface for the audio function: its header lists MIDI streaming and the two audio streaming
+ * interfaces (TinyUSB's MIDI driver takes the AudioControl interface with the MIDI streaming one right after it;
+ * usb_audio.c takes 2 and 3). Then mass storage. */
+enum { ITF_AUDIO_CONTROL, ITF_MIDI_STREAMING, ITF_AUDIO_OUT, ITF_AUDIO_IN, ITF_DRIVE, ITF_COUNT };
 #define EP_MIDI_OUT  0x01
 #define EP_MIDI_IN   0x81
 #define EP_DRIVE_OUT 0x02
 #define EP_DRIVE_IN  0x82
-#define CONFIG_LENGTH (TUD_CONFIG_DESC_LEN + TUD_MIDI_DESC_LEN + TUD_MSC_DESC_LEN)
+#define AC_LEN       (11 + 12 + 9 + 12 + 9)  /* header, then each direction's input and output terminal */
+#define MS_LEN       (TUD_MIDI_DESC_LEN - TUD_MIDI_DESC_HEAD_LEN + 9 + 7)
+#define AS_LEN       (9 + 9 + 7 + 11 + 9 + 7)
+#define CONFIG_LENGTH (TUD_CONFIG_DESC_LEN + 9 + AC_LEN + MS_LEN + 2 * AS_LEN + TUD_MSC_DESC_LEN)
+
+#define TERMINAL_IN(_id, _type)  12, TUSB_DESC_CS_INTERFACE, 0x02, _id, U16_TO_U8S_LE(_type), 0, 2, U16_TO_U8S_LE(0x0003), 0, 0
+#define TERMINAL_OUT(_id, _type, _source)  9, TUSB_DESC_CS_INTERFACE, 0x03, _id, U16_TO_U8S_LE(_type), 0, _source, 0
+/* A streaming interface: alternate 0 with no endpoint, alternate 1 with PCM, 2 channels of 16 bits at 48 kHz, one
+ * isochronous endpoint of 196 bytes (49 frames) every frame. */
+#define AUDIO_STREAMING(_itf, _terminal, _ep, _sync) \
+    9, TUSB_DESC_INTERFACE, _itf, 0, 0, TUSB_CLASS_AUDIO, AUDIO_SUBCLASS_STREAMING, 0, 0, \
+    9, TUSB_DESC_INTERFACE, _itf, 1, 1, TUSB_CLASS_AUDIO, AUDIO_SUBCLASS_STREAMING, 0, 0, \
+    7, TUSB_DESC_CS_INTERFACE, 0x01, _terminal, 1, U16_TO_U8S_LE(0x0001), \
+    11, TUSB_DESC_CS_INTERFACE, 0x02, 1, 2, 2, 16, 1, 0x80, 0xBB, 0x00, \
+    9, TUSB_DESC_ENDPOINT, _ep, (uint8_t)(TUSB_XFER_ISOCHRONOUS | (_sync)), U16_TO_U8S_LE(196), 1, 0, 0, \
+    7, TUSB_DESC_CS_ENDPOINT, 0x01, 0, 0, U16_TO_U8S_LE(0)
 
 static const uint8_t configuration_descriptor[] = {
     TUD_CONFIG_DESCRIPTOR(1, ITF_COUNT, 0, CONFIG_LENGTH, TUSB_DESC_CONFIG_ATT_SELF_POWERED, 100),
-    TUD_MIDI_DESCRIPTOR(ITF_MIDI_CONTROL, 0, EP_MIDI_OUT, EP_MIDI_IN, 64),
+    9, TUSB_DESC_INTERFACE, ITF_AUDIO_CONTROL, 0, 0, TUSB_CLASS_AUDIO, AUDIO_SUBCLASS_CONTROL, 0, 0,
+    11, TUSB_DESC_CS_INTERFACE, 0x01, U16_TO_U8S_LE(0x0100), U16_TO_U8S_LE(AC_LEN), 3, ITF_MIDI_STREAMING,
+    ITF_AUDIO_OUT, ITF_AUDIO_IN,
+    TERMINAL_IN(1, 0x0101),                    /* USB streaming, from the computer */
+    TERMINAL_OUT(2, 0x0603, 1),                /* -> line connector: the app's input */
+    TERMINAL_IN(3, 0x0603),                    /* line connector: the app's output */
+    TERMINAL_OUT(4, 0x0101, 3),                /* -> USB streaming, to the computer */
+    9, TUSB_DESC_INTERFACE, ITF_MIDI_STREAMING, 0, 2, TUSB_CLASS_AUDIO, AUDIO_SUBCLASS_MIDI_STREAMING, 0, 0,
+    7, TUSB_DESC_CS_INTERFACE, MIDI_CS_INTERFACE_HEADER, U16_TO_U8S_LE(0x0100),
+    U16_TO_U8S_LE(7 + TUD_MIDI_DESC_JACK_LEN + 2 * TUD_MIDI_DESC_EP_LEN(1)),
+    TUD_MIDI_DESC_JACK_DESC(1, 0),
+    TUD_MIDI_DESC_EP(EP_MIDI_OUT, 64, 1), TUD_MIDI_JACKID_IN_EMB(1),
+    TUD_MIDI_DESC_EP(EP_MIDI_IN, 64, 1), TUD_MIDI_JACKID_OUT_EMB(1),
+    AUDIO_STREAMING(ITF_AUDIO_OUT, 1, USB_AUDIO_EP_OUT, TUSB_ISO_EP_ATT_ADAPTIVE),
+    AUDIO_STREAMING(ITF_AUDIO_IN, 4, USB_AUDIO_EP_IN, TUSB_ISO_EP_ATT_ASYNCHRONOUS),
     TUD_MSC_DESCRIPTOR(ITF_DRIVE, 0, EP_DRIVE_OUT, EP_DRIVE_IN, 64),
 };
+_Static_assert(sizeof configuration_descriptor == CONFIG_LENGTH, "the configuration's length");
 
 const uint8_t *tud_descriptor_configuration_cb(uint8_t index)
 {
