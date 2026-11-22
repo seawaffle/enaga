@@ -14,7 +14,9 @@ namespace {
 struct Drawn { int x, y; std::string text; int grey; };
 std::vector<Drawn> g_drawn;
 void host_text(uint8_t *, int x, int y, const char *text, uint8_t grey) { g_drawn.push_back({x, y, text, grey}); }
-enaga_host_t g_host = [] { enaga_host_t h{}; h.text = host_text; return h; }();
+uint32_t g_ms = 1000;
+uint32_t host_ms() { return g_ms; }
+enaga_host_t g_host = [] { enaga_host_t h{}; h.text = host_text; h.ms = host_ms; return h; }();
 uint8_t g_pixels[ENAGA_SCREEN_W * ENAGA_SCREEN_H];
 
 int failures = 0;
@@ -163,7 +165,104 @@ static void test_text_entry() {
     check(entry.key(ENAGA_KEY_CLR, true) == Action::no && !entry.active(), "text: CLR cancels");
 }
 
+// The pixel at (x, y) of the last drawing.
+int px(int x, int y) { return g_pixels[y * ENAGA_SCREEN_W + x]; }
+void blank() { std::memset(g_pixels, 0, sizeof g_pixels); g_drawn.clear(); }
+bool same(const char *a, const char *b) { return std::strcmp(a, b) == 0; }
+
+static void test_line() {
+    check(same(Line().add("TEMPO ").fixed(1300, 1).add(" BPM"), "TEMPO 130.0 BPM"), "line: chained parts");
+    check(same(Line().number(-42), "-42") && same(Line().number(0), "0"), "line: numbers");
+    check(same(Line().number(7, 3, '0'), "007") && same(Line().number(7, 3), "  7"), "line: width and padding");
+    check(same(Line().number(-7, 3, '0'), "-07") && same(Line().number(-7, 4), "  -7"), "line: negative padded");
+    check(same(Line().number(12345, 3), "12345"), "line: a wider number is not cut to the width");
+    check(same(Line().fixed(-5, 2), "-0.05") && same(Line().fixed(1005, 1), "100.5"), "line: fixed point");
+    check(same(Line().fixed(3, 0), "3"), "line: fixed point with no decimals");
+    check(same(Line().hex(0x3C, 2).add(' ').hex(0xBEEF, 4), "3C BEEF"), "line: hex");
+    check(same(Line().note(60), "C4") && same(Line().note(61), "C#4") && same(Line().note(0), "C-1")
+          && same(Line().note(127), "G9") && same(Line().note(69), "A4"), "line: note names");
+    check(same(Line().shown("kick_01.wav"), "KICK-01.WAV"), "line: outside text made drawable");
+    check(same(Line().shown("abcdef", 3), "ABC"), "line: outside text cut at max");
+    Line long_line("ABCDEFGHIJKLMNOPQRS");                 // 19 of 21
+    check(!long_line.add_if_fits(" XYZ") && long_line.length() == 19, "line: a part that does not fit is left out");
+    check(long_line.add_if_fits(" X") && long_line.room() == 0, "line: one that fits goes in");
+    check(same(long_line.add("MORE"), "ABCDEFGHIJKLMNOPQRS X"), "line: cut at the end of the screen's line");
+    check(same(Line("A").column(4).add("B"), "A   B"), "line: column");
+    char small[5];
+    Line("CUTOFF").copy_to(small, sizeof small);
+    check(same(small, "CUTO"), "line: copy_to cuts to the buffer");
+    for (const char *p = "AZ09 !#+-./:=?%>"; *p; p++) check(drawable(*p), "drawable: the font's characters");
+    check(!drawable('a') && !drawable('_') && !drawable(','), "drawable: others are not");
+}
+
+static void test_frame_and_notice() {
+    blank();
+    enaga::Canvas canvas(g_pixels);
+    status_line(canvas, "SONG 1", "120.0");
+    hint_line(canvas, "OK: LOAD  CLR: BACK");
+    hint_line(canvas, "UP DOWN: MOVE", 1);
+    check(row(0) == "SONG 1|120.0" && find("120.0")->x == ENAGA_SCREEN_W - 30, "frame: status line");
+    check(px(0, 9) == 3 && px(127, 9) == 3, "frame: a rule under the status line");
+    check(row(hint_y) == "OK: LOAD  CLR: BACK" && row(hint_y - 10) == "UP DOWN: MOVE", "frame: hint lines");
+    check(body_top > 9 && body_bottom < hint_y - 1, "frame: the body between them");
+
+    Notice notice;
+    blank();
+    notice.draw(canvas);
+    check(!notice.showing() && g_drawn.empty(), "notice: nothing before show");
+    notice.show("SAVED");
+    g_ms += 1000;
+    notice.draw(canvas);
+    check(notice.showing() && row(hint_y) == "SAVED" && px(0, hint_y - 2) == 4, "notice: shown on a bar");
+    g_ms += 600;
+    check(!notice.showing() && same(notice.text(), ""), "notice: gone after 1.5 s");
+    char text[] = "LOADED";
+    notice.show(text, 100);
+    text[0] = 'X';
+    check(same(notice.text(), "LOADED"), "notice: the text is copied");
+    notice.clear();
+    check(!notice.showing(), "notice: clear");
+    g_ms = 0xFFFFFF00u;                                  // shown across the millisecond counter's wrap
+    notice.show("WRAP");
+    g_ms += 0x200;
+    check(notice.showing(), "notice: across the counter's wrap");
+}
+
+static void test_bars_and_meters() {
+    enaga::Canvas canvas(g_pixels);
+    blank();
+    bar(canvas, 10, 50, 40, 64, 0, 127);
+    check(px(10, 50) == 9 && px(29, 50) == 9 && px(30, 50) == 2 && px(49, 50) == 2 && px(50, 50) == 0, "bar: lit to the value");
+    blank();
+    bar(canvas, 10, 50, 40, 500, 0, 127, 3);
+    check(px(49, 52) == 9 && px(50, 52) == 0, "bar: clamped, and h high");
+    blank();
+    bar_centred(canvas, 0, 50, 40, -25, -50, 50);
+    check(px(10, 50) == 9 && px(9, 50) == 2 && px(19, 50) == 9 && px(20, 49) == 6 && px(25, 50) == 2,
+          "bar_centred: from the middle to the left");
+    blank();
+    bar_centred(canvas, 0, 50, 40, 50, -50, 50);
+    check(px(21, 50) == 9 && px(39, 50) == 9 && px(15, 50) == 2, "bar_centred: and to the right");
+    blank();
+    meter(canvas, 0, 20, 4, 40, 0.5f, 0.75f);                // upright: bottom half lit, the peak above it
+    check(px(0, 59) == 9 && px(0, 40) == 9 && px(0, 39) == 2 && px(3, 30) == 15 && px(0, 31) == 2, "meter: upright");
+    blank();
+    meter(canvas, 0, 20, 40, 3, 1.5f, 1.0f);                 // across, over full scale: all lit, peak at the end
+    check(px(38, 21) == 9 && px(39, 21) == 15, "meter: across, clamped");
+    blank();
+    meter(canvas, 0, 20, 40, 3, 0.0f);
+    check(px(0, 20) == 2 && px(39, 22) == 2, "meter: empty with no peak");
+    auto near = [](float a, float b) { return a - b < 0.01f && b - a < 0.01f; };
+    check(near(meter_db(1.0f), 1.0f) && near(meter_db(-1.0f), 1.0f), "meter_db: full scale");
+    check(near(meter_db(0.5f), 1.0f - 6.0206f / 48.0f), "meter_db: -6 dB");
+    check(meter_db(0.0f) == 0.0f && meter_db(0.001f) == 0.0f && near(meter_db(0.1f, -40.0f), 0.5f), "meter_db: floor");
+    check(meter_db(2.0f) == 1.0f, "meter_db: over full scale");
+}
+
 int main() {
+    test_line();
+    test_frame_and_notice();
+    test_bars_and_meters();
     test_list();
     test_param_page();
     test_dialog();

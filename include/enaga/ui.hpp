@@ -14,11 +14,15 @@
 // selection buttons under the screen flip between groups of four, and pushing a knob returns its parameter to its
 // initial value; lists move with UP / DOWN or VALUE, OK chooses and CLR goes back. F1 stays the app's.
 //
+// Around the widgets: Line builds text without printf, status_line and hint_line frame the screen (the widgets go
+// between body_top and body_bottom), Notice shows a message for a moment, and bar and meter draw levels.
+//
 // Widgets keep no pointers to the app beyond what it hands them (item names, parameters, values), which must
 // outlive the widget. Main context only. Text is upper case: the font has A-Z, 0-9, space and ! # + - . / : = ? % >.
 #pragma once
 
 #include <enaga/app.hpp>
+#include <enaga/dsp/math.h>
 
 #include <cstdint>
 
@@ -62,6 +66,203 @@ inline void right(Canvas &canvas, int y, const char *text, uint8_t grey, int x_e
 // Text ending at x_end (the screen's right edge by default): values and labels in a column.
 inline void text_right(Canvas &canvas, int y, const char *text, uint8_t grey = 15, int x_end = screen_width) {
     detail::right(canvas, y, text, grey, x_end);
+}
+
+// ---- Text -------------------------------------------------------------------------------------------------------
+
+// Whether Enaga's font has a character; it draws any other as '?'.
+inline bool drawable(char c) {
+    if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) return true;
+    for (const char *p = " !#+-./:=?%>"; *p; p++) if (*p == c) return true;
+    return false;
+}
+
+// A line of text built in place, never longer than the screen's line (line_chars): whatever would run past the
+// end is cut off. Each call returns the line, so calls chain:
+//
+//     enaga::ui::Line line;
+//     line.add("TEMPO ").fixed(1300, 1).add(" BPM");           // "TEMPO 130.0 BPM"
+//     canvas.text(0, 20, line);
+class Line {
+public:
+    static constexpr int capacity = line_chars;
+
+    Line() = default;
+    explicit Line(const char *s) { add(s); }
+
+    Line &clear() { n_ = 0; text_[0] = 0; return *this; }
+    Line &add(char c) { if (n_ < capacity) { text_[n_++] = c; text_[n_] = 0; } return *this; }
+    Line &add(const char *s) { while (s && *s) add(*s++); return *this; }
+
+    // A number, right-aligned in `width` characters filled with `pad`: number(7, 3, '0') is "007".
+    Line &number(int value, int width = 0, char pad = ' ') {
+        char digits[12];
+        int k = 0;
+        unsigned v = value < 0 ? 0u - unsigned(value) : unsigned(value);
+        do { digits[k++] = char('0' + v % 10); v /= 10; } while (v);
+        int used = k + (value < 0);
+        if (value < 0 && pad == '0') add('-');
+        for (; used < width; used++) add(pad);
+        if (value < 0 && pad != '0') add('-');
+        while (k) add(digits[--k]);
+        return *this;
+    }
+    // A fixed-point number: `value` in units of 10^-decimals. fixed(1300, 1) is "130.0", fixed(-5, 2) "-0.05".
+    Line &fixed(int value, int decimals) {
+        unsigned scale = 1;
+        for (int i = 0; i < decimals; i++) scale *= 10;
+        unsigned v = value < 0 ? 0u - unsigned(value) : unsigned(value);
+        if (value < 0) add('-');
+        number(int(v / scale));
+        if (decimals > 0) { add('.'); number(int(v % scale), decimals, '0'); }
+        return *this;
+    }
+    // `digits` hex digits, upper case: hex(0x3C, 2) is "3C".
+    Line &hex(unsigned value, int digits) {
+        for (int shift = 4 * (digits - 1); shift >= 0; shift -= 4) add("0123456789ABCDEF"[(value >> shift) & 15]);
+        return *this;
+    }
+    // A MIDI note's name, with middle C (60) as C4: 61 is "C#4", 0 "C-1".
+    Line &note(int note) {
+        static const char names[] = "C C#D D#E F F#G G#A A#B ";
+        int pitch = ((note % 12) + 12) % 12, octave = (note - pitch) / 12 - 1;
+        add(names[2 * pitch]);
+        if (names[2 * pitch + 1] != ' ') add(names[2 * pitch + 1]);
+        return number(octave);
+    }
+    // Text from outside the app, a file name, say, as the font can draw it: lower case raised, anything else the
+    // font lacks shown as '-', at most `max` characters. "kick_01.wav" becomes "KICK-01.WAV".
+    Line &shown(const char *text, int max = capacity) {
+        for (int i = 0; text && text[i] && i < max; i++) {
+            char c = text[i] >= 'a' && text[i] <= 'z' ? char(text[i] - 'a' + 'A') : text[i];
+            add(drawable(c) ? c : '-');
+        }
+        return *this;
+    }
+    // Adds `part` only if all of it fits, for a line made of optional pieces in order of importance: what does not
+    // fit is left out whole rather than cut. Returns whether it was added.
+    bool add_if_fits(const char *part) {
+        if (n_ + detail::length(part) > capacity) return false;
+        add(part);
+        return true;
+    }
+    // Spaces up to character column `at` (0-20), to line values up under each other.
+    Line &column(int at) { while (n_ < at && n_ < capacity) add(' '); return *this; }
+
+    const char *text() const { return text_; }
+    operator const char *() const { return text_; }
+    // Into a buffer of `size` bytes, cut to fit: for a Param's format function, say.
+    void copy_to(char *out, int size) const { detail::copy(out, size, text_); }
+    int length() const { return n_; }
+    int room() const { return capacity - n_; }
+
+private:
+    char text_[capacity + 1] = {};
+    int n_ = 0;
+};
+
+// ---- The screen's frame -----------------------------------------------------------------------------------------
+
+// A status line at the top with a rule under it, key hints on the bottom line, and the widgets between: pass
+// body_top and body_bottom as their `top` and `bottom`.
+constexpr int status_y = 0;
+constexpr int body_top = 12;
+constexpr int hint_y = ENAGA_SCREEN_H - 8;   // 120, the bottom line
+constexpr int body_bottom = hint_y - 2;
+
+// The top line: `left` bright, `right` (if any) dim at the right edge, and a rule under both.
+inline void status_line(Canvas &canvas, const char *left, const char *right = nullptr) {
+    canvas.text(0, status_y, left ? left : "", 15);
+    if (right) detail::right(canvas, status_y, right, 8);
+    canvas.rect(0, status_y + 9, screen_width, 1, 3);
+}
+
+// Key hints ("OK: LOAD  CLR: BACK") on the bottom line, or `row` lines above it (10 pixels each).
+inline void hint_line(Canvas &canvas, const char *hints, int row = 0) {
+    canvas.text(0, hint_y - 10 * row, hints ? hints : "", 6);
+}
+
+// ---- Notice -----------------------------------------------------------------------------------------------------
+
+// A message shown for a moment ("SAVED", "NO CARD"): show() copies the text, and draw() puts it on a lit bar over
+// the bottom line until the time is up. Drawn after the hints, it covers them.
+class Notice {
+public:
+    static constexpr uint32_t default_ms = 1500;
+
+    void show(const char *text, uint32_t duration_ms = default_ms) {
+        detail::copy(text_, sizeof text_, text);
+        since_ = enaga::ms();
+        duration_ = duration_ms;
+    }
+    void clear() { text_[0] = 0; }
+    bool showing() const { return text_[0] && enaga::ms() - since_ < duration_; }
+    const char *text() const { return showing() ? text_ : ""; }
+
+    void draw(Canvas &canvas, int y = hint_y) const {
+        if (!showing()) return;
+        canvas.rect(0, y - 2, screen_width, 10, 4);
+        canvas.text(2, y, text_, 15);
+    }
+
+private:
+    char text_[line_chars + 1] = {};
+    uint32_t since_ = 0, duration_ = 0;
+};
+
+// ---- Bars and meters --------------------------------------------------------------------------------------------
+
+namespace detail {
+inline int place(int value, int min, int max, int pixels) {   // value's place in min..max, 0..pixels
+    if (max <= min) return 0;
+    value = value < min ? min : value > max ? max : value;
+    unsigned range = unsigned(max) - unsigned(min), offset = unsigned(value) - unsigned(min);
+    while (range > (1u << 22)) { range >>= 1; offset >>= 1; }   // 32-bit: no 64-bit division on the C674x
+    return int(unsigned(pixels) * offset / range);
+}
+inline int fraction(float f, int pixels) {
+    return f <= 0.0f ? 0 : f >= 1.0f ? pixels : int(f * float(pixels) + 0.5f);
+}
+}  // namespace detail
+
+// A value's place in its range: a dim track `w` pixels long and `h` high, lit from the left up to the value.
+inline void bar(Canvas &canvas, int x, int y, int w, int value, int min, int max, int h = 1, uint8_t grey = 9) {
+    canvas.rect(x, y, w, h, 2);
+    canvas.rect(x, y, detail::place(value, min, max, w), h, grey);
+}
+
+// The same lit from the middle of the range towards the value: for values either side of a centre (pan,
+// detune). A mark shows the middle.
+inline void bar_centred(Canvas &canvas, int x, int y, int w, int value, int min, int max, int h = 1,
+                        uint8_t grey = 9) {
+    canvas.rect(x, y, w, h, 2);
+    int middle = w / 2, at = detail::place(value, min, max, w);
+    if (at < middle) canvas.rect(x + at, y, middle - at, h, grey);
+    else canvas.rect(x + middle, y, at - middle, h, grey);
+    canvas.rect(x + middle, y - 1, 1, h + 2, 6);
+}
+
+// A level meter: upright, filling from the bottom, when it is taller than wide; otherwise across, from the left.
+// `level` and `peak` are fractions of full scale, 0-1 (meter_db makes one from an amplitude); a peak at 0 or above
+// shows as a bright mark.
+inline void meter(Canvas &canvas, int x, int y, int w, int h, float level, float peak = -1.0f) {
+    canvas.rect(x, y, w, h, 2);
+    if (h > w) {
+        int lit = detail::fraction(level, h);
+        canvas.rect(x, y + h - lit, w, lit, 9);
+        if (peak >= 0.0f) { int p = detail::fraction(peak, h - 1); canvas.rect(x, y + h - 1 - p, w, 1, 15); }
+    } else {
+        canvas.rect(x, y, detail::fraction(level, w), h, 9);
+        if (peak >= 0.0f) canvas.rect(x + detail::fraction(peak, w - 1), y, 1, h, 15);
+    }
+}
+
+// An amplitude (1.0 full scale) as a meter fraction on a decibel scale: floor_db and below are 0, 0 dB is 1.
+inline float meter_db(float amplitude, float floor_db = -48.0f) {
+    if (amplitude < 0.0f) amplitude = -amplitude;
+    if (amplitude <= 0.0f || floor_db >= 0.0f) return 0.0f;
+    float db = 6.0206f * enaga_log2(amplitude);
+    return db <= floor_db ? 0.0f : db >= 0.0f ? 1.0f : 1.0f - db / floor_db;
 }
 
 // ---- List -------------------------------------------------------------------------------------------------------
@@ -225,9 +426,7 @@ public:
             canvas.text(9, y, text, 12);
             format(param, text);
             detail::right(canvas, y, text, v == p.initial ? 11 : 15);
-            int span = p.max - p.min;
-            canvas.rect(9, y + 8, 40, 1, 2);
-            canvas.rect(9, y + 8, span > 0 ? 40 * (v - p.min) / span : 0, 1, 9);
+            bar(canvas, 9, y + 8, 40, v, p.min, p.max);
         }
     }
 
