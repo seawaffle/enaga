@@ -196,9 +196,12 @@ static void on_pad(int channel, unsigned value)
     deliver(&e);
 }
 
+int status_scroll;                            /* menu.c moves it; clamped here */
+
 static void status_page(u32 ms)
 {
-    u32 i, first;
+    u32 i, first, kept = log_count < LOG_LINES ? log_count : LOG_LINES;
+    int most = kept > 5 ? (int)kept - 5 : 0;
     gfx_clear(0);
     gfx_text(0, 0, "ENAGA " ENAGA_VERSION, 15);
     gfx_dec(96, 0, (int)(ms / 1000u), 8);
@@ -209,6 +212,12 @@ static void status_page(u32 ms)
         gfx_hex(0, 39, crash_pc, 8, 12);
         gfx_hex(54, 39, crash_efr, 1, 12);
         gfx_hex(66, 39, crash_ierr, 3, 12);
+    } else if (usb_audio_out_streaming() || usb_audio_in_streaming() || usb_audio_out_packets || usb_audio_in_packets) {
+        /* USB audio: packets from the computer (O) and to it (I) since start-up, each streaming direction bright */
+        gfx_text(0, 39, "UA O", 10);
+        gfx_dec(24, 39, (int)(usb_audio_out_packets % 100000u), usb_audio_out_streaming() ? 15 : 8);
+        gfx_text(66, 39, "I", 10);
+        gfx_dec(72, 39, (int)(usb_audio_in_packets % 100000u), usb_audio_in_streaming() ? 15 : 8);
     }
     gfx_text(0, 48, "AUDIO", 10);
     gfx_dec(36, 48, audio_status, 15);
@@ -230,8 +239,12 @@ static void status_page(u32 ms)
         gfx_text(30, 75, "C", 8); gfx_dec(36, 75, (int)sd_io_command, 15);
         gfx_hex(60, 75, sd_io_status, 4, 15);
     }
-    first = log_count > 5 ? log_count - 5 : 0;
-    for (i = first; i < log_count; i++) gfx_text(0, 84 + 9 * (int)(i - first), log_lines[i % LOG_LINES], 8);
+    /* The last five log lines, or earlier ones scrolled back to (UP / DOWN or VALUE), with how far back at the right. */
+    status_scroll = status_scroll < 0 ? 0 : status_scroll > most ? most : status_scroll;
+    first = log_count - (kept < 5 ? kept : 5) - (u32)status_scroll;
+    for (i = first; i < first + (kept < 5 ? kept : 5); i++)
+        gfx_text(0, 84 + 9 * (int)(i - first), log_lines[i % LOG_LINES], 8);
+    if (status_scroll) { gfx_text(108, 75, "-", 10); gfx_dec(114, 75, status_scroll, 10); }
 }
 
 static void shutdown_with(const char *text)

@@ -261,14 +261,11 @@ static u32 size32(FSIZE_t size) { return size > 0xFFFFFFFFu ? 0xFFFFFFFFu : (u32
  * as read, high word first, over two lines of the status page's 21 characters ("CSD 400E0032 5B590000",
  * "CSD 76B27F80 0A404000"), and the size taken from it ("CARD 62333952 SECTORS"). A USB DRIVE size that is wrong
  * can then be traced to the register or the parse. */
-static void log_card_size(void)
+void files_log_card(void)                     /* also when USB DRIVE opens, so the lines sit beside its own */
 {
     static const char hex[] = "0123456789ABCDEF";
-    static int done;
     char line[24];
     int n, w, i;
-    if (done || (sd_csd[3] >> 30 == 0 && sd_sectors)) return;
-    done = 1;
     for (w = 3; w >= 0; w -= 2) {
         n = 0;
         line[n++] = 'C'; line[n++] = 'S'; line[n++] = 'D'; line[n++] = ' ';
@@ -283,6 +280,14 @@ static void log_card_size(void)
     for (i = 0; " SECTORS"[i] && n < 21; i++) line[n++] = " SECTORS"[i];
     line[n] = 0;
     log_line(line);
+}
+
+static void log_card_size(void)
+{
+    static int done;
+    if (done || (sd_csd[3] >> 30 == 0 && sd_sectors)) return;
+    done = 1;
+    files_log_card();
 }
 
 int files_mount(void)                         /* FR_OK or the FatFs error */

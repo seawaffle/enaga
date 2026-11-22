@@ -120,6 +120,8 @@ void menu_open(const char *message);          /* message: a line under the title
 void menu_close(void);                        /* back to the running app (none: stays) */
 void menu_event(const enaga_event_t *event);
 void menu_draw(void);
+extern int status_scroll;                      /* STATUS: log lines back from the newest (UP / DOWN, VALUE) */
+void files_log_card(void);                     /* the card's CSD and size, to the log (USB DRIVE logs them) */
 /* The Enaga screens' frame, as apps' <enaga/ui.hpp> draws it: a title with a rule under it, key hints on the
  * bottom line (row 0) or the rows above it, a lit bar behind a list's current line. */
 void ui_title(const char *title);
@@ -190,7 +192,7 @@ void leds_forget(void);                       /* the panel's state is unknown: t
 void leds_off(void);
 
 /* log.c: Enaga's log, also read by the emulator tests */
-#define LOG_LINES 16
+#define LOG_LINES 32
 #define LOG_WIDTH 40
 extern char log_lines[LOG_LINES][LOG_WIDTH];
 extern u32 log_count;                         /* lines ever logged; the newest is log_lines[(log_count-1) % LOG_LINES] */

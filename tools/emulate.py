@@ -34,6 +34,7 @@ _spec.loader.exec_module(firmware_build)
 
 WORK = paths.BUILD
 MS = 372_000                               # cycles in a millisecond at 372 MHz
+LOG_LINES = 32                             # firmware/include/kernel.h: the log lines Enaga keeps
 # Each encoder's two quadrature pins (bank, pin): A-D, then VALUE. At rest both are high.
 ENCODER_PINS = [((3, 14), (3, 15)), ((3, 12), (3, 10)), ((5, 2), (5, 0)), ((5, 5), (5, 4)), ((5, 7), (5, 8))]
 POWER_PIN = (3, 0)                         # the POWER key, low while pressed
@@ -140,9 +141,10 @@ class Emulation:
 
     def log(self):
         count = self.word("log_count")
-        lines = self.cpu.read(self.names["log_lines"], 16 * 40)
-        first = max(0, count - 16)
-        return [lines[(i % 16) * 40:(i % 16) * 40 + 40].split(b"\0")[0].decode("ascii", "replace") for i in range(first, count)]
+        lines = self.cpu.read(self.names["log_lines"], LOG_LINES * 40)
+        first = max(0, count - 16)                # the last 16, as the tests have always compared
+        return [lines[(i % LOG_LINES) * 40:(i % LOG_LINES) * 40 + 40].split(b"\0")[0].decode("ascii", "replace")
+                for i in range(first, count)]
 
     def report(self):
         raw_audio, audio = self.cpu.audio_output()
