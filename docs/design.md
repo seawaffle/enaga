@@ -390,7 +390,24 @@ emulator where it can be, and the ones that need the unit collect into a session
    while streaming; Enaga does the same, or resamples by a fraction of a sample (to decide at the step from
    measurements). Testing: the emulator has no isochronous transfers yet (a request through the user for
    smpltrek-re); the unit plays and records with a DAW.
-5. **Exit.** On a unit: copy an app over USB DRIVE and run it; play audio from a DAW through the unit and record
+5. (**Done** 2026-11-22, see the log.) **UI toolkit, second part: the pieces every screen needs**. What a large app written without the
+   toolkit had to build for itself shows what apps need. In `<enaga/ui.hpp>`, header-only:
+   - `Line`, a line of text built in place without printf, never longer than the screen: text, numbers (with
+     width and padding), fixed point ("130.0"), hex, MIDI note names, outside text made drawable (lower case
+     raised, characters the font lacks shown as `-`), a part added only if it fits, padding to a column.
+     `drawable(c)` says whether the font has a character.
+   - `Notice`, a message that clears itself after a moment (1.5 s by default), drawn over the bottom line.
+   - The screen's frame: `status_line` at the top with a rule under it, `hint_line` for key hints at the
+     bottom, and the constants between them (`body_top`, `body_bottom`) for the widgets' `top` and `bottom`.
+   - `bar` and `bar_centred` (a value's place in its range), `meter` (a level, upright or across, with a peak
+     mark) and `meter_db` (an amplitude on a dB scale, as a meter's fraction).
+   - api.md says LED writes go out only when a level changes, so apps need no copy of their own.
+   Tested on the host (tests/ui/host.cpp); `examples/widgets` uses them and drops its own number formatting.
+6. **UI toolkit, third part: larger widgets.** A grid that mirrors the pads (4 x 4 cells with labels, selected
+   and lit states); a file browser on `List` and the file service (folders, back up, a file type); a four-column
+   layout and page tabs for `ParamPage`. Each with a host test and a page in an example. The 16-step grid stays
+   with apps: every sequencer draws its own.
+7. **Exit.** On a unit: copy an app over USB DRIVE and run it; play audio from a DAW through the unit and record
    the unit into it; the battery mark falls with the batteries and the unit switches
    itself off cleanly.
 
@@ -446,7 +463,7 @@ of the input routes, which need equipment. The exit test passed as a simulation 
 downloads); a person doing it moves to E6. USB uses test IDs until pid.codes grants one.
 
 E5 ("E5 plan"): steps 1-4 (battery, SYNC polarity, USB DRIVE, USB audio) are done on the emulator and merged
-(2026-11-22); the exit, step 5, is a unit session over checklist steps 19-21, with 16, 17 and 7 still owed from E4.
+(2026-11-22); the exit, step 7, is a unit session over checklist steps 19-21, with 16, 17 and 7 still owed from E4.
 Its card is staged by `tools/unit_card.py` (the dry run, steps 1-10, passes 141/141).
 
 ## Open items
@@ -1796,3 +1813,21 @@ count, so `usb.c` is unchanged. *Decided:* no automatic restart of the app after
 the app loads the new package, as leaving the menu always works. `tests/test_usb_drive.py`: OK waits while a write
 arrives late, restarts the wait on another, ends 2 s after the last; OK twice ends it at once. Checklist step 20
 gains copying over the running app and pressing OK.
+
+### UI toolkit, second part, E5 step 5 (2026-11-22)
+
+The pieces around the widgets that every screen ended up needing, in `<enaga/ui.hpp>` as planned: `Line` (text,
+padded numbers, fixed point, hex, note names, outside text made drawable, `add_if_fits`, `column`, `copy_to`),
+`drawable`, `status_line` / `hint_line` with `body_top` / `body_bottom`, `Notice`, `bar`, `bar_centred`, `meter`
+and `meter_db`. `ParamPage` draws its bars with `bar` (the same pixels). api.md now says LED writes go out only
+when a level changes.
+- `bar` placed values with a 64-bit division at first; the C674x has none, and libgcc's helper drags in its
+  unwinder, which an app cannot link (`__exidx_start` undefined). The arithmetic is 32-bit now, halving a range
+  wider than 2^22 first.
+- `examples/widgets` uses all of it: the status line and hints on every page, a notice for each action, `Line`
+  in place of its hand-written formatting, and a LEVELS page (F6) metering the input with peak marks and a
+  centred PAN bar.
+- Tests: tests/ui/host.cpp checks each piece's text and pixels (including a notice across the millisecond
+  counter's wrap); `tests/test_widgets.py` adds the notice on the screen and gone after 1.5 s, and the meters
+  dim in silence and lit with input on the emulator.
+

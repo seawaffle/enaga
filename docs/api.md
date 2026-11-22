@@ -12,7 +12,7 @@ In the repository, `tests/test_api_docs.py` fails when a public name in `include
 | `<enaga/wav.hpp>` | `enaga::wav`: WAV headers |
 | `<enaga/settings.hpp>` | `enaga::Settings`: an app's own key/value settings |
 | `<enaga/midi.hpp>`, `<enaga/clock.hpp>` | `enaga::midi`: sending MIDI; `enaga::clock`: tempo, transport, ticks |
-| `<enaga/ui.hpp>` | `enaga::ui`: list, parameter page, dialog, text entry |
+| `<enaga/ui.hpp>` | `enaga::ui`: list, parameter page, dialog, text entry; text lines, the screen's frame, notices, bars and meters |
 | `<enaga/bytes.hpp>` | `enaga::bytes`: numbers in packed data at any address |
 | `<enaga/dsp.hpp>` | `enaga::dsp`: math, oscillators, filters, envelopes, LFOs, delays, chorus, reverb |
 | `<enaga/abi.h>` | The C boundary under all of it: constants, events, the host and app tables, the package header |
@@ -263,7 +263,8 @@ characters are left blank.
 ## LEDs
 
 Levels run 0 (off) to `ENAGA_LED_MAX` (10). Main context only; ignored from `audio`. Enaga switches every LED
-off when an app stops.
+off when an app stops. Enaga keeps the level last sent to each LED and sends only changes to the panel, so an app
+can set all its LEDs on every update without keeping a copy of its own.
 
 | Function | LED |
 |---|---|
@@ -583,8 +584,9 @@ SRC MIDI, CLOCK OUT and MIDI THRU both on would send the clock twice.
 ## UI toolkit
 
 `<enaga/ui.hpp>`, as `enaga::ui::`: a list, a page of parameters on the knobs, a confirmation dialog and text
-entry. They're drawn on the `Canvas` with Enaga's font, so apps look alike, and are header-only, with nothing in
-the firmware. `examples/widgets` uses all four.
+entry, and around them the pieces every screen needs: text built without printf, a status line and key hints,
+a message shown for a moment, bars and meters. They're drawn on the `Canvas` with Enaga's font, so apps look
+alike, and are header-only, with nothing in the firmware. `examples/widgets` uses all of them.
 
 **Driving them.** An app passes its own key and knob callbacks to the widget it is showing and draws it in `draw`.
 Each `key(key, down)` and `encoder(encoder, delta)` returns an `Action`:
@@ -649,6 +651,59 @@ void draw(enaga::Canvas &canvas) override { canvas.clear(); list.draw(canvas); }
 - **Answering:** OK gives `chosen` and CLR `no`, both closing it. While it is `active()` it takes every key.
 - **Reading:** `text()` is the text without trailing spaces, and `cursor()` the position.
 - `draw(canvas, top)` shows the title, the text in boxes with the cursor's lit, and the controls.
+
+**`Line`**: a line of text built in place, with no printf. It holds at most `Line::capacity` characters (21, the
+screen's line), and anything past that is cut off. Each call returns the line, so calls chain, and a `Line` passes
+wherever a `const char *` goes:
+
+```cpp
+enaga::ui::Line line;
+line.add("TEMPO ").fixed(1300, 1).add(" BPM");           // "TEMPO 130.0 BPM"
+canvas.text(0, 20, line);
+```
+
+- `add(text)` or `add(c)`; `clear()` starts again; `Line(text)` starts with some.
+- `number(value, width, pad)`: right-aligned in `width` characters filled with `pad`, so `number(7, 3, '0')` is
+  `007`. A wider number is not cut to the width.
+- `fixed(value, decimals)`: `value` in units of 10^-decimals, so `fixed(1300, 1)` is `130.0` and `fixed(-5, 2)`
+  `-0.05`.
+- `hex(value, digits)`, upper case.
+- `note(note)`: a MIDI note's name with middle C (60) as `C4`; 61 is `C#4` and 0 `C-1`.
+- `shown(text, max)`: text from outside the app (a file name, say) as the font can draw it: lower case raised and
+  anything else the font lacks shown as `-`, at most `max` characters. `kick_01.wav` becomes `KICK-01.WAV`.
+- `add_if_fits(part)` adds all of `part` or none of it, and says which: for a status line made of optional
+  pieces, most important first.
+- `column(at)` pads with spaces up to character column `at`, to line values up.
+- `text()`, `length()`, `room()` (characters left), and `copy_to(out, size)` for a buffer such as a `Param`'s
+  `format` output.
+
+`drawable(c)` says whether the font has a character; it draws any other as `?`.
+
+**The screen's frame.** A status line at the top, key hints on the bottom line, and the widgets between them:
+- `status_line(canvas, left, right)`: `left` bright, `right` (optional) dim at the right edge, and a rule under
+  both.
+- `hint_line(canvas, hints, row)`: key hints such as `"OK: LOAD  CLR: BACK"` on the bottom line, or `row` lines
+  above it (10 pixels each).
+- The rows: `status_y` (0), `body_top` (12), `body_bottom` (118) and `hint_y` (120). Pass `body_top` and
+  `body_bottom` as a widget's `top` and `bottom`.
+
+**`Notice`**: a message shown for a moment, such as "SAVED" or "NO CARD".
+- `show(text, duration_ms)` copies the text; the default duration is `Notice::default_ms` (1.5 s).
+- `draw(canvas, y)` puts it on a lit bar over the bottom line (`hint_y`) until the time is up. Draw it after the
+  hints, and it covers them.
+- `showing()`, `text()` (empty once the time is up) and `clear()`.
+
+**Bars and meters.**
+- `bar(canvas, x, y, w, value, min, max, h, grey)`: a value's place in its range, a dim track `w` pixels long and
+  `h` high (1 by default), lit from the left up to the value. `ParamPage` draws its bars with it.
+- `bar_centred(...)`, with the same arguments, is lit from the middle of the range towards the value, with a mark
+  at the middle: for values either side of a centre, such as pan or detune.
+- `meter(canvas, x, y, w, h, level, peak)`: a level meter, upright (filling from the bottom) when taller than
+  wide, otherwise across. `level` and `peak` are fractions of full scale, 0-1; a `peak` of 0 or more is a bright
+  mark.
+- `meter_db(amplitude, floor_db)` turns an amplitude (1.0 full scale) into a meter fraction on a decibel scale:
+  `floor_db` (-48 by default) and below are 0, and 0 dB is 1. `examples/widgets` meters the input this way, with
+  the block's peak passed from `audio` to `update` and a peak mark that holds for a second.
 
 **Layout helpers.** `screen_width` (128), `char_width` (6, the font's advance), `line_chars` (21 to a line), and
 `text_right(canvas, y, text, grey, x_end)` for right-aligned text. The font has A-Z, 0-9, space and
