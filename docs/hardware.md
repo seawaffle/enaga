@@ -658,8 +658,8 @@ unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it mut
     - **Turning speed:** F3 EDIT, F1 for columns or not; knob D (ATTACK, 0-2000 MS): turned slowly it moves 1 a
       detent, spun quickly it moves much further (3 or 8 a detent). Is the speed-up comfortable, too eager or too
       timid? LEVEL (0-100) never speeds up.
-    - **Font:** F4 NAME shows the character set as you step through it; the new `< ( ) , _ ' * [ ]` are in file
-      names on the FILES page if the card has such names (`KICK_01.WAV`).
+    - **Font:** name a file on the card `KICK_(1).WAV`: on the FILES page it should read exactly that, the `_`,
+      `(` and `)` drawn rather than `-` or `?`.
     - **Synth:** F1 + F2, PATCH: UP / DOWN move as well as VALUE, the loaded patch marked `>`; a saved patch shows
       SAVED U1 on a bar over the scope for two seconds. Pressure: hold a pad and press harder with a modulation
       slot set to PRESS (MOD page): it should respond only after the hit, not to the hit itself.
