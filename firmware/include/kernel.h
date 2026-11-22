@@ -76,6 +76,9 @@ int  usb_configured(void);                    /* a host has configured the devic
 u32  usb_midi_tx_free(void);
 int  usb_midi_stalled(void);                   /* the host has stopped taking MIDI out */
 int  usb_midi_send(const u8 *data, u32 bytes);
+void usb_drive_share(int on);                 /* USB DRIVE: the SD card shown to the computer, or not */
+int  usb_drive_ejected(void);                 /* the computer ejected it */
+extern u32 usb_drive_read_sectors, usb_drive_written_sectors, usb_drive_errors;
 #define IRQ_USB0 10                           /* CPU interrupt 10 <- event 19, USB0_INT */                       /* main loop: parse MIDI input; returns the bytes taken */
 int  midi_send(u32 ports, const u8 *data, u32 bytes);   /* an app's midi_send (enaga_host_t) */
 extern int midi_channel_setting, midi_thru;   /* MIDI CH 0-15, MIDI THRU */
@@ -110,6 +113,8 @@ void menu_open(const char *message);          /* message: a line under the title
 void menu_close(void);                        /* back to the running app (none: stays) */
 void menu_event(const enaga_event_t *event);
 void menu_draw(void);
+void menu_service(u32 ms);                    /* main loop: the USB DRIVE page's end */
+extern int menu_drive;                        /* the USB DRIVE page is open: the card is the computer's */
 /* power.c: the battery level and the switch-off when it is empty */
 void battery_reading(unsigned raw);           /* panel channel 15, as it arrives */
 int  battery_poll(u32 ms);                    /* main loop: 1 when empty long enough to switch off */
@@ -142,6 +147,7 @@ int  files_mounted(void);
 int  files_service(u32 ms);                    /* each main-loop pass; non-zero while work remains */
 void files_write_probe(void);                /* /ENAGA/SDTEST.BIN: the SD write sequences (files.c) */
 void files_app_stopped(void);                  /* main context, after the app's stop() */
+void files_release(void);                      /* unmount the card (USB DRIVE); apps_mount takes it back */
 extern volatile int files_reset_pending;      /* set when an app is dropped: the next pass resets and remounts */
 extern u32 files_requests_done;
 int32_t files_open(const char *path, uint32_t mode);

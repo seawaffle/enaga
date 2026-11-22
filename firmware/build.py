@@ -31,7 +31,7 @@ CFLAGS = ["-march=c674x", "-mlittle-endian", "-O2", "-Werror=frame-larger-than=1
           "-Wno-main", f"-I{HERE / 'include'}", f"-I{ENAGA / 'include'}", f"-I{ENAGA / 'loader'}",
           f"-I{HERE / 'third_party' / 'fatfs'}", f"-I{HERE / 'usb'}", f"-I{HERE / 'third_party' / 'tinyusb' / 'src'}"]
 TINYUSB = HERE / "third_party" / "tinyusb" / "src"
-TINYUSB_SOURCES = ["tusb.c", "common/tusb_fifo.c", "device/usbd.c", "class/midi/midi_device.c",
+TINYUSB_SOURCES = ["tusb.c", "common/tusb_fifo.c", "device/usbd.c", "class/midi/midi_device.c", "class/msc/msc_device.c",
                    "portable/mentor/musb/dcd_musb.c"]
 
 

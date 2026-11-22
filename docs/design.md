@@ -79,7 +79,7 @@ As built: the paused app's audio goes on and it gets no events, `update` or `dra
 every key and pad press it was given when the menu opens, and of none it was not. An app can open the menu itself
 (`open_menu`, `enaga::system::open_menu()`); it opens once the app's callback returns. The menu lists the apps
 under `/ENAGA/APPS` by the display name in each package's header (the folder name if the header cannot be read),
-then SETTINGS and STATUS (Enaga's status page); UP / DOWN or VALUE move, OK chooses (the running app resumes,
+then SETTINGS, USB DRIVE (E5) and STATUS (Enaga's status page); UP / DOWN or VALUE move, OK chooses (the running app resumes,
 another replaces it through steps 1-5 above), CLR or F1 + POWER resume. With no app running (a crash, a failed
 load, a card without apps) Enaga shows the status page, and OK there opens the menu.
 
@@ -374,7 +374,7 @@ emulator where it can be, and the ones that need the unit collect into a session
    thresholds are the stock ones; the voltages behind them want a reading on the unit with each battery type.
 2. (**Done** on the emulator 2026-11-21, see the log; the unit to come.) **SYNC IN polarity.** The stock POLARITY IN setting (rising or falling edges, HW-27), and POLARITY OUT for
    SYNC OUT's idle level. Small; the unit with a falling-edge device checks it.
-3. **USB mass storage.** The card as a USB drive, so apps and samples go on without taking the card out. The SD
+3. (**Done** on the emulator 2026-11-21, see the log; the unit to come.) **USB mass storage.** The card as a USB drive, so apps and samples go on without taking the card out. The SD
    card cannot be used by FatFs and by the computer at once. *Decided (2026-11-21):* a USB DRIVE page in the Enaga menu that
    stops the app, unmounts the card and hands it to the computer until it is ejected (or OK is pressed), then
    remounts and goes back to the menu; rather than a drive that appears while apps run (files would fail
@@ -451,6 +451,10 @@ downloads); a person doing it moves to E6. USB uses test IDs until pid.codes gra
   the pid.codes product ID (vendor 0x1209) is granted. The request is in, and its timing is pid.codes'; releases
   ship with the test IDs until then (0.2.0 did, and its notes say so).
 
+- USB DRIVE: the card's size from its CSD is checked only on the emulator's SDSC card (CSD 1.0); an SDHC or SDXC
+  card (CSD 2.0) is first read on the unit. Whether each computer's eject sends START STOP UNIT (which closes the
+  page by itself) is to see on Windows, macOS and Linux; OK ends it either way. Speed over full-speed USB is
+  unmeasured (checklist step 20).
 - SYNC polarity: POL IN RISE arms the pin's falling edge, as the stock RISE does, on the reading that the board
   inverts SYNC IN; nothing has shown that on a unit. Only the phase depends on it (by the other device's pulse
   width), not the tempo. A scope on the jack settles it (checklist step 17).
@@ -1701,3 +1705,33 @@ POL IN and POL OUT settings (RISE, FALL; both RISE by default), as the original 
 - `tests/test_clock.py` `SyncPolarity`: RISE counts the pin's falling edge and not its rising one, FALL the other
   way round, and POL OUT FALL idles high with 15 ms low pulses. The settings come from `SETTINGS.TXT`, through
   the same apply as the SETTINGS page.
+
+### USB DRIVE, E5 step 3 (2026-11-21)
+
+The SD card as a USB drive, from the menu's new USB DRIVE line (between SETTINGS and STATUS), as decided in the plan.
+- **USB:** a mass storage function beside MIDI in one configuration (interface 2, bulk endpoints 0x02 / 0x82),
+  TinyUSB's MSC class vendored from the same 0.21.0 tarball (hash checked). It is always there but reports no
+  medium unless the page is open, so a computer sees an empty card reader; MIDI is never interrupted by
+  re-enumerating. Opening the page reports UNIT ATTENTION (medium changed), and the computer mounts the card.
+  Reads and writes go straight to the SD driver in the main loop's `usb_poll`, 16 sectors per command. START STOP
+  UNIT with START clear (eject or stop) marks the drive ejected. SYNCHRONIZE CACHE passes (nothing is cached);
+  other commands TinyUSB does not answer get ILLEGAL REQUEST.
+- **The page:** opening it stops the running app as a switch does (`stop()`, files closed), unmounts FatFs
+  (`files_release`) and shares the card. It shows whether a cable is in and the computer has read the card, and
+  the KB read and written. It ends on the eject, on the cable pulled after a computer had the drive, or on OK /
+  CLR; then the card is mounted again (`apps_mount`) and the menu reopens rescanned, with the reason as its
+  message. The app is not restarted. AUTO OFF waits while the page is open.
+- **Card size:** `sd_init` now reads the CSD (CMD9, between CMD3 and CMD7) into `sd_sectors`, for CSD 1.0 and 2.0;
+  the response registers are read as Linux's davinci_mmc does (MMCRSP01 = bits 31-0).
+- **Unplugging:** TinyUSB's MUSB driver left the DISCON interrupt empty, so after a cable was pulled the device
+  stayed configured in TinyUSB's eyes until the next bus reset (USB MIDI included). DISCON now signals
+  `DCD_EVENT_UNPLUGGED` (a marked local change).
+- `tests/test_usb_drive.py`: no medium before the page (INQUIRY answers, TEST UNIT READY says medium not present,
+  reads fail, the app runs on); the page stops the app (its `stop()` file is on the card), UNIT ATTENTION then
+  ready, READ CAPACITY matches the card, sectors read back as the card holds them; an app package copied the way a
+  computer would (added to a copy of the image offline, the changed sectors written over USB) lands intact, the
+  eject closes the page, the drive is gone again and the menu lists the new app; OK ends it; unplugging ends it.
+  `tests/test_usb.py` expects the new interface and endpoints.
+- `tests/test_synth.py` pressed F1 and the second key of a chord at the same instant; which one the key scan
+  saw first depended on where the firmware was in its scan, and this step's larger kernel moved that, so the synth
+  saw F2 alone. The test now holds F1 15 ms first, as a hand does. Nothing in the synth changed.

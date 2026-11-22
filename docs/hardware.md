@@ -396,8 +396,15 @@ HW-27).
 ## USB
 
 USB0 at `0x01E00000`: a Mentor MUSB core at +0x400 behind TI's wrapper (SPRUH79C chapter 33). Enaga runs it as a
-full-speed USB MIDI device with TinyUSB (`firmware/third_party/tinyusb`). The C6748 port is
+full-speed USB MIDI and mass storage device with TinyUSB (`firmware/third_party/tinyusb`). The C6748 port is
 `firmware/usb/musb_enaga.h` and the glue `firmware/usb/usb.c`.
+- **Unplugging:** the core's DISCON interrupt (the session ended) now tells TinyUSB the device is unplugged;
+  TinyUSB left it unhandled, so the device stayed configured in its eyes until the next bus reset.
+- **Mass storage (USB DRIVE, E5):** bulk-only transport, SCSI, one removable drive that is the whole SD card,
+  16 sectors per SD command. No medium except while the menu's USB DRIVE page is open; then UNIT ATTENTION
+  (medium changed) and the card. START STOP UNIT with START clear (eject) ends the page. The size comes from the
+  card's CSD (CMD9, read during `sd_init`; CSD 1.0 and 2.0), which the emulator's SDSC card exercises; an SDHC card
+  is first read on the unit.
 - **Bring-up:** as the original firmware (smpltrek-re HW-12):
   1. CFGCHIP2 = 0x0972: 24 MHz reference, PHY clock from AUXCLK, PHY PLL on, VBUS and session comparators on.
   2. PSC1 module 1 on.
@@ -411,7 +418,8 @@ full-speed USB MIDI device with TinyUSB (`firmware/third_party/tinyusb`). The C6
   take its status from the port.
 - **FIFOs:** dynamic, in the core's 4 KiB. The core has no RX / TX_DOUBLE_PACKET_DISABLE registers (0x340 / 0x342,
   found on newer MUSB revisions); double buffering is the DPB bit of TXFIFOSZ / RXFIFOSZ.
-- **Endpoints and IDs:** the MIDI interface uses bulk endpoints 0x01 and 0x81 (64 bytes). The USB IDs are
+- **Endpoints and IDs:** the MIDI interface uses bulk endpoints 0x01 and 0x81 (64 bytes), the mass storage
+  interface (USB DRIVE, interface 2) 0x02 and 0x82. The USB IDs are
   TinyUSB's test values (0xCAFE / 0x4011) until a pid.codes product ID is granted.
 
 Tested on the emulator's USB model and scripted host (enumeration, MIDI both ways, clock, unplugging), and on the
@@ -602,5 +610,16 @@ unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it mut
     batteries at each change, which ties the raw values to volts. Set SETTINGS, BATTERY to the type in the unit.
     With nearly flat batteries, if it gets that far: BATTERY EMPTY with a countdown at the bottom of the screen,
     then the unit switches off showing BATTERY EMPTY.
+20. **USB DRIVE (E5):** with an app running and USB connected, F1 + POWER, choose USB DRIVE. The app stops and the
+    page shows the drive's state. On the computer a drive appears (Windows: a drive letter; macOS: on the desktop;
+    Linux: in the file manager). Note its size against the card's.
+    - Copy a large file (100 MB or more) to it and time it; copy an app's package into `/ENAGA/APPS/<NAME>/`.
+    - Eject it on the computer (Windows: Safely Remove / Eject; macOS: Eject; Linux: Eject or Power Off). The page
+      should close by itself with USB DRIVE EJECTED and the menu list the new app. If it stays open after the
+      eject, note which computer, and press OK.
+    - Start the copied app. Open USB DRIVE again and check the large file is whole (compare it on the computer).
+    - Pull the cable while the page is open: the menu comes back with USB UNPLUGGED.
+    - USB MIDI still works alongside (step 18) before and after.
+    Each of Windows, macOS and Linux if available. Report anything the computer says (on Linux, `dmesg`).
 
 Afterwards the official update restores the unit ("Installing and recovery").

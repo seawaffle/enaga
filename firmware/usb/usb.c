@@ -14,6 +14,14 @@
  *     here, so USB MIDI out is late by up to one main-loop pass and one USB frame (1 ms). Nothing is queued while the
  *     unit is not configured by a host.
  *
+ * Mass storage (E5 step 3, "USB DRIVE" in the menu): a second function on the same device, bulk-only transport with
+ * SCSI commands (TinyUSB's MSC class), one removable drive that is the whole SD card. It shows no medium until the
+ * menu shares the card (usb_drive_share), so a computer sees an empty card reader, as with any reader with no card
+ * in it; then it reports a medium change (UNIT ATTENTION), and the computer mounts the card. START STOP UNIT with
+ * START clear (the computer's eject) is noted for the menu, which then takes the card back. The SD card is never
+ * used by FatFs and the computer at once: the menu stops the app and unmounts it first (menu.c). Reads and writes run
+ * in usb_poll, in the main loop, straight on the SD driver.
+ *
  * USB IDs: ENAGA_USB_VID / ENAGA_USB_PID. Until the pid.codes product ID is granted these are TinyUSB's test
  * values, not for release (docs/design.md "Open items"). */
 
@@ -78,6 +86,97 @@ int usb_midi_send(const u8 *data, u32 bytes)   /* all or nothing; 0 when not con
     return result;
 }
 
+/* ---- mass storage ---- */
+
+#define DRIVE_SECTORS_MAX (CFG_TUD_MSC_EP_BUFSIZE / 512u)
+static volatile int drive_shared, drive_attention, drive_ejected;
+u32 usb_drive_read_sectors, usb_drive_written_sectors, usb_drive_errors;
+
+void usb_drive_share(int on)
+{
+    drive_shared = on;
+    drive_attention = on;                      /* the computer is told the medium changed */
+    drive_ejected = 0;
+}
+
+int usb_drive_ejected(void) { return drive_ejected; }
+
+static int drive_ready(void) { return drive_shared && !drive_ejected && sd_present() && sd_sectors; }
+
+bool tud_msc_test_unit_ready_cb(uint8_t lun)
+{
+    (void)lun;
+    if (!drive_ready()) { tud_msc_set_sense(0, SCSI_SENSE_NOT_READY, 0x3A, 0x00); return false; }   /* no medium */
+    if (drive_attention) {
+        drive_attention = 0;
+        tud_msc_set_sense(0, SCSI_SENSE_UNIT_ATTENTION, 0x28, 0x00);   /* not ready to ready: medium may have changed */
+        return false;
+    }
+    return true;
+}
+
+void tud_msc_capacity_cb(uint8_t lun, uint32_t *block_count, uint16_t *block_size)
+{
+    (void)lun;
+    *block_count = drive_ready() ? sd_sectors : 0;
+    *block_size = 512;
+}
+
+void tud_msc_inquiry_cb(uint8_t lun, uint8_t vendor_id[8], uint8_t product_id[16], uint8_t product_rev[4])
+{
+    const char *vendor = "Enaga", *product = "SD card", *rev = ENAGA_VERSION;   /* space-padded fields */
+    u32 i, end;
+    (void)lun;
+    for (i = 0, end = 0; i < 8; i++) { if (!vendor[i]) end = 1; vendor_id[i] = end ? ' ' : (u8)vendor[i]; }
+    for (i = 0, end = 0; i < 16; i++) { if (!product[i]) end = 1; product_id[i] = end ? ' ' : (u8)product[i]; }
+    for (i = 0, end = 0; i < 4; i++) { if (!rev[i] || (i == 3 && rev[i] == '.')) end = 1; product_rev[i] = end ? ' ' : (u8)rev[i]; }
+}
+
+bool tud_msc_is_writable_cb(uint8_t lun) { (void)lun; return true; }
+
+bool tud_msc_start_stop_cb(uint8_t lun, uint8_t power_condition, bool start, bool load_eject)
+{
+    (void)lun; (void)power_condition; (void)load_eject;
+    if (!start && drive_shared) drive_ejected = 1;   /* eject, or stop: either way the computer is done */
+    return true;
+}
+
+static int drive_range(uint32_t lba, uint32_t offset, uint32_t bytes)
+{
+    return drive_ready() && offset == 0 && bytes % 512u == 0 && bytes / 512u <= DRIVE_SECTORS_MAX
+           && lba < sd_sectors && bytes / 512u <= sd_sectors - lba;
+}
+
+int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void *buffer, uint32_t bufsize)
+{
+    (void)lun;
+    if (!drive_range(lba, offset, bufsize) || ((u32)buffer & 3) || sd_read(buffer, lba, bufsize / 512u) != 0) {
+        usb_drive_errors++;
+        return TUD_MSC_RET_ERROR;
+    }
+    usb_drive_read_sectors += bufsize / 512u;
+    return (int32_t)bufsize;
+}
+
+int32_t tud_msc_write10_cb(uint8_t lun, uint32_t lba, uint32_t offset, uint8_t *buffer, uint32_t bufsize)
+{
+    (void)lun;
+    if (!drive_range(lba, offset, bufsize) || ((u32)buffer & 3) || sd_write(buffer, lba, bufsize / 512u) != 0) {
+        usb_drive_errors++;
+        return TUD_MSC_RET_ERROR;
+    }
+    usb_drive_written_sectors += bufsize / 512u;
+    return (int32_t)bufsize;
+}
+
+int32_t tud_msc_scsi_cb(uint8_t lun, uint8_t const scsi_cmd[16], void *buffer, uint16_t bufsize)
+{
+    (void)lun; (void)buffer; (void)bufsize;
+    if (scsi_cmd[0] == 0x35) return 0;         /* SYNCHRONIZE CACHE (10): writes go straight to the card */
+    tud_msc_set_sense(0, SCSI_SENSE_ILLEGAL_REQUEST, 0x20, 0x00);   /* invalid command operation code */
+    return -1;
+}
+
 /* ---- the stack ---- */
 
 void usb_init(void)
@@ -138,14 +237,17 @@ static const tusb_desc_device_t device_descriptor = {
 
 const uint8_t *tud_descriptor_device_cb(void) { return (const uint8_t *)&device_descriptor; }
 
-enum { ITF_MIDI_CONTROL, ITF_MIDI_STREAMING, ITF_COUNT };
-#define EP_MIDI_OUT 0x01
-#define EP_MIDI_IN  0x81
-#define CONFIG_LENGTH (TUD_CONFIG_DESC_LEN + TUD_MIDI_DESC_LEN)
+enum { ITF_MIDI_CONTROL, ITF_MIDI_STREAMING, ITF_DRIVE, ITF_COUNT };
+#define EP_MIDI_OUT  0x01
+#define EP_MIDI_IN   0x81
+#define EP_DRIVE_OUT 0x02
+#define EP_DRIVE_IN  0x82
+#define CONFIG_LENGTH (TUD_CONFIG_DESC_LEN + TUD_MIDI_DESC_LEN + TUD_MSC_DESC_LEN)
 
 static const uint8_t configuration_descriptor[] = {
     TUD_CONFIG_DESCRIPTOR(1, ITF_COUNT, 0, CONFIG_LENGTH, TUSB_DESC_CONFIG_ATT_SELF_POWERED, 100),
     TUD_MIDI_DESCRIPTOR(ITF_MIDI_CONTROL, 0, EP_MIDI_OUT, EP_MIDI_IN, 64),
+    TUD_MSC_DESCRIPTOR(ITF_DRIVE, 0, EP_DRIVE_OUT, EP_DRIVE_IN, 64),
 };
 
 const uint8_t *tud_descriptor_configuration_cb(uint8_t index)

@@ -1,4 +1,4 @@
-/* TinyUSB configuration for Enaga (firmware/third_party/tinyusb): a USB MIDI device on the C6748's USB0, full speed,
+/* TinyUSB configuration for Enaga (firmware/third_party/tinyusb): a USB MIDI and mass storage device on the C6748's USB0, full speed,
  * no RTOS. The C6748 is not one of TinyUSB's MCU options: the MUSB driver is selected here and its port is
  * musb_enaga.h. */
 #ifndef TUSB_CONFIG_H
@@ -21,7 +21,8 @@
 #define CFG_TUD_ENDPOINT0_SIZE     64
 
 #define CFG_TUD_CDC                0
-#define CFG_TUD_MSC                0
+#define CFG_TUD_MSC                1
+#define CFG_TUD_MSC_EP_BUFSIZE     8192          /* 16 sectors per SD command */
 #define CFG_TUD_HID                0
 #define CFG_TUD_VENDOR             0
 #define CFG_TUD_AUDIO              0

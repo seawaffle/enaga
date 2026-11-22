@@ -57,6 +57,7 @@
 
 static int high_capacity, card_ready;
 static u32 rca;
+u32 sd_sectors;                            /* the card's size in 512-byte sectors, from its CSD (0: unknown) */
 static u32 status;                 /* MMCST0 bits seen since the command was issued and not yet consumed */
 static u32 last_st;                /* what the last command's wait returned, for the error report */
 int sd_error;
@@ -208,6 +209,20 @@ int sd_init(void)
     if (!ok(command(2, 0, RSP_136))) return fail(-6);          /* ALL_SEND_CID */
     if (!ok(command(3, 0, RSP_48))) return fail(-7);           /* SEND_RELATIVE_ADDR */
     rca = response() >> 16;
+    sd_sectors = 0;
+    if (ok(command(9, rca << 16, RSP_136))) {                  /* SEND_CSD: the size, for USB DRIVE */
+        u32 w[4], c_size;
+        w[0] = REG32(MMC + MMCRSP01); w[1] = REG32(MMC + MMCRSP23);   /* CSD bits 31-0 ... */
+        w[2] = REG32(MMC + MMCRSP45); w[3] = REG32(MMC + MMCRSP67);   /* ... 127-96, as Linux's davinci_mmc reads them */
+        if ((w[3] >> 30) == 1) {                                /* CSD 2.0 (SDHC, SDXC): C_SIZE bits 69-48 */
+            c_size = (w[1] >> 16) | ((w[2] & 0x3F) << 16);
+            sd_sectors = (c_size + 1) << 10;
+        } else if ((w[3] >> 30) == 0) {                         /* CSD 1.0: C_SIZE 73-62, C_SIZE_MULT 49-47, READ_BL_LEN 83-80 */
+            u32 mult = (w[1] >> 15) & 7, bl_len = (w[2] >> 16) & 15;
+            c_size = (w[1] >> 30) | ((w[2] & 0x3FF) << 2);
+            if (bl_len >= 9 && bl_len <= 11) sd_sectors = (c_size + 1) << (mult + 2 + bl_len - 9);
+        }
+    }
     if (!ok(command(7, rca << 16, RSP_48 | CMD_BSYEXP))) return fail(-8);   /* SELECT_CARD */
     if (app_command(6, 2, RSP_48))                          /* SET_BUS_WIDTH 4 */
         REG32(MMC + MMCCTL) = 4;                                       /* WIDTH0: 4-bit bus */
