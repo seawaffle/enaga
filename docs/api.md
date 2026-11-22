@@ -12,7 +12,7 @@ In the repository, `tests/test_api_docs.py` fails when a public name in `include
 | `<enaga/wav.hpp>` | `enaga::wav`: WAV headers |
 | `<enaga/settings.hpp>` | `enaga::Settings`: an app's own key/value settings |
 | `<enaga/midi.hpp>`, `<enaga/clock.hpp>` | `enaga::midi`: sending MIDI; `enaga::clock`: tempo, transport, ticks |
-| `<enaga/ui.hpp>` | `enaga::ui`: list, parameter page, dialog, text entry; text lines, the screen's frame, notices, bars and meters |
+| `<enaga/ui.hpp>` | `enaga::ui`: list, grid, parameter page, dialog, text entry, pad map, file browser; text lines, the screen's frame, notices, bars and meters |
 | `<enaga/bytes.hpp>` | `enaga::bytes`: numbers in packed data at any address |
 | `<enaga/dsp.hpp>` | `enaga::dsp`: math, oscillators, filters, envelopes, LFOs, delays, chorus, reverb |
 | `<enaga/abi.h>` | The C boundary under all of it: constants, events, the host and app tables, the package header |
@@ -583,8 +583,8 @@ SRC MIDI, CLOCK OUT and MIDI THRU both on would send the clock twice.
 
 ## UI toolkit
 
-`<enaga/ui.hpp>`, as `enaga::ui::`: a list, a page of parameters on the knobs, a confirmation dialog and text
-entry, and around them the pieces every screen needs: text built without printf, a status line and key hints,
+`<enaga/ui.hpp>`, as `enaga::ui::`: a list and a grid, a page of parameters on the knobs, a confirmation dialog,
+text entry, a map of the pads and a file browser, and around them the pieces every screen needs: text built without printf, a status line and key hints,
 a message shown for a moment, bars and meters. They're drawn on the `Canvas` with Enaga's font, so apps look
 alike, and are header-only, with nothing in the firmware. `examples/widgets` uses all of them.
 
@@ -626,7 +626,11 @@ void draw(enaga::Canvas &canvas) override { canvas.clear(); list.draw(canvas); }
   app's own `int` values, one per parameter. The page only changes those values.
 - **Changes:** after `Action::changed`, `changed()` is the parameter. `set_value(param, value)` sets one from the
   app, clamped. `value(param)` reads one.
-- **Groups from the app:** `groups()`, `group()` and `show_group(n)`.
+- **Groups from the app:** `groups()`, `group()` and `show_group(n)`. `set_group_names(names)`, a name for each
+  group, shows them as tabs on the title line, the current one lit, in place of "group/groups" (which stays when
+  the names do not fit beside the title).
+- **Columns:** `set_columns(true)` puts the four side by side, each with its letter, name, value and a bar, in
+  place of rows. Names and values then show five characters each, so keep them short.
 - **Drawing:** `draw(canvas, top)` shows the title and "group/groups". Then a row per knob: its letter, the name
   with a bar for the value's place in its range, and the value at the right, brighter when it is not the
   initial one.
@@ -651,6 +655,40 @@ void draw(enaga::Canvas &canvas) override { canvas.clear(); list.draw(canvas); }
 - **Answering:** OK gives `chosen` and CLR `no`, both closing it. While it is `active()` it takes every key.
 - **Reading:** `text()` is the text without trailing spaces, and `cursor()` the position.
 - `draw(canvas, top)` shows the title, the text in boxes with the cursor's lit, and the controls.
+
+**`Grid`**: cells in rows and columns, such as a bank of patterns or sound slots; a `List` in two dimensions.
+- `set_items(names, count, columns)`, or `set_items(count, columns, label, user)` with a `Label` function as in
+  `List`; `set_title`. Up to `Grid::max_cells` (64) cells.
+- **Movement:** the arrow keys move the cursor, stopping at the edges; VALUE moves it through the cells in order.
+  OK gives `chosen`, CLR `back`. `cursor()`, `select(cell)`, `count()`, `columns()`.
+- **Lights:** `light(cell, on)` fills a cell (a slot that holds something, a pattern that is playing); `lit(cell)`
+  and `clear_lights()`.
+- `draw(canvas, top, bottom)`: the title, then as many rows of cells (`cell_height`, 12 px) as fit, scrolled to
+  the cursor's row. Each cell is its share of the screen's width, and its label shows as many characters as fit
+  (four in a quarter). The cursor's cell is framed.
+
+**`PadMap`**: the fifteen pads as they lie on the panel, for a screen that says what each pad does. Two staggered
+rows like a piano's keys: eight below (pads 0, 2, ... 14, left to right) and seven above (pads 1, 3, ... 13), each
+upper pad over the gap between two lower ones.
+- `label(pad, text)` (two characters show), `light(pad, grey)` (0 dark to 15), `select(pad)` to frame one (-1 for
+  none) and `selected()`. The map takes no events: the app sets it, from `on_pad_press` and `on_pad_release`, say.
+- `draw(canvas, top)` draws the upper row at `top` and the lower one under it, `PadMap::height` (28) pixels in all.
+- `PadMap::x(pad)` and `PadMap::upper(pad)` give a pad's place, for drawing more over it; each pad is
+  `cell_width` (16) by `cell_height` (14) pixels.
+
+**`FileBrowser`**: choosing a file on the card.
+- `open(folder, extension)` lists `folder` (`"/SAMPLES"`) in the background through the file service. With an
+  extension (`".WAV"`, any case) only those files show. Folders always show, first, ending in `/`; then files,
+  each sorted by name ignoring case. Names show as `Line::shown` makes them.
+- **Keys:** UP / DOWN or VALUE move. OK on a folder goes into it (`moved`); OK on a file gives `chosen`, and
+  `path()` is its full path. CLR goes back up, and in the folder `open` started from gives `back`.
+- **Reading:** `folder()`, `count()`, `cursor()`, `name(index)`, `is_folder(index)`; `loading()` while a listing
+  runs, and `error()` (`ENAGA_FILE_OK` or the listing's error).
+- `draw(canvas, top, bottom)`: the folder (its end, if long) and the entries; `LOADING`, `EMPTY` or the error's
+  name instead when there is nothing to list.
+- Up to `FileBrowser::max_entries` (128) entries a folder. Names of `name_bytes` (64) bytes or more are left out,
+  as the browser could not give their path; paths are at most `path_bytes` (256). It holds about 9 KB: make it a member of the app, which also keeps it
+  alive while a listing runs.
 
 **`Line`**: a line of text built in place, with no printf. It holds at most `Line::capacity` characters (21, the
 screen's line), and anything past that is cut off. Each call returns the line, so calls chain, and a `Line` passes

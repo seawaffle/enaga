@@ -1,6 +1,6 @@
-"""The UI toolkit on the firmware: examples/widgets driven on the emulator through every widget (list, parameter
-page with groups and resets, text entry, dialog) by keys and knobs, following what the widgets report in its log,
-and checking that each page puts its widget on the screen. The widgets' own logic is tested on the host
+"""The UI toolkit on the firmware: examples/widgets driven on the emulator through every widget (list and grid,
+parameter page with groups and resets, text entry, dialog, notice, meters, pad map, file browser) by keys, knobs and
+pads, following what the widgets report in its log, and checking that each page puts its widget on the screen. The widgets' own logic is tested on the host
 (tests/test_ui.py).
 
     ENAGA_EMULATOR=/path/to/emulator python3 -B -m unittest tests.test_widgets
@@ -21,7 +21,7 @@ from unit_dry_run import ENCODER_PINS, turn  # noqa: E402
 BOOT = 300_000_000
 MS = 372_000
 UP, DOWN, LEFT, RIGHT, OK, CLR = 17, 25, 24, 18, 23, 30
-F2, F3, F4, F5, F6 = 26, 20, 27, 22, 29
+F1, F2, F3, F4, F5, F6, F7, F8 = 19, 26, 20, 27, 22, 29, 21, 28
 SELECT_RIGHT, PUSH_B = 9, 0
 KNOB_A, KNOB_B, VALUE = 0, 1, 4
 
@@ -30,7 +30,12 @@ KNOB_A, KNOB_B, VALUE = 0, 1, 4
 class Widgets(unittest.TestCase):
     def setUp(self):
         from emulate import Emulation
-        self.emu = Emulation(ENAGA / "examples" / "widgets")
+        card = paths.BUILD / "widgets-card"
+        card.mkdir(parents=True, exist_ok=True)
+        (card / "kick.wav").write_bytes(b"RIFF")
+        (card / "notes.txt").write_bytes(b"x")
+        self.emu = Emulation(ENAGA / "examples" / "widgets", card_files={
+            "/SAMPLES/Drums/kick_01.wav": card / "kick.wav", "/SAMPLES/notes.txt": card / "notes.txt"})
         self.addCleanup(self.emu.close)
         for pins in ENCODER_PINS:                    # at rest both encoder pins are high
             for bank, pin in pins:
@@ -113,6 +118,61 @@ class Widgets(unittest.TestCase):
         self.turn(KNOB_A, -10)                                              # PAN L10: lit left of the middle
         frame = self.screen()
         self.assertEqual([self.grey(frame, x, 52) for x in (103, 106, 108)], [2, 9, 6])
+
+    def test_the_sounds_as_a_grid(self):
+        self.press(F1)                                                      # the grid, cursor on PIANO
+        self.press(RIGHT); self.press(DOWN)                                 # STRINGS, then PAD under it
+        self.press(OK)
+        self.assertEqual(self.log()[-1], "CHOSE 5")
+        frame = self.screen()
+        self.assertEqual(self.grey(frame, 34, 37), 9)                       # PAD's cell lit (column 2, row 2)
+        self.press(F1)                                                      # back to the list, at PAD
+        self.press(DOWN); self.press(OK)
+        self.assertEqual(self.log()[-1], "CHOSE 6")
+
+    def test_edit_tabs_and_columns(self):
+        self.press(F3)
+        frame = self.screen()
+        self.assertEqual(self.grey(frame, 127 - 6 * 7, 13), 4)              # OSC, the current tab, lit
+        self.press(F1)                                                      # columns
+        self.turn(KNOB_B, 3)
+        self.assertEqual(self.log()[-1], "CHANGED 1 67")
+        columns = self.screen()
+        bars = [self.grey(columns, x, 12 + 14 + 34) for x in (0, 32, 64, 32 + 27)]
+        self.assertEqual(bars, [2, 9, 9, 2])        # a bar per column: WAVE at 0, CUTOFF 67 of 127, RESONANCE 20%
+        self.press(F1)
+        self.assertNotEqual(self.screen(), columns)                         # rows again
+
+    def test_the_pads_light_on_the_map(self):
+        self.press(F7)
+        for _ in range(2):                                                  # pad 3 (D#) hard: two reports
+            self.emu.cpu.uart_receive(1, bytes([0xB0 | 3, 3300 & 0x7F, 3300 >> 7]))
+            self.assertIsNone(self.emu.run(4 * MS)["error"])
+        frame = self.screen()
+        top = 12 + 24                                                       # the upper row
+        self.assertEqual(self.grey(frame, 24 + 1, top + 1), 15)             # pad 3: upper, x 24, lit and framed
+        self.assertEqual(self.grey(frame, 8 + 2, top + 2), 2)               # pad 1 dark
+        for _ in range(2):
+            self.emu.cpu.uart_receive(1, bytes([0xB0 | 3, 1, 0]))
+            self.assertIsNone(self.emu.run(4 * MS)["error"])
+        self.assertEqual(self.grey(self.screen(), 24 + 2, top + 2), 2)      # released: dark again
+
+    def test_the_file_browser(self):
+        self.press(F8)
+        self.assertIsNone(self.emu.run(300 * MS)["error"])                  # the listing, in the background
+        self.press(DOWN)                                                    # ENAGA/, SAMPLES/: into SAMPLES
+        self.press(OK)
+        self.assertIsNone(self.emu.run(300 * MS)["error"])
+        self.press(OK)                                                      # DRUMS/ first, then NOTES.TXT
+        self.assertIsNone(self.emu.run(300 * MS)["error"])
+        self.press(OK)
+        self.assertEqual(self.log()[-1], "FILE KICK-01.WAV")
+        self.press(CLR); self.press(CLR)                                    # back up to the root
+        self.assertIsNone(self.emu.run(300 * MS)["error"])
+        self.press(DOWN); self.press(OK)
+        self.assertIsNone(self.emu.run(300 * MS)["error"])
+        self.press(DOWN); self.press(OK)
+        self.assertEqual(self.log()[-1], "FILE NOTES.TXT")
 
     def test_an_open_dialog_takes_the_keys(self):
         self.press(F5)

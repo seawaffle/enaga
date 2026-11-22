@@ -403,10 +403,11 @@ emulator where it can be, and the ones that need the unit collect into a session
      mark) and `meter_db` (an amplitude on a dB scale, as a meter's fraction).
    - api.md says LED writes go out only when a level changes, so apps need no copy of their own.
    Tested on the host (tests/ui/host.cpp); `examples/widgets` uses them and drops its own number formatting.
-6. **UI toolkit, third part: larger widgets.** A grid that mirrors the pads (4 x 4 cells with labels, selected
-   and lit states); a file browser on `List` and the file service (folders, back up, a file type); a four-column
-   layout and page tabs for `ParamPage`. Each with a host test and a page in an example. The 16-step grid stays
-   with apps: every sequencer draws its own.
+6. (**Done** 2026-11-22, see the log.) **UI toolkit, third part: larger widgets.** A map of the pads as they lie
+   (two staggered rows of 8 and 7, not a 4 x 4 grid as first written here), and a `Grid` of cells for banks and
+   slots, both with labels, a selection and lit states; a file browser on `List` and the file service (folders,
+   back up, a file type); a four-column layout and page tabs for `ParamPage`. Each with a host test and a page in
+   an example. The 16-step grid stays with apps: every sequencer draws its own.
 7. **Exit.** On a unit: copy an app over USB DRIVE and run it; play audio from a DAW through the unit and record
    the unit into it; the battery mark falls with the batteries and the unit switches
    itself off cleanly.
@@ -1830,4 +1831,27 @@ when a level changes.
 - Tests: tests/ui/host.cpp checks each piece's text and pixels (including a notice across the millisecond
   counter's wrap); `tests/test_widgets.py` adds the notice on the screen and gone after 1.5 s, and the meters
   dim in silence and lit with input on the emulator.
+
+### UI toolkit, third part, E5 step 6 (2026-11-22)
+
+`Grid`, `PadMap`, `FileBrowser`, and tabs and columns for `ParamPage`, in `<enaga/ui.hpp>`.
+- **The pads are not a grid.** The plan said a 4 x 4 grid mirroring the pads; the panel has 15 pads in two
+  staggered rows (hardware.md "Panel MCU"), so `PadMap` draws them that way, 16 px cells with the upper row offset
+  by half a cell, and the general case, cells moved with the arrows, is its own widget, `Grid`.
+- `Grid` keeps its lights in a 64-bit mask, hence `max_cells` 64. Right and left stop at a row's ends; VALUE runs
+  through all cells in order.
+- `FileBrowser` sorts as entries arrive (insertion into an index array; the file service lists in directory
+  order). A listing still running when the browser moves on (OK into a folder, CLR, a new `open`) would deliver
+  its entries into the new folder's list; requests run in order, so the browser counts the listings outstanding
+  at the move and drops entries until that many have finished. Names of 64 bytes or more are left out rather
+  than kept cut short, since a cut name gives a path that does not open.
+- `ParamPage` tabs fall back to "2/3" when the names do not fit beside the title. Columns show five characters of
+  name and value; `examples/widgets` now shows CUTOFF above 1 kHz as `4.5K` so it fits.
+- `examples/widgets`: F7 PADS (the map labelled as a keyboard, lit by velocity while held), F8 FILES (from the
+  root), F1 switching SOUNDS between list and grid and EDIT between rows and columns, and EDIT's groups as tabs.
+- Tests: tests/ui/host.cpp (also run under the address and undefined-behaviour sanitizers while writing) checks
+  grid movement, scrolling and drawing, the pads' places, tabs and columns, and the browser against a hand-driven
+  file service: sorting, filtering, going in and up, errors, late listings and over-long names.
+  `tests/test_widgets.py` adds the grid, the tabs and columns, pads lighting the map, and browsing a card with
+  `/SAMPLES/Drums/kick_01.wav` on the emulator.
 

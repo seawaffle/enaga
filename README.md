@@ -110,8 +110,9 @@ See `examples/tone` for a minimal app and `examples/synth` for a whole instrumen
 analogue synthesizer with hard sync and a ring modulator, a filter, three envelopes, two LFOs that can fade in,
 a modulation matrix, unison, chorus, delay and reverb, played from the pads and STEP keys, edited page by
 page, with sixteen user patch slots and the last sound kept on the card. `examples/widgets` shows the UI toolkit
-(`<enaga/ui.hpp>`): a list, a page of parameters on the knobs, text entry and a confirmation dialog, with a
-status line, key hints, notices and input meters.
+(`<enaga/ui.hpp>`): a list and a grid, a page of parameters on the knobs in rows or columns, text entry, a
+confirmation dialog, a map of the pads and a file browser, with a status line, key hints, notices and input
+meters.
 
 ## Building
 
@@ -167,7 +168,7 @@ directory (the one containing `cpu.py`); it builds its core into its own `work/`
 
 ```sh
 export ENAGA_EMULATOR=/path/to/smpltrek-re/emulator
-python3 -B -m unittest discover -s tests -v                           # 115 tests, about 9 minutes
+python3 -B -m unittest discover -s tests -v                           # 119 tests, about 9 minutes
 python3 -B tools/emulate.py examples/tone --key 32@300000000           # press STEP 1; writes build/emulate/
 ```
 
