@@ -18,6 +18,7 @@
  *   CLOCK SRC   INT MIDI SYNC     who drives the tempo clock: the app, MIDI clock at MIDI IN, or SYNC IN (clock.c)
  *   CLOCK OUT   OFF ON            send MIDI clock and transport at MIDI OUT
  *   SYNC OUT    ON OFF            pulse SYNC OUT, 2 to the quarter note
+ *   BATTERY     ALKALINE NiMH LITHIUM   the batteries in the unit, for the level's thresholds (power.c)
  *
  * The SPI flash is not used: it holds the original firmware's sound content, which Enaga never writes. */
 #define SETTINGS_FILE "/ENAGA/SETTINGS.TXT"
@@ -29,6 +30,7 @@ static const char *const on_off[] = { "ON", "OFF" };
 static const char *const off_on[] = { "OFF", "ON" };
 static const char *const sources[] = { "INT", "MIDI", "SYNC" };
 static const char *const ports[] = { "DIN", "USB", "BOTH" };
+static const char *const batteries[] = { "ALKALINE", "NiMH", "LITHIUM" };
 static const char *const channels[] = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14",
                                         "15", "16" };
 
@@ -39,7 +41,7 @@ typedef struct {
 } setting_t;
 
 enum { VOLUME, BRIGHTNESS, PADS, AUTO_OFF, SPEAKER, MIDI_CH, MIDI_THRU, MIDI_IN, MIDI_OUT, CLOCK_SRC, CLOCK_OUT, SYNC_OUT,
-       SETTINGS_COUNT };
+       BATTERY, SETTINGS_COUNT };
 static const setting_t table[SETTINGS_COUNT] = {
     { "VOLUME", numbers, 0, 11, 10 },
     { "BRIGHTNESS", numbers, 1, 10, 9 },
@@ -53,6 +55,7 @@ static const setting_t table[SETTINGS_COUNT] = {
     { "CLOCK SRC", sources, 0, 3, 0 },
     { "CLOCK OUT", off_on, 0, 2, 0 },
     { "SYNC OUT", on_off, 0, 2, 0 },
+    { "BATTERY", batteries, 0, 3, 0 },
 };
 static int settings_value[SETTINGS_COUNT], settings_saved[SETTINGS_COUNT];
 static int settings_cursor;
@@ -81,6 +84,7 @@ static void apply(int which)
         break;
     case CLOCK_OUT: clock_out_setting = v == 1; break;
     case SYNC_OUT: sync_out_setting = v == 0; break;
+    case BATTERY: battery_type_setting = v; battery_type_changed(); break;
     default: break;
     }
 }
@@ -128,7 +132,7 @@ void settings_load(void)                      /* after the card is mounted (or n
 static void save(void)
 {
     static FIL f;
-    char text[160];
+    char text[320];                           /* all lines at their longest: about 180 bytes */
     unsigned n = 0, i;
     int k;
     UINT put;

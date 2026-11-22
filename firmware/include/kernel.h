@@ -109,6 +109,14 @@ void menu_open(const char *message);          /* message: a line under the title
 void menu_close(void);                        /* back to the running app (none: stays) */
 void menu_event(const enaga_event_t *event);
 void menu_draw(void);
+/* power.c: the battery level and the switch-off when it is empty */
+void battery_reading(unsigned raw);           /* panel channel 15, as it arrives */
+int  battery_poll(u32 ms);                    /* main loop: 1 when empty long enough to switch off */
+int  battery_level(void);                     /* 0-4 (4 full) on batteries, -1 on USB or adapter power */
+int  battery_seconds_left(u32 ms);            /* while empty: seconds until the switch-off, else -1 */
+void battery_type_changed(void);
+extern int battery_type_setting;              /* BATTERY: 0 ALKALINE, 1 NiMH, 2 LITHIUM */
+extern u32 battery_sample_ms, battery_empty_ms, battery_average;
 /* settings.c: Enaga's settings, /ENAGA/SETTINGS.TXT, and the menu's SETTINGS page */
 void settings_load(void);                     /* read and apply (defaults without a card or file) */
 void settings_open(void);

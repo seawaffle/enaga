@@ -316,6 +316,10 @@ typedef struct enaga_host {
     int32_t (*clock_control)(uint32_t command, int32_t value);
     void (*clock_state)(enaga_clock_state_t *state);
     uint32_t (*clock_ticks)(enaga_clock_tick_t *ticks, uint32_t max);
+    /* The battery: 0-4 (4 full) while the unit runs on batteries, -1 on USB or adapter power. It follows the
+     * voltage over several seconds, with the user's BATTERY setting for the thresholds. At 0 Enaga warns, then
+     * switches the unit off (stopping the app as POWER does) if it stays there. Main context. */
+    int32_t (*battery)(void);
 } enaga_host_t;
 
 /* What the app gives Enaga. Every callback receives `context`; any callback may be 0. */

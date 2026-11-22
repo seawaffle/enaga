@@ -176,7 +176,7 @@ static void pad_press(int channel, enaga_event_t *e)
 static void on_pad(int channel, unsigned value)
 {
     enaga_event_t e;
-    if (channel >= 15) return;                /* channel 15 is the battery */
+    if (channel >= 15) { battery_reading(value); return; }   /* channel 15 is the battery (power.c) */
     e.id = (u16)channel; e.ms = timer_ms();
     if (pad_state[channel] == PAD_UP && value >= pad_press_level) {
         pad_state[channel] = PAD_RISING;
@@ -218,6 +218,8 @@ static void status_page(u32 ms)
     gfx_text(0, 57, "LOAD", 10);
     gfx_dec(36, 57, (int)(audio_cycles_peak / (AUDIO_BUDGET_CYCLES / 1000u)), 15);
     gfx_dec(78, 57, (int)audio_overruns, 15);
+    gfx_text(96, 57, "B", 10);                /* battery level, or - on USB or adapter power (power.c) */
+    if (battery_level() < 0) gfx_text(102, 57, "-", 15); else gfx_dec(102, 57, battery_level(), 15);
     /* The SD card: sectors read and written since start-up, and the last failure (code, command, MMCST0 low byte):
      * "SD R1234 W56 E-2 C24 10". */
     gfx_text(0, 66, "SD", 10);
@@ -232,12 +234,14 @@ static void status_page(u32 ms)
     for (i = first; i < log_count; i++) gfx_text(0, 84 + 9 * (int)(i - first), log_lines[i % LOG_LINES], 8);
 }
 
-static void shutdown(void)
+static void shutdown_with(const char *text)
 {
+    int n = 0;
+    while (text[n]) n++;
     powering_off = 1;
     apps_unload();
     gfx_clear(0);
-    gfx_text(52, 60, "BYE", 15);
+    gfx_text(64 - 3 * n, 60, text, 15);       /* centred: 6 px a character */
     gfx_present();
     uart1_send(0xB2);                         /* the original firmware's order: B2, DAC mute, C2, hold release */
     audio_mute();
@@ -246,6 +250,18 @@ static void shutdown(void)
     power_off();
     for (;;)
         ;
+}
+
+static void shutdown(void) { shutdown_with("BYE"); }
+
+/* While the battery is empty: a bar over the bottom of whatever is on screen, counting down to the switch-off. */
+static void battery_warning(u32 ms)
+{
+    int left = battery_seconds_left(ms), x, y;
+    if (left < 0) return;
+    for (y = 117; y < 128; y++) for (x = 0; x < 128; x++) gfx_pixel(x, y, (ms / 500u) & 1 ? 0 : 3);
+    gfx_text(2, 119, "BATTERY EMPTY: OFF", 15);
+    gfx_dec(112, 119, left, 15);
 }
 
 static void poll_inputs(u32 ms)
@@ -333,6 +349,7 @@ void kernel_loop(void)
         kernel_stage = 3;
         poll_power(ms);
         if (settings_auto_off_ms && !app_keep_on && ms - last_input >= settings_auto_off_ms) shutdown();
+        if (battery_poll(ms)) shutdown_with("BATTERY EMPTY");
         kernel_stage = 4;
         busy = display_dma ? oled_dma_poll() : 0;   /* also releases the chip select after a frame */
         if (ms - last_draw >= 50 && !busy) {        /* a frame still in flight delays the next draw */
@@ -341,6 +358,7 @@ void kernel_loop(void)
             if (menu_active && !menu_status) menu_draw();
             else if (app_current && !menu_active && app_current->draw) app_current->draw(app_current->context, canvas);
             else status_page(ms);
+            battery_warning(ms);
             kernel_stage = 6;
             if (display_dma) gfx_present_dma(); else gfx_present();
         }

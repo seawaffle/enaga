@@ -281,10 +281,11 @@ In `<enaga/app.hpp>`. Main context.
 | `enaga::system::speaker(bool on)` | `false` mutes the built-in speaker, e.g. while monitoring the built-in microphone (feedback). The user's SPEAKER setting still wins. Released when the app stops |
 | `enaga::system::headphones()` | `true` while headphones are plugged in; the speaker is cut in hardware meanwhile. Poll it, e.g. in `update` |
 | `enaga::system::input(source, level)` | chooses the audio input ([The input](#the-input-enagasysteminputsource-level)) |
+| `enaga::system::battery()` | the battery: 0-4 (4 full) while the unit runs on batteries, -1 on USB or adapter power. It follows the voltage over several seconds, using the user's BATTERY setting (ALKALINE, NiMH, LITHIUM). At 0 Enaga shows a warning and, if the level stays there for 30 seconds, switches the unit off, stopping the app as POWER does, so its `stop()` and file closing run before the supply gives out |
 | `enaga::system::device()` | which device Enaga runs on: `ENAGA_DEVICE_SMPLTREK`, `ENAGA_DEVICE_LOFI12XT`, `ENAGA_DEVICE_CYDRUMS` or `ENAGA_DEVICE_UNKNOWN`. The three have the same board and controls in the same places; use it for what differs, such as labels printed on the panel |
 
-Volume, brightness, pad sensitivity, AUTO OFF and SPEAKER are the user's settings, in the Enaga menu; apps do
-not set them.
+Volume, brightness, pad sensitivity, AUTO OFF, SPEAKER and BATTERY are the user's settings, in the Enaga menu; apps
+do not set them.
 
 ## Files
 
@@ -854,7 +855,7 @@ and the functions the C++ layer wraps:
 | `file_info`, `file_remove`, `file_make_folder`, `file_read_all`, `file_save`, `file_data_folder` | `files::info`, `remove`, `make_folder`, `read_all`, `save`, `data_folder` |
 | `file_load`, `file_list` | `files::load`, `list` |
 | `stream_open`, `stream_create`, `stream_read`, `stream_write`, `stream_status`, `stream_close` | `files::Stream` |
-| `open_menu`, `set_busy`, `speaker`, `headphones`, `device`, `input` | `enaga::system::` the same names |
+| `open_menu`, `set_busy`, `speaker`, `headphones`, `device`, `input`, `battery` | `enaga::system::` the same names |
 | `midi_send(ports, data, bytes)` (0 queued, -1 no room), `midi_channel` | `enaga::midi::send` and the helpers, `channel` |
 | `clock_control(command, value)`, `clock_state`, `clock_ticks(ticks, max)` | `enaga::clock::` control, `state`, `ticks` |
 

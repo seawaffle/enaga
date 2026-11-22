@@ -141,6 +141,17 @@ static void fill(int x, int y, int w, int h, u8 grey)
     for (j = y; j < y + h; j++) for (i = x; i < x + w; i++) gfx_pixel(i, j, grey);
 }
 
+/* On batteries, a battery at the top right with one bar per level (power.c); nothing on USB or adapter power. */
+static void draw_battery(int x, int y)
+{
+    int level = battery_level(), i;
+    if (level < 0) return;
+    fill(x, y, 14, 1, 10); fill(x, y + 6, 14, 1, 10);           /* the outline, 14 x 7, and its tip */
+    fill(x, y, 1, 7, 10); fill(x + 13, y, 1, 7, 10);
+    fill(x + 14, y + 2, 2, 3, 10);
+    for (i = 0; i < level; i++) fill(x + 2 + 3 * i, y + 2, 2, 3, 12);   /* bars 2 wide, 1 apart */
+}
+
 void menu_draw(void)
 {
     int i, y;
@@ -148,6 +159,7 @@ void menu_draw(void)
     gfx_clear(0);
     gfx_text(0, 0, "ENAGA", 15);
     gfx_text(36, 0, ENAGA_VERSION, 6);
+    draw_battery(CANVAS_W - 16, 0);
     if (menu_message[0]) gfx_text(0, 12, menu_message, 12);
     else if (menu_count == 0) gfx_text(0, 12, "NO APPS", 12);
     for (i = menu_top, y = MENU_TOP; i <= menu_count + 1 && i < menu_top + MENU_ROWS; i++, y += MENU_LINE) {
