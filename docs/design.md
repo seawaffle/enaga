@@ -443,7 +443,11 @@ the DIN jacks and over USB, the clock with transport and SYNC, the UI toolkit, a
 prebuilt toolchain and its source with each release). On the unit (session 5) pad pressure, the menu icons, an app
 built from the released SDK, and USB MIDI passed; still to check there are DIN MIDI, the clock and SYNC, and three
 of the input routes, which need equipment. The exit test passed as a simulation (a fresh agent with only the
-downloads); a person doing it moves to E6. USB uses test IDs until pid.codes grants one. E5 is planned ("E5 plan").
+downloads); a person doing it moves to E6. USB uses test IDs until pid.codes grants one.
+
+E5 ("E5 plan"): steps 1-4 (battery, SYNC polarity, USB DRIVE, USB audio) are done on the emulator and merged
+(2026-11-22); the exit, step 5, is a unit session over checklist steps 19-21, with 16, 17 and 7 still owed from E4.
+Its card is staged by `tools/unit_card.py` (the dry run, steps 1-10, passes 141/141).
 
 ## Open items
 
