@@ -493,7 +493,20 @@ Its card is staged by `tools/unit_card.py` (the dry run, steps 1-10, passes 141/
     streams were off when looked at, or a crash record took its row. Suspect: the SOF interrupt reaching the CPU
     through the TI wrapper on the real chip (the emulator gates SOF by the core's INTRUSBE; ENAGA_USB0_SOURCES
     includes USB bits 16-24).
-  - Next: the user is starting a Claude session on the Windows PC with a read-only brief: raw sectors 0-63 and
+  - Windows session's findings (`~/smpltrek-debug/FINDINGS.md` on the user's machine): over USB the 4,534 sectors
+    Windows got match the card reader's byte for byte. The failure is a 128-sector READ(10) cut short: 57,856 or
+    58,112 of 65,536 bytes (seven 8 KiB chunks, then 8 or 12 packets of the eighth), then the CSW (passed, residue
+    0), after 5 to 35 good reads; Windows waits 20 s, cancels, and the drive reports no medium. Every control
+    request answered OK. Isochronous: Windows completes its own URBs at once with USBD_STATUS_INVALID_PARAMETER
+    (0x80000300), 10 packets of 192 (OUT) or 196 (IN) bytes, ASAP: nothing reaches the wire. No MIDI device
+    appears in Windows at all (USB MIDI was only ever tested through WSL).
+  - Fix tried for the drive: `process_epin_isr` wrote the next packet on every TX interrupt without checking the
+    FIFO had room; an extra TX interrupt with TXRDY still set overwrote an unsent packet and counted it, so a chunk
+    "finished" early. It now skips while TXRDY is set and counts the skips (`USB TX BUSY n` logged when the page
+    ends); drive read / write failures log the SD driver's code, command and status (`DRV R -3 C18 0008`). The
+    emulator never delivers such an interrupt, so `test_large_reads_as_windows_makes_them` (128-sector reads) is
+    coverage, not a reproduction.
+  - Earlier plan: the user started a Claude session on the Windows PC with a read-only brief: raw sectors 0-63 and
     the partition start over USB vs a card reader, a USBPcap capture of drive mount / playback / recording, and
     scripted play / record tests. Debug from its evidence. Also ask whether STATUS showed a crash row.
 

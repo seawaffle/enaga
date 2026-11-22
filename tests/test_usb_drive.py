@@ -167,6 +167,19 @@ class UsbDrive(unittest.TestCase):
             self.assertIn("CLOCK", titles)                                      # mounted again and rescanned
             self.assertEqual(card.get(self.card_now(d), "/ENAGA/APPS/CLOCK/APP.ENA"), package)
 
+    def test_large_reads_as_windows_makes_them(self):
+        # Windows reads 128 sectors (64 KiB) a command: eight of TinyUSB's 8 KiB chunks, 1,024 packets. On the unit
+        # one such read once ended after 113 sectors (a TX interrupt with the FIFO still full counted a packet as
+        # sent: dcd_musb.c process_epin_isr). Every byte must come, in order, and the command's status after it.
+        self.open_drive()
+        self.assertIs(self.ready() == (6, 0x28) and self.ready(), True)
+        image = self.emu.cpu.sd_read()
+        for lba in (0, 128, 1000, 4096):
+            status, data = self.scsi([0x28, 0, *lba.to_bytes(4, "big"), 0, 0, 128, 0], 128 * SECTOR)
+            self.assertEqual((status, len(data)), (0, 128 * SECTOR), lba)
+            self.assertEqual(data, image[lba * SECTOR:(lba + 128) * SECTOR], lba)
+        self.assertEqual(self.emu.word("usb_drive_errors"), 0)
+
     def test_ok_ends_it(self):
         self.open_drive()
         self.assertEqual(self.emu.word("menu_drive"), 1)

@@ -100,6 +100,16 @@ static void drive_close(const char *why)
 {
     usb_drive_share(0);
     log_line(why);
+    if (enaga_musb_tx_busy) {                 /* how often a TX interrupt found the FIFO full (dcd_musb.c) */
+        char line[24] = "USB TX BUSY ";
+        int n = 12, k = 0;
+        char digits[10];
+        u32 v = enaga_musb_tx_busy;
+        do { digits[k++] = (char)('0' + v % 10u); v /= 10u; } while (v);
+        while (k) line[n++] = digits[--k];
+        line[n] = 0;
+        log_line(line);
+    }
     apps_mount();                             /* the card back, as at start-up */
     menu_open(why);                           /* rescanned: apps copied over are listed */
 }

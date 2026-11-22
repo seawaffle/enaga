@@ -309,6 +309,8 @@ static void pipe_write(musb_regs_t* musb_regs, pipe_state_t* pipe, uint8_t epnum
   ep_csr->tx_csrl = MUSB_TXCSRL1_TXRDY;
 }
 
+volatile uint32_t enaga_musb_tx_busy;   /* Enaga: TX interrupts that found the FIFO still full (process_epin_isr) */
+
 // Called from the TX interrupt. If the last queued packet finished the transfer,
 // signal completion; otherwise queue the next packet.
 static void process_epin_isr(uint8_t rhport, musb_regs_t *musb_regs, uint8_t epnum) {
@@ -321,6 +323,13 @@ static void process_epin_isr(uint8_t rhport, musb_regs_t *musb_regs, uint8_t epn
 
   pipe_state_t* pipe = pipe_get(epnum, TUSB_DIR_IN);
   if (pipe->remaining > 0) {
+    /* Enaga: not into a full FIFO. A TX interrupt with TXRDY still set (an extra one, as the C6748's wrapper can
+     * deliver) wrote over a packet that had not gone, yet counted it sent: a mass-storage read "finished" after a
+     * few of its packets. The interrupt for the packet actually leaving comes next and loads the following one. */
+    if (csrl & MUSB_TXCSRL1_TXRDY) {
+      enaga_musb_tx_busy++;
+      return;
+    }
     pipe_write(musb_regs, pipe, epnum);
   } else {
     // All bytes have been loaded into the FIFO. With double-packet buffering a
