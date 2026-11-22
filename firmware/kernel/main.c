@@ -344,11 +344,12 @@ void kernel_loop(void)
             if (app_current && !menu_active) open_menu(0);
         }
         apps_service(ms);
+        menu_service(ms);
         kernel_stage = 8;
         filing = files_service(ms);                 /* the card-detect pin, then queued file work (files.c) */
         kernel_stage = 3;
         poll_power(ms);
-        if (settings_auto_off_ms && !app_keep_on && ms - last_input >= settings_auto_off_ms) shutdown();
+        if (settings_auto_off_ms && !app_keep_on && !menu_drive && ms - last_input >= settings_auto_off_ms) shutdown();
         if (battery_poll(ms)) shutdown_with("BATTERY EMPTY");
         kernel_stage = 4;
         busy = display_dma ? oled_dma_poll() : 0;   /* also releases the chip select after a frame */

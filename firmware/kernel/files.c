@@ -275,6 +275,12 @@ int files_mount(void)                         /* FR_OK or the FatFs error */
 
 int files_mounted(void) { return mounted; }
 
+void files_release(void)                      /* no app running, so nothing is open or queued */
+{
+    if (mounted) f_mount(0, "", 0);
+    mounted = 0;
+}
+
 static void drop_all(int32_t result, int callbacks)
 {
     unsigned i;

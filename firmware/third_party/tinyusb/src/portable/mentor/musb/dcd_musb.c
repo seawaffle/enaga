@@ -986,6 +986,7 @@ void dcd_int_handler(uint8_t rhport) {
 
   intr_usb &= musb_regs->intr_usben; /* Clear disabled interrupts */
   if (intr_usb & MUSB_IS_DISCON) {
+    dcd_event_bus_signal(rhport, DCD_EVENT_UNPLUGGED, true);   /* Enaga: the session ended (cable out): unmounted */
   }
   if (intr_usb & MUSB_IS_SOF) {
     dcd_event_bus_signal(rhport, DCD_EVENT_SOF, true);

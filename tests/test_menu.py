@@ -189,7 +189,7 @@ class Menu(unittest.TestCase):
                 titles = [raw[i:i + 24].split(b"\0")[0].decode() for i in (0, 24)]
                 canvas = emu.cpu.read(emu.names["canvas"], 128 * 128)
                 icons = {"TONE": rows, "MENU-TEST": self.builtin_icon("generic")}
-                lines = [icons[t] for t in titles] + [self.builtin_icon("settings"), self.builtin_icon("status")]
+                lines = [icons[t] for t in titles] + [self.builtin_icon("settings"), self.builtin_icon("drive")]
                 for line, icon in enumerate(lines):
                     background = 3 if line == 1 else 0
                     top = 24 + 20 * line

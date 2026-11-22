@@ -146,6 +146,7 @@ class Synth(unittest.TestCase):
             self.press(emu, PUSH_B)
             self.assertEqual(self.values(emu)[CUTOFF], 127)
             emu.key(F1, True)                     # F1 + F2: PATCH; VALUE chooses, OK loads
+            emu.run(15 * MS)                      # F1 held first, as a hand does
             self.press(emu, F2)
             emu.key(F1, False)
             turn(emu, 4, 1)
@@ -159,6 +160,7 @@ class Synth(unittest.TestCase):
 
     def patch_page(self, emu):
         emu.key(F1, True)
+        emu.run(15 * MS)                      # F1 held first, as a hand does
         self.press(emu, F2)
         emu.key(F1, False)
         emu.run(15 * MS)
@@ -185,12 +187,14 @@ class Synth(unittest.TestCase):
             turn(emu, 1, -3)
             self.patch_page(emu)
             emu.key(F1, True)                     # F1 + OK on a factory patch saves nothing
+            emu.run(15 * MS)                      # F1 held first, as a hand does
             self.press(emu, OK)
             emu.key(F1, False)
             turn(emu, 4, FACTORY)                 # U1, empty: OK leaves the sound as it is
             self.press(emu, OK)
             self.assertEqual(self.values(emu)[CUTOFF], 124)
             emu.key(F1, True)                     # F1 + OK: saved in U1
+            emu.run(15 * MS)                      # F1 held first, as a hand does
             self.press(emu, OK)
             emu.key(F1, False)
             turn(emu, 4, 1)                       # U2, the older file
