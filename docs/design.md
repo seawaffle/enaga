@@ -517,9 +517,14 @@ Its card is staged by `tools/unit_card.py` (the dry run, steps 1-10, passes 141/
   - **The remount failure was the SD driver**: `sd_init` kept the RCA from the last start-up and sent it with
     CMD55 before ACMD41; a card just reset answers CMD55 only for RCA 0, hence `MOUNT 3 -2 00000010` after every
     USB DRIVE and the power-cycle retry. It now starts from RCA 0; `test_ok_ends_it` checks the CMD55 arguments in
-    the emulator's SD trace (the emulator's card answers both RCAs) and fails on the old code.
-  - For the emulator (via the user, smpltrek-re): POWER resets with HSENAB set on the real core, and a host
-    could then run the device at high speed; a card in idle or ready state should answer CMD55 only for RCA 0.
+    the emulator's SD trace and fails on the old code.
+  - The emulator now matches the hardware on both (done by its agent from our brief, 2026-11-23): POWER resets
+    to 0x20 (HSENAB on), each bus reset picks the speed from HSENAB and sets HSMODE, and `usb_state()` reports
+    `speed` and `high_speed_resets` (its host still sends only full-speed traffic); the card answers CMD55 only
+    for RCA 0 before CMD3 and only for its own RCA after. With the two firmware fixes reverted, `test_usb` and
+    five `test_usb_drive` tests fail; with them, all pass. `test_usb` also checks HSMODE and `high_speed_resets`.
+    Not asked for yet: high-speed rules in the host (512-byte bulk, bInterval in microframes, device qualifier),
+    needed only if Enaga moves to high speed on purpose.
   - Earlier plan: the user started a Claude session on the Windows PC with a read-only brief: raw sectors 0-63 and
     the partition start over USB vs a card reader, a USBPcap capture of drive mount / playback / recording, and
     scripted play / record tests. Debug from its evidence. Also ask whether STATUS showed a crash row.
