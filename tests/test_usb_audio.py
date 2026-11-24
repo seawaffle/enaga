@@ -196,6 +196,24 @@ class UsbAudio(unittest.TestCase):
         self.run_ms(50)
         self.assertEqual(self.word("usb_audio_in_packets"), before)             # nothing loaded once stopped
 
+    def test_each_way_of_feeding_the_in_endpoint(self):
+        # The STATUS page's LEFT / RIGHT choose how IN packets are loaded (usb_audio_in_mode), for trying on the
+        # unit; each must stream cleanly here, and the stream's end logs its mode and counts.
+        self.usb_input()
+        for mode in (1, 2, 3, 0):
+            self.emu.cpu.write(self.emu.names["usb_audio_in_mode"], mode.to_bytes(4, "little"))
+            self.sent = 0
+            self.start()
+            self.stream([48] * 300)
+            rows = self.stream([48] * 500)
+            self.assertEqual(({r["status"] for r in rows}, {len(r["data"]) for r in rows}), ({"data"}, {192}), mode)
+            steps = self.counter_steps(rows)
+            self.assertGreater(steps.get(1, 0), 0.999 * sum(steps.values()), (mode, steps))
+            for itf in (ITF_IN, ITF_OUT):
+                self.assertEqual(self.emu.cpu.usb_set_interface(itf, 0)["status"], "ok")
+            self.assertTrue(any(line.startswith(f"IN M{mode} L") and line.endswith(" U0")
+                                for line in self.emu.report()["log"][-3:]), self.emu.report()["log"][-3:])
+
     def test_unplugging_while_streaming(self):
         self.usb_input()
         self.start()

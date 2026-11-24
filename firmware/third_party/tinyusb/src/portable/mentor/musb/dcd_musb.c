@@ -798,7 +798,11 @@ bool dcd_edpt_open(uint8_t rhport, tusb_desc_endpoint_t const * ep_desc) {
 
   hwfifo_flush(musb, epn, is_rx, true);
 
-  TU_ASSERT(hwfifo_config(musb, epn, is_rx, mps, ep_desc->bmAttributes.xfer == TUSB_XFER_BULK));
+  /* Enaga: one packet per FIFO, bulk too. Double-buffered, the C6748's core clears TXPKTRDY and interrupts when a
+   * packet is loaded, not when it is sent (SPRUH79C 33.2.7.1.2.1.2), so the wait below for FIFONOTEMPTY to clear
+   * got no further interrupt: at full speed, every IN transfer's completion was lost (the mass-storage CSW after
+   * INQUIRY never sent; unit session 6, round 3). Single-buffered, the interrupt means the packet has gone. */
+  TU_ASSERT(hwfifo_config(musb, epn, is_rx, mps, false));
   musb->intren_ep[is_rx] |= TU_BIT(epn);
 
   return true;

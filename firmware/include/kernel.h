@@ -82,6 +82,7 @@ int  usb_audio_out_streaming(void);
 int  usb_audio_in_streaming(void);
 extern u32 usb_audio_out_packets, usb_audio_out_overruns, usb_audio_out_underruns;
 extern u32 usb_audio_in_packets, usb_audio_in_late, usb_audio_in_underruns;
+extern int usb_audio_in_mode;                  /* how the IN endpoint is fed (usb_audio.c), 0-3: STATUS LEFT / RIGHT */
 extern float usb_audio_out_ratio;
 void usb_drive_share(int on);                 /* USB DRIVE: the SD card shown to the computer, or not */
 int  usb_drive_ejected(void);                 /* the computer ejected it */
