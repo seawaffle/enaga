@@ -257,6 +257,39 @@ static u32 size32(FSIZE_t size) { return size > 0xFFFFFFFFu ? 0xFFFFFFFFu : (u32
 
 /* ---- mounting and the card -------------------------------------------------------------------------------- */
 
+/* Once a start-up, for a card other than a CSD 1.0 one whose size was read (the only kind the emulator has): the CSD
+ * as read, high word first, over two lines of the status page's 21 characters ("CSD 400E0032 5B590000",
+ * "CSD 76B27F80 0A404000"), and the size taken from it ("CARD 62333952 SECTORS"). A USB DRIVE size that is wrong
+ * can then be traced to the register or the parse. */
+void files_log_card(void)                     /* also when USB DRIVE opens, so the lines sit beside its own */
+{
+    static const char hex[] = "0123456789ABCDEF";
+    char line[24];
+    int n, w, i;
+    for (w = 3; w >= 0; w -= 2) {
+        n = 0;
+        line[n++] = 'C'; line[n++] = 'S'; line[n++] = 'D'; line[n++] = ' ';
+        for (i = 28; i >= 0; i -= 4) line[n++] = hex[sd_csd[w] >> i & 15];
+        line[n++] = ' ';
+        for (i = 28; i >= 0; i -= 4) line[n++] = hex[sd_csd[w - 1] >> i & 15];
+        line[n] = 0;
+        log_line(line);
+    }
+    line[0] = 'C'; line[1] = 'A'; line[2] = 'R'; line[3] = 'D'; line[4] = ' ';
+    n = put_dec(line, 5, (int)sd_sectors);
+    for (i = 0; " SECTORS"[i] && n < 21; i++) line[n++] = " SECTORS"[i];
+    line[n] = 0;
+    log_line(line);
+}
+
+static void log_card_size(void)
+{
+    static int done;
+    if (done || (sd_csd[3] >> 30 == 0 && sd_sectors)) return;
+    done = 1;
+    files_log_card();
+}
+
 int files_mount(void)                         /* FR_OK or the FatFs error */
 {
     FRESULT r = f_mount(&fs, "", 1);
@@ -270,6 +303,7 @@ int files_mount(void)                         /* FR_OK or the FatFs error */
         }
     }
     mounted = r == FR_OK;
+    if (mounted) log_card_size();
     return r;
 }
 

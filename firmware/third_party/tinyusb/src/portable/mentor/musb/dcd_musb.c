@@ -309,6 +309,8 @@ static void pipe_write(musb_regs_t* musb_regs, pipe_state_t* pipe, uint8_t epnum
   ep_csr->tx_csrl = MUSB_TXCSRL1_TXRDY;
 }
 
+volatile uint32_t enaga_musb_tx_busy;   /* Enaga: TX interrupts that found the FIFO still full (process_epin_isr) */
+
 // Called from the TX interrupt. If the last queued packet finished the transfer,
 // signal completion; otherwise queue the next packet.
 static void process_epin_isr(uint8_t rhport, musb_regs_t *musb_regs, uint8_t epnum) {
@@ -321,6 +323,13 @@ static void process_epin_isr(uint8_t rhport, musb_regs_t *musb_regs, uint8_t epn
 
   pipe_state_t* pipe = pipe_get(epnum, TUSB_DIR_IN);
   if (pipe->remaining > 0) {
+    /* Enaga: not into a full FIFO. A TX interrupt with TXRDY still set (an extra one, as the C6748's wrapper can
+     * deliver) wrote over a packet that had not gone, yet counted it sent: a mass-storage read "finished" after a
+     * few of its packets. The interrupt for the packet actually leaving comes next and loads the following one. */
+    if (csrl & MUSB_TXCSRL1_TXRDY) {
+      enaga_musb_tx_busy++;
+      return;
+    }
     pipe_write(musb_regs, pipe, epnum);
   } else {
     // All bytes have been loaded into the FIFO. With double-packet buffering a
@@ -789,7 +798,11 @@ bool dcd_edpt_open(uint8_t rhport, tusb_desc_endpoint_t const * ep_desc) {
 
   hwfifo_flush(musb, epn, is_rx, true);
 
-  TU_ASSERT(hwfifo_config(musb, epn, is_rx, mps, ep_desc->bmAttributes.xfer == TUSB_XFER_BULK));
+  /* Enaga: one packet per FIFO, bulk too. Double-buffered, the C6748's core clears TXPKTRDY and interrupts when a
+   * packet is loaded, not when it is sent (SPRUH79C 33.2.7.1.2.1.2), so the wait below for FIFONOTEMPTY to clear
+   * got no further interrupt: at full speed, every IN transfer's completion was lost (the mass-storage CSW after
+   * INQUIRY never sent; unit session 6, round 3). Single-buffered, the interrupt means the packet has gone. */
+  TU_ASSERT(hwfifo_config(musb, epn, is_rx, mps, false));
   musb->intren_ep[is_rx] |= TU_BIT(epn);
 
   return true;
@@ -931,8 +944,11 @@ void dcd_edpt_stall(uint8_t rhport, uint8_t ep_addr) {
       } else {
         // Forcing EP0 to IDLE: any RXRDY parked by the aborted transfer's flow control is stale,
         // clear it so the next SETUP IRQ is not gated off.
+        /* Enaga: and service it with the stall. A request with no data stage, or an OUT one, leaves its SETUP's
+         * RXRDY parked (pipe0_start_setup); SendStall alone then never goes out, the core NAKs the host's next
+         * packet for good, and the host's control transfer times out instead of seeing a stall. */
+        ep_csr->csr0l = pipe0->rxrdy_consumed ? (MUSB_CSRL0_STALL | MUSB_CSRL0_RXRDYC) : MUSB_CSRL0_STALL;
         pipe0->rxrdy_consumed = false;
-        ep_csr->csr0l = MUSB_CSRL0_STALL;
       }
     }
   } else {

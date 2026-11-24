@@ -16,7 +16,12 @@
  *     terminal 3 -> USB streaming terminal 4, endpoint 0x83, asynchronous. Both 196 bytes (49 frames at most).
  *     No feature unit, so computers use their own volume.
  *   - This file is a TinyUSB class driver for interfaces 2 and 3: it claims them, allocates their FIFOs
- *     (double-buffered) and answers SET_INTERFACE. Alternate setting 1 starts a stream, 0 stops it.
+ *     (double-buffered) and answers SET_INTERFACE. Alternate setting 1 starts a stream, 0 stops it. Computers also
+ *     set and read each endpoint's sampling frequency as a stream starts (UAC1 5.2.3.2.3.1), although the
+ *     descriptor offers no controls: SET_CUR is accepted (another rate than 48,000 is logged, as below) and the
+ *     GETs answer 48,000. Any other request
+ *     for these interfaces or endpoints is refused (a stall) and logged ("USB REQ 22 01 0200 0003": request type,
+ *     request, value, index), so a computer's surprise shows on the status page.
  *   - Packets do not go through TinyUSB's transfers, which finish in the main loop (about 850 passes a second, less
  *     while an app draws). They are moved in the USB interrupt on every SOF (1 ms; the SOF interrupt is on while
  *     a stream runs): the OUT packet that arrived in the last frame is read from the FIFO, and the IN packet for
@@ -62,6 +67,7 @@ static u32 frames_since(u32 tsc)
 
 u32 usb_audio_out_packets, usb_audio_out_overruns, usb_audio_out_underruns;
 u32 usb_audio_in_packets, usb_audio_in_late, usb_audio_in_underruns;
+static u32 in_late_at, in_underruns_at;                    /* the counters when the IN stream started */
 float usb_audio_out_ratio;                    /* the resampling ratio in use, for the status page and tests */
 
 int usb_audio_out_streaming(void) { return out_alt; }
@@ -178,16 +184,22 @@ static void load_in(volatile uint32_t *fifo, musb_ep_csr_t *csr)   /* one packet
     usb_audio_in_packets++;
 }
 
-/* Both halves of the double-buffered FIFO are kept loaded, so a SOF served late (the USB interrupt waits while the
- * app's audio callback runs, up to a block) still finds a packet ready: 1 ms more latency for no gaps. */
+/* One packet a frame, into the double-buffered FIFO, held by POWER.ISOUPDATE until the next SOF. Keeping both halves
+ * loaded (to ride out a SOF served late) failed on the unit: Windows saw babble on almost every packet and the ring
+ * emptied twice as fast, so the core sent more than one packet a frame (unit session 6, rounds 3 and 4; one packet
+ * a frame, with or without ISOUPDATE or double buffering, recorded cleanly). The emulator does not show it. */
 static void service_in(void)
 {
     musb_ep_csr_t *csr = &musb->indexed_csr;
     volatile uint32_t *fifo = &musb->fifo[USB_AUDIO_EP_IN & 0x0F];
-    int k;
+    u8 csrl;
     musb->index = USB_AUDIO_EP_IN & 0x0F;
-    if (csr->tx_csrl & MUSB_TXCSRL1_UNDRN) { csr->tx_csrl &= (u8)~MUSB_TXCSRL1_UNDRN; usb_audio_in_late++; }
-    for (k = 0; k < 2 && !(csr->tx_csrl & MUSB_TXCSRL1_TXRDY); k++) load_in(fifo, csr);
+    csrl = csr->tx_csrl;
+    if (csrl & MUSB_TXCSRL1_UNDRN) {         /* cleared without writing TXPKTRDY back, which would commit a packet */
+        csr->tx_csrl = (u8)(csrl & ~(MUSB_TXCSRL1_UNDRN | MUSB_TXCSRL1_TXRDY));
+        usb_audio_in_late++;
+    }
+    if (!(csr->tx_csrl & MUSB_TXCSRL1_TXRDY)) load_in(fifo, csr);
 }
 
 static void uac_sof(uint8_t rhport, uint32_t frame)
@@ -239,13 +251,63 @@ static uint16_t uac_open(uint8_t rhport, tusb_desc_interface_t const *itf, uint1
     return (uint16_t)(p - (const uint8_t *)itf);
 }
 
+static int put_dec(char *line, int n, u32 v)    /* v in decimal at line[n]; returns the end */
+{
+    char digits[10];
+    int k = 0;
+    do { digits[k++] = (char)('0' + v % 10u); v /= 10u; } while (v && k < 5);
+    while (k) line[n++] = digits[--k];
+    return n;
+}
+
+/* A request refused: logged (the first few), and a stall. */
+static bool refuse(tusb_control_request_t const *request)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    static u32 logged;
+    char line[] = "USB REQ tt rr vvvv iiii";
+    u32 fields[4] = {request->bmRequestType, request->bRequest, request->wValue, request->wIndex};
+    int at[4] = {8, 11, 14, 19}, digits[4] = {2, 2, 4, 4}, f, d;
+    if (logged >= 8) return false;
+    logged++;
+    for (f = 0; f < 4; f++)
+        for (d = 0; d < digits[f]; d++) line[at[f] + d] = hex[(fields[f] >> (4 * (digits[f] - 1 - d))) & 15];
+    log_line(line);
+    return false;
+}
+
+/* The sampling frequency control of an endpoint (UAC1 5.2.3.2.3.1): 3 bytes, little-endian Hz. One rate. */
+static bool sampling_frequency(uint8_t rhport, uint8_t stage, tusb_control_request_t const *request)
+{
+    static uint8_t rate[3];
+    if (request->wLength != 3) return refuse(request);
+    if (request->bRequest == AUDIO10_CS_REQ_SET_CUR) {
+        if (stage == CONTROL_STAGE_SETUP) return tud_control_xfer(rhport, request, rate, 3);
+        if (stage == CONTROL_STAGE_DATA && (rate[0] | rate[1] << 8 | rate[2] << 16) != 48000u)
+            refuse(request);                  /* logged; accepted all the same, as refusing mid-transfer would hang */
+        return true;
+    }
+    if (request->bRequest == AUDIO10_CS_REQ_GET_CUR || request->bRequest == AUDIO10_CS_REQ_GET_MIN ||
+        request->bRequest == AUDIO10_CS_REQ_GET_MAX || request->bRequest == AUDIO10_CS_REQ_GET_RES) {
+        if (stage != CONTROL_STAGE_SETUP) return true;
+        rate[0] = 48000u & 0xFF; rate[1] = (48000u >> 8) & 0xFF; rate[2] = 0;
+        if (request->bRequest == AUDIO10_CS_REQ_GET_RES) rate[0] = rate[1] = 0;   /* no steps: one rate */
+        return tud_control_xfer(rhport, request, rate, 3);
+    }
+    return refuse(request);
+}
+
 static bool uac_control(uint8_t rhport, uint8_t stage, tusb_control_request_t const *request)
 {
     u32 itf = tu_u16_low(request->wIndex), alt = request->wValue;
     static uint8_t current;
+    if (request->bmRequestType_bit.type == TUSB_REQ_TYPE_CLASS &&
+        request->bmRequestType_bit.recipient == TUSB_REQ_RCPT_ENDPOINT &&
+        (itf == USB_AUDIO_EP_OUT || itf == USB_AUDIO_EP_IN) && tu_u16_high(request->wValue) == 0x01)
+        return sampling_frequency(rhport, stage, request);
     if (request->bmRequestType_bit.type != TUSB_REQ_TYPE_STANDARD ||
         request->bmRequestType_bit.recipient != TUSB_REQ_RCPT_INTERFACE || (itf != ITF_OUT && itf != ITF_IN))
-        return false;                          /* no class requests: no controls are offered */
+        return stage == CONTROL_STAGE_SETUP ? refuse(request) : false;
     if (request->bRequest == TUSB_REQ_GET_INTERFACE) {
         if (stage != CONTROL_STAGE_SETUP) return true;
         current = itf == ITF_OUT ? out_alt : in_alt;
@@ -257,6 +319,7 @@ static bool uac_control(uint8_t rhport, uint8_t stage, tusb_control_request_t co
     {
         const tusb_desc_endpoint_t *ep = itf == ITF_OUT ? out_ep : in_ep;
         u32 gie = irq_global_disable();
+        int was_streaming = itf == ITF_OUT ? out_alt : in_alt;
         stop((int)itf);
         if (alt == 1 && ep) {
             u8 index = musb->index;
@@ -265,17 +328,28 @@ static bool uac_control(uint8_t rhport, uint8_t stage, tusb_control_request_t co
             if (tu_edpt_dir(ep->bEndpointAddress) == TUSB_DIR_IN) {
                 musb->intr_txen &= (u16)~(1u << tu_edpt_number(ep->bEndpointAddress));   /* served on SOF */
                 musb->indexed_csr.tx_csrh |= 0x20;                       /* TXCSRH MODE: transmit */
+                musb->power |= MUSB_POWER_ISOUP;
+                in_late_at = usb_audio_in_late;
+                in_underruns_at = usb_audio_in_underruns;
             } else {
                 musb->intr_rxen &= (u16)~(1u << tu_edpt_number(ep->bEndpointAddress));
             }
             musb->index = index;
-            musb->power |= MUSB_POWER_ISOUP;
             if (itf == ITF_OUT) out_alt = 1; else in_alt = 1;
             usbd_sof_enable(rhport, SOF_CONSUMER_AUDIO, true);
         }
         if (gie) irq_global_enable();
         log_line(itf == ITF_OUT ? (alt ? "USB AUDIO OUT ON" : "USB AUDIO OUT OFF")
                                 : (alt ? "USB AUDIO IN ON" : "USB AUDIO IN OFF"));
+        if (itf == ITF_IN && alt == 0 && was_streaming) {   /* the stream's underruns (UNDERRUN) and ring gaps */
+            char line[24] = "USB AUDIO IN L";
+            int n = 14;
+            n = put_dec(line, n, usb_audio_in_late - in_late_at);
+            line[n++] = ' '; line[n++] = 'U';
+            n = put_dec(line, n, usb_audio_in_underruns - in_underruns_at);
+            line[n] = 0;
+            log_line(line);
+        }
     }
     return tud_control_status(rhport, request);
 }

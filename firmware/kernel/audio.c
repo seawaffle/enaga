@@ -368,11 +368,14 @@ void audio_isr(void)
             for (i = 0; i < WORDS; i++) in_block[i] = 0.0f;
         }
         clock_block();                        /* the clock's ticks for this block, before the app asks */
-        if (fn) {                             /* the watchdog, UART1, UART0 and SYNC IN may interrupt the app's callback */
+        if (fn) {                             /* the watchdog, UART1, UART0, SYNC IN and USB may interrupt the app's
+                                               * callback: USB so that each 1 ms frame's audio packet is loaded on time
+                                               * even when the callback takes longer than a frame */
             u32 saved[3];
             audio_callback_start = tsc_read();
             audio_in_callback = 1;
-            irq_nest_begin(saved, 1u << IRQ_WATCHDOG | 1u << IRQ_UART1 | 1u << IRQ_UART0 | 1u << IRQ_GPIO7);
+            irq_nest_begin(saved, 1u << IRQ_WATCHDOG | 1u << IRQ_UART1 | 1u << IRQ_UART0 | 1u << IRQ_GPIO7 |
+                                  1u << IRQ_USB0);
             fn(callback_context, in_block, out_block, FRAMES);
             irq_nest_end(saved);
             audio_in_callback = 0;

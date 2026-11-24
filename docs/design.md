@@ -478,6 +478,89 @@ Its card is staged by `tools/unit_card.py` (the dry run, steps 1-10, passes 141/
 
 ## Open items
 
+- **Unit session 6 (2026-11-22, E5 exit, in progress; Windows host): USB DRIVE and USB audio fail on the unit.**
+  Build under test: `a24ba51d` (branch `usb-audio-requests`, c9df676), card a 4 GB Toshiba microSDHC in a PNY
+  adapter.
+  - USB DRIVE: Windows lists the drive but asks to format it, with endless errors until the page is ended. Ending
+    it leaves the card unusable until the unit is switched off: `MOUNT 3 -2 00000010`, `SD CYCLED MOUNT 3` (ACMD41
+    no response after CMD8 answered). The size is right: `CSD 400E0032 5B590000`, `CSD 1D177F80 0A40008D`,
+    `CARD 7626752 SECTORS` (CSD 2.0, C_SIZE 7447). Ruled out: size, MSC offset handling, caches (sd_read copies
+    by CPU, no DMA). Untested ideas: what data Windows gets back (misaligned accesses in FIFO code, which the
+    emulator may not model as the C674x does; bulk IN on the real MUSB), and what leaves the card unanswering.
+  - USB audio: after the request fix (9775a5e) the streams start (`USB AUDIO OUT ON`, `IN ON` / `OFF`), but a
+    video player playing to the unit still hangs; Audacity records silence (CHECK plays nothing unless STEP 1-3,
+    so that may be right). The `UA O.. I..` STATUS line never appeared: either packets never moved and the
+    streams were off when looked at, or a crash record took its row. Suspect: the SOF interrupt reaching the CPU
+    through the TI wrapper on the real chip (the emulator gates SOF by the core's INTRUSBE; ENAGA_USB0_SOURCES
+    includes USB bits 16-24).
+  - Windows session's findings (`~/smpltrek-debug/FINDINGS.md` on the user's machine): over USB the 4,534 sectors
+    Windows got match the card reader's byte for byte. The failure is a 128-sector READ(10) cut short: 57,856 or
+    58,112 of 65,536 bytes (seven 8 KiB chunks, then 8 or 12 packets of the eighth), then the CSW (passed, residue
+    0), after 5 to 35 good reads; Windows waits 20 s, cancels, and the drive reports no medium. Every control
+    request answered OK. Isochronous: Windows completes its own URBs at once with USBD_STATUS_INVALID_PARAMETER
+    (0x80000300), 10 packets of 192 (OUT) or 196 (IN) bytes, ASAP: nothing reaches the wire. No MIDI device
+    appears in Windows at all (USB MIDI was only ever tested through WSL).
+  - Fix tried for the drive: `process_epin_isr` wrote the next packet on every TX interrupt without checking the
+    FIFO had room; an extra TX interrupt with TXRDY still set overwrote an unsent packet and counted it, so a chunk
+    "finished" early. It now skips while TXRDY is set and counts the skips (`USB TX BUSY n` logged when the page
+    ends); drive read / write failures log the SD driver's code, command and status (`DRV R -3 C18 0008`). The
+    emulator never delivers such an interrupt, so `test_large_reads_as_windows_makes_them` (128-sector reads) is
+    coverage, not a reproduction.
+  - Round 2 (`FINDINGS2.md`): **Windows ran the unit at high speed** (USB Device Tree Viewer, the xHCI trace's
+    DeviceSpeed 2). The core's POWER.HSENAB is on after reset and nothing cleared it (the original firmware writes
+    POWER = 0x40; TinyUSB only ORs SOFTCONN in), so the core chirped. At high speed the full-speed descriptors mean
+    other things: isochronous bInterval 1 is 125 us, so usbaudio's 10-packet URBs are not whole frames and the
+    stack rejects them (USBD_STATUS_INVALID_PARAMETER, never dispatched); bulk at 64 bytes is illegal there (the
+    drive's BABBLE). `enaga_usb_phy_start` now clears HSENAB. The drive's photo showed no USB TX BUSY line: the
+    TX guard (kept, harmless) was not the cause. Windows groups interfaces 0-3 as one usbaudio function (the AC
+    header's baInterfaceNr), so MIDI is usbaudio's, with no MIDI child; worth checking once audio works.
+  - **The remount failure was the SD driver**: `sd_init` kept the RCA from the last start-up and sent it with
+    CMD55 before ACMD41; a card just reset answers CMD55 only for RCA 0, hence `MOUNT 3 -2 00000010` after every
+    USB DRIVE and the power-cycle retry. It now starts from RCA 0; `test_ok_ends_it` checks the CMD55 arguments in
+    the emulator's SD trace and fails on the old code.
+  - The emulator now matches the hardware on both (done by its agent from our brief, 2026-11-23): POWER resets
+    to 0x20 (HSENAB on), each bus reset picks the speed from HSENAB and sets HSMODE, and `usb_state()` reports
+    `speed` and `high_speed_resets` (its host still sends only full-speed traffic); the card answers CMD55 only
+    for RCA 0 before CMD3 and only for its own RCA after. With the two firmware fixes reverted, `test_usb` and
+    five `test_usb_drive` tests fail; with them, all pass. `test_usb` also checks HSMODE and `high_speed_resets`.
+    Not asked for yet: high-speed rules in the host (512-byte bulk, bInterval in microframes, device qualifier),
+    needed only if Enaga moves to high speed on purpose.
+  - Round 3 (`FINDINGS3.md`, build `ea4d223f`, 2026-11-23): the unit enumerates at Full-Speed, playback works at
+    the USB level (EP 0x03 OUT, all URBs succeed), apps survive USB DRIVE. Still failing:
+    - **USB DRIVE never mounts**: the drive sends INQUIRY's 36 bytes and then never its CSW (from plug-in; earlier,
+      a CSW then no sense data). Cause, from SPRUH79C 33.2.7.1.2.1.2: with double packet buffering TXPKTRDY clears
+      and the interrupt comes when a packet is *loaded*; when it is later sent there is no interrupt. TinyUSB's
+      MUSB port waits for FIFONOTEMPTY to clear before completing an IN transfer, so the completion never came
+      (at high speed the packet had usually gone before the ISR looked). Bulk endpoints are now single-buffered.
+      The emulator raises an interrupt as each packet leaves, so it could not show this (relay below).
+    - **Recording babbles**: 97.7 % of EP 0x83 IN packets end in BABBLE_DETECTED, two good packets every 134
+      frames, though the samples in the good ones are right and continuous (the packets carry 48 frames each).
+      Not explained. Diagnostics: STATUS LEFT / RIGHT choose `usb_audio_in_mode` (0 double-buffered with both halves
+      loaded and ISOUPDATE, as before; 1 one packet a frame with ISOUPDATE; 2 the same without; 3 single-buffered
+      without), shown as `M` on the UA line and taken when a stream starts; the stream's end logs
+      `IN M<mode> L<underruns> U<ring gaps>`. UNDERRUN is now cleared without writing TXPKTRDY back (the
+      read-modify-write committed a packet whenever both halves were full).
+    - For the emulator (via the user): with double packet buffering, a TX endpoint interrupts when TXPKTRDY
+      clears (at the load, if the other half is free), not again when the packet is sent.
+  - Round 4 (build `9a4d6133`, 2026-11-23): **USB DRIVE works**: a 102 MB file copied to it and back is identical,
+    the drive mounts, ejects and keeps the apps. Writes ran at about 155 KiB/s (11 minutes), about the unit's
+    single-sector write speed, though the drive writes 16 sectors a command; the limit is not yet known (see the
+    next item). **USB audio works** in IN modes 1-3 (`L0 U0`) and fails in mode 0 (`U4006`: the ring emptied twice
+    as fast, so with two packets pending the core sent more than one a frame, which is the babble). Playback no
+    longer hangs the player; the meters follow it. Now fixed at one packet a frame, double-buffered, with
+    ISOUPDATE; the selector is gone, and the end of a recording logs `USB AUDIO IN L<underruns> U<ring gaps>`.
+    One packet a frame needs the SOF handled within a frame, which an app callback longer than 1 ms prevented
+    (`test_a_heavy_callback_does_not_cost_packets`: a quarter of the packets empty, samples lost), so the USB
+    interrupt now nests in the app's callback, as the watchdog, UARTs and SYNC IN already did.
+- USB DRIVE speed: about 155 KiB/s writing on the unit (round 4). With the SD card's multi-block writes at about
+  2,000 KiB/s, the time goes on USB: about 380 us a 64-byte packet, single-buffered (a NAK while the CPU empties
+  the FIFO; how soon the computer retries is the computer's). To measure before changing anything: the read
+  speed, and whether double buffering the OUT endpoint helps (the TRM is not clear that a second packet waiting
+  raises its own interrupt, the trap the IN side fell into).
+  - Earlier plan: the user started a Claude session on the Windows PC with a read-only brief: raw sectors 0-63 and
+    the partition start over USB vs a card reader, a USBPcap capture of drive mount / playback / recording, and
+    scripted play / record tests. Debug from its evidence. Also ask whether STATUS showed a crash row.
+
 - USB IDs: the device uses TinyUSB's test vendor and product IDs (0xCAFE / 0x4011, `firmware/usb/usb.c`) until
   the pid.codes product ID (vendor 0x1209) is granted. The request is in, and its timing is pid.codes'; releases
   ship with the test IDs until then (0.2.0 did, and its notes say so).
@@ -1914,4 +1997,19 @@ What steps 5-7 offer, put to use where Enaga and its example drew things by hand
 - **The template** shows the frame too: a status line with the note playing (`Line::note`), the parameter page
   under it and a key hint at the bottom; its ATTACK and RELEASE (0-2000 and 0-4000 ms) now speed up when turned
   quickly. getting-started.md's rules point at `Line` and `<enaga/string.h>`.
+
+### USB audio on a computer: refused requests hung it (2026-11-22, unit session)
+
+On the unit the computer listed the audio device, but playing to it hung the player and Audacity could not record.
+On the emulator, the request computers send as a stream starts, SET_CUR of the endpoint's sampling frequency
+(UAC1 5.2.3.2.3.1, sent although the descriptor offers no controls), timed out rather than stalled. Two faults:
+- **Refused requests never stalled.** TinyUSB's MUSB port leaves the SETUP's RXRDY parked when the request has no
+  data stage or an OUT one, and its EP0 stall wrote SendStall without servicing it; the core went on NAKing, and
+  the computer's control transfer timed out (seconds, then a hang). The stall now services RXRDY too (vendored
+  README); `tests/test_usb.py` refuses a request of each shape and expects a stall and a working device after,
+  and fails on the old code. The emulator's host had only ever sent requests the device knew.
+- **The sampling frequency was refused.** `usb_audio.c` now accepts SET_CUR (a rate other than 48,000 is logged,
+  not refused mid-transfer) and answers GET_CUR / MIN / MAX / RES with 48,000. Anything else for the audio
+  interfaces or endpoints is refused and logged on the status page as `USB REQ <type> <request> <value> <index>`
+  (the first eight), so the next surprise shows itself. `tests/test_usb_audio.py` covers both.
 

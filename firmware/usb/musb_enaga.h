@@ -12,7 +12,8 @@
  * PHY and start-up: as the original firmware (smpltrek-re HW-12, docs/04-hardware-access.md "USB device"): CFGCHIP2
  * = 0x0972 (24 MHz reference, PHY clock from AUXCLK, data polarity normal, PHY PLL on, VBUS and session comparators
  * on, no OTG override), PSC1 module 1, CTRLR reset, the PHY's clock-good bit (CFGCHIP2 bit 17), then the masks.
- * Full speed (HSEN is never set). The event is 19 (USB0_INT), on CPU interrupt 10 (usb.c). */
+ * Full speed: HSENAB in POWER is set by the core's reset and cleared in enaga_usb_phy_start, as the original firmware
+ * does by writing POWER = 0x40 (TinyUSB only ORs SOFTCONN in, so it would stay on and the unit run at high speed). The event is 19 (USB0_INT), on CPU interrupt 10 (usb.c). */
 #ifndef MUSB_ENAGA_H
 #define MUSB_ENAGA_H
 

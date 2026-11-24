@@ -48,6 +48,10 @@ int enaga_usb_phy_start(void)                  /* the original firmware's order 
     while (!(REG32(ENAGA_CFGCHIP2) & (1u << 17)))   /* USB0PHYCLKGD: within 10 ms on the unit (HW-59) */
         if (tsc_read() - start > 50u * TICKS_PER_MS) return -1;
     REG32(ENAGA_USB0_INTCLRR) = ENAGA_USB0_SOURCES;
+    REG8(ENAGA_USB0 + 0x401) = 0x00;           /* POWER: HSENAB off. It is on after reset, and the original firmware
+                                                * writes 0x40 here; left on, the core chirps and a computer runs it at
+                                                * high speed, where the full-speed descriptors mean other things
+                                                * (bInterval 1 = 125 us, bulk at 64 bytes): unit session 6 */
     REG8(ENAGA_USB0 + 0x40B) = 0x27;           /* INTRUSBE: suspend, resume, reset, disconnect (no SOF) */
     REG32(ENAGA_USB0_INTMSKSETR) = ENAGA_USB0_SOURCES;
     usb_phy_status = 0;
@@ -148,11 +152,39 @@ static int drive_range(uint32_t lba, uint32_t offset, uint32_t bytes)
            && lba < sd_sectors && bytes / 512u <= sd_sectors - lba;
 }
 
+/* A read or write the drive could not do, logged (the first four): "DRV R -3 C18 0008" is the SD driver's code, its
+ * command and MMCST0; "DRV W RANGE" a request outside the card or misaligned. */
+static void drive_failed(char what, int sd_code)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    char line[24] = "DRV ? ";
+    int n = 6, i;
+    usb_drive_errors++;
+    if (usb_drive_errors > 4) return;
+    line[4] = what;
+    if (!sd_code) {
+        for (i = 0; "RANGE"[i]; i++) line[n++] = "RANGE"[i];
+    } else {
+        u32 v = (u32)(sd_code < 0 ? -sd_code : sd_code), c = sd_io_command;
+        if (sd_code < 0) line[n++] = '-';
+        line[n++] = (char)('0' + v % 10u);
+        line[n++] = ' '; line[n++] = 'C';
+        if (c >= 10u) line[n++] = (char)('0' + c / 10u % 10u);
+        line[n++] = (char)('0' + c % 10u);
+        line[n++] = ' ';
+        for (i = 12; i >= 0; i -= 4) line[n++] = hex[sd_io_status >> i & 15];
+    }
+    line[n] = 0;
+    log_line(line);
+}
+
 int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void *buffer, uint32_t bufsize)
 {
+    int r;
     (void)lun;
-    if (!drive_range(lba, offset, bufsize) || ((u32)buffer & 3) || sd_read(buffer, lba, bufsize / 512u) != 0) {
-        usb_drive_errors++;
+    if (!drive_range(lba, offset, bufsize) || ((u32)buffer & 3)) { drive_failed('R', 0); return TUD_MSC_RET_ERROR; }
+    if ((r = sd_read(buffer, lba, bufsize / 512u)) != 0) {
+        drive_failed('R', r);
         return TUD_MSC_RET_ERROR;
     }
     usb_drive_read_sectors += bufsize / 512u;
@@ -161,9 +193,11 @@ int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void *buff
 
 int32_t tud_msc_write10_cb(uint8_t lun, uint32_t lba, uint32_t offset, uint8_t *buffer, uint32_t bufsize)
 {
+    int r;
     (void)lun;
-    if (!drive_range(lba, offset, bufsize) || ((u32)buffer & 3) || sd_write(buffer, lba, bufsize / 512u) != 0) {
-        usb_drive_errors++;
+    if (!drive_range(lba, offset, bufsize) || ((u32)buffer & 3)) { drive_failed('W', 0); return TUD_MSC_RET_ERROR; }
+    if ((r = sd_write(buffer, lba, bufsize / 512u)) != 0) {
+        drive_failed('W', r);
         return TUD_MSC_RET_ERROR;
     }
     usb_drive_written_sectors += bufsize / 512u;

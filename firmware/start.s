@@ -15,7 +15,7 @@
 ; Each maskable vector then pushes B0/B1, loads the interrupt number into B1 and branches to isr_common, which
 ; saves every register the C calling convention lets enaga_irq clobber (A0-A9, A16-A31, B0-B9, B16-B31) plus
 ; ILC/RILC (SPLOOP state), calls enaga_irq(number) with interrupts disabled, restores, and returns through
-; IRP. The one nesting is the watchdog inside the app's audio callback (irq_nest_begin/end, kernel/audio.c).
+; IRP. The one nesting is inside the app's audio callback (irq_nest_begin/end, kernel/audio.c).
 
 	.global _start
 	.global _halt

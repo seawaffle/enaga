@@ -167,6 +167,19 @@ class UsbDrive(unittest.TestCase):
             self.assertIn("CLOCK", titles)                                      # mounted again and rescanned
             self.assertEqual(card.get(self.card_now(d), "/ENAGA/APPS/CLOCK/APP.ENA"), package)
 
+    def test_large_reads_as_windows_makes_them(self):
+        # Windows reads 128 sectors (64 KiB) a command: eight of TinyUSB's 8 KiB chunks, 1,024 packets. On the unit
+        # one such read once ended after 113 sectors (a TX interrupt with the FIFO still full counted a packet as
+        # sent: dcd_musb.c process_epin_isr). Every byte must come, in order, and the command's status after it.
+        self.open_drive()
+        self.assertIs(self.ready() == (6, 0x28) and self.ready(), True)
+        image = self.emu.cpu.sd_read()
+        for lba in (0, 128, 1000, 4096):
+            status, data = self.scsi([0x28, 0, *lba.to_bytes(4, "big"), 0, 0, 128, 0], 128 * SECTOR)
+            self.assertEqual((status, len(data)), (0, 128 * SECTOR), lba)
+            self.assertEqual(data, image[lba * SECTOR:(lba + 128) * SECTOR], lba)
+        self.assertEqual(self.emu.word("usb_drive_errors"), 0)
+
     def test_ok_ends_it(self):
         self.open_drive()
         self.assertEqual(self.emu.word("menu_drive"), 1)
@@ -174,6 +187,14 @@ class UsbDrive(unittest.TestCase):
         self.assertEqual(self.emu.word("menu_drive"), 0)
         self.assertEqual(self.emu.text("menu_message", 40), "USB DRIVE ENDED")
         self.assertEqual(self.ready(), (2, 0x3A))
+        # The card mounted again from reset: every CMD55 between its CMD0 and CMD3 carries RCA 0. (A real card
+        # answers nothing else then; the emulator's answers its own RCA too, so check the commands themselves.
+        # The old RCA once went out, and the remount failed on the unit: MOUNT 3 -2 00000010.)
+        trace = [(t["command"], t["argument"]) for t in self.emu.cpu.sd_state()["trace"]]
+        reset = max(i for i, (c, _) in enumerate(trace) if c == 0)
+        addressed = next(i for i, (c, _) in enumerate(trace) if c == 3 and i > reset)
+        self.assertEqual({a for c, a in trace[reset:addressed] if c == 55}, {0})
+        self.assertNotIn("MOUNT", " ".join(self.emu.report()["log"]))
 
     def test_ok_waits_for_the_writes_to_stop(self):
         self.open_drive()

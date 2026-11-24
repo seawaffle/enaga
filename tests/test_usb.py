@@ -75,6 +75,23 @@ class Usb(unittest.TestCase):
         self.assertEqual(bytes(product["data"][2::2]).decode(), "Enaga SmplTrek")
         s = self.emu.cpu.usb_state()
         self.assertEqual((s["configuration"], s["stalls"], s["errors"], s["toggle_errors"]), (1, 0, 0, 0))
+        # Full speed, as the descriptors are written: POWER's HSENAB (on after the core's reset, in the emulator
+        # too) must be off, or a computer runs the unit at high speed (unit session 6). The emulator's host only
+        # sends full-speed traffic, but counts the bus resets that a high-speed host would have chirped on.
+        self.assertEqual(self.emu.cpu.read(0x01E00401, 1)[0] & 0x70, 0x40)   # SOFTCONN on, HSENAB and HSMODE off
+        self.assertEqual(s.get("high_speed_resets", 0), 0)
+
+    def test_a_refused_request_stalls_and_the_device_answers_on(self):
+        # A request the device does not know must stall in every shape, not leave the computer waiting: with no
+        # data stage, with data from the computer, and with data to it. (The first two once timed out: the
+        # MUSB port's stall left the SETUP's RXRDY parked, dcd_musb.c dcd_edpt_stall.)
+        self.start()
+        for setup, data in [((0x40, 0x55, 0, 0), None), ((0x41, 0x55, 0, 1), b"\1\2\3"),
+                            ((0xC0, 0x55, 0, 0), 4), ((0x21, 0x0B, 1, 0), None)]:
+            result = self.emu.cpu.usb_control(setup, data)
+            self.assertEqual(result["status"], "stall", setup)
+            product = self.emu.cpu.usb_control((0x80, 6, 0x0302, 0x0409), 64)   # and the next request works
+            self.assertEqual(product["status"], "ok", setup)
 
     def test_product_name_follows_the_device(self):
         self.start(bootloader_file="Lofi-12 XT.bin")

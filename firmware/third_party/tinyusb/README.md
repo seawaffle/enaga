@@ -22,5 +22,9 @@ Local changes, each marked `Enaga:` in the source:
   pulled) signals `DCD_EVENT_UNPLUGGED`; TinyUSB left it empty, so the device stayed "mounted" after an unplug.
 - `src/portable/mentor/musb/dcd_musb.c`: `dcd_sof_enable` sets or clears the SOF interrupt enable (TinyUSB left
   it empty); USB audio (`firmware/usb/usb_audio.c`) paces its packets on SOF.
+- `src/portable/mentor/musb/dcd_musb.c`: `dcd_edpt_stall` on EP0 services the SETUP's parked RXRDY together with
+  SendStall. The port leaves RXRDY set after a SETUP with no data stage or an OUT one (its NAK flow control), and
+  SendStall alone then never went out: a refused request of those kinds left the host's control transfer to time
+  out (`tests/test_usb.py`), which is how USB audio hung computers that set the sampling rate.
 - `src/class/midi/midi_device.c`: real-time bytes (F8-FF) written as a stream go out as CIN 0xF (single byte), as
   USB MIDI 1.0 table 4-1 has them; TinyUSB sent them as CIN 0x5 (single-byte system common).

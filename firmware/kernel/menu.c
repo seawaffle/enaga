@@ -87,6 +87,7 @@ static void drive_open(void)
     if (!sd_present()) { copy(menu_message, sizeof menu_message, "NO CARD"); return; }
     if (app_current) apps_unload();           /* stop() and its files first, as for a switch */
     files_release();
+    files_log_card();                         /* the size the computer will be given, beside USB DRIVE ON */
     usb_drive_read_sectors = usb_drive_written_sectors = 0;
     usb_drive_share(1);
     drive_host_seen = drive_stopping = 0;
@@ -99,6 +100,16 @@ static void drive_close(const char *why)
 {
     usb_drive_share(0);
     log_line(why);
+    if (enaga_musb_tx_busy) {                 /* how often a TX interrupt found the FIFO full (dcd_musb.c) */
+        char line[24] = "USB TX BUSY ";
+        int n = 12, k = 0;
+        char digits[10];
+        u32 v = enaga_musb_tx_busy;
+        do { digits[k++] = (char)('0' + v % 10u); v /= 10u; } while (v);
+        while (k) line[n++] = digits[--k];
+        line[n] = 0;
+        log_line(line);
+    }
     apps_mount();                             /* the card back, as at start-up */
     menu_open(why);                           /* rescanned: apps copied over are listed */
 }
@@ -121,7 +132,7 @@ static void choose(void)
 {
     if (menu_cursor == LINE_SETTINGS) { menu_settings = 1; settings_open(); return; }
     if (menu_cursor == LINE_DRIVE) { drive_open(); return; }
-    if (menu_cursor == LINE_STATUS) { menu_status = 1; return; }
+    if (menu_cursor == LINE_STATUS) { menu_status = 1; status_scroll = 0; return; }
     if (app_current && same(menu_names[menu_cursor], app_folder)) { menu_close(); return; }
     if (apps_start(menu_names[menu_cursor]) == 0) { menu_active = menu_status = 0; return; }
     copy(menu_message, sizeof menu_message, app_status);   /* why it did not start; the menu stays */
@@ -137,10 +148,16 @@ void menu_event(const enaga_event_t *e)
         }
         return;
     }
-    if (e->type == ENAGA_EVENT_ENCODER && e->id == 4) { if (!menu_status) move(e->value); return; }
+    if (e->type == ENAGA_EVENT_ENCODER && e->id == 4) {
+        if (!menu_status) move(e->value);
+        else status_scroll -= e->value;           /* anticlockwise: further back in the log */
+        return;
+    }
     if (e->type != ENAGA_EVENT_KEY || !e->value) return;
     if (menu_status) {
         if (e->id == ENAGA_KEY_OK || e->id == ENAGA_KEY_CLR) menu_status = 0;
+        if (e->id == ENAGA_KEY_UP) status_scroll++;
+        if (e->id == ENAGA_KEY_DOWN) status_scroll--;
         return;
     }
     switch (e->id) {

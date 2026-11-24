@@ -86,6 +86,7 @@ extern float usb_audio_out_ratio;
 void usb_drive_share(int on);                 /* USB DRIVE: the SD card shown to the computer, or not */
 int  usb_drive_ejected(void);                 /* the computer ejected it */
 extern u32 usb_drive_read_sectors, usb_drive_written_sectors, usb_drive_errors;
+extern volatile uint32_t enaga_musb_tx_busy;   /* dcd_musb.c: TX interrupts that found the FIFO still full */
 #define IRQ_USB0 10                           /* CPU interrupt 10 <- event 19, USB0_INT */                       /* main loop: parse MIDI input; returns the bytes taken */
 int  midi_send(u32 ports, const u8 *data, u32 bytes);   /* an app's midi_send (enaga_host_t) */
 extern int midi_channel_setting, midi_thru;   /* MIDI CH 0-15, MIDI THRU */
@@ -120,6 +121,8 @@ void menu_open(const char *message);          /* message: a line under the title
 void menu_close(void);                        /* back to the running app (none: stays) */
 void menu_event(const enaga_event_t *event);
 void menu_draw(void);
+extern int status_scroll;                      /* STATUS: log lines back from the newest (UP / DOWN, VALUE) */
+void files_log_card(void);                     /* the card's CSD and size, to the log (USB DRIVE logs them) */
 /* The Enaga screens' frame, as apps' <enaga/ui.hpp> draws it: a title with a rule under it, key hints on the
  * bottom line (row 0) or the rows above it, a lit bar behind a list's current line. */
 void ui_title(const char *title);
@@ -190,7 +193,7 @@ void leds_forget(void);                       /* the panel's state is unknown: t
 void leds_off(void);
 
 /* log.c: Enaga's log, also read by the emulator tests */
-#define LOG_LINES 16
+#define LOG_LINES 32
 #define LOG_WIDTH 40
 extern char log_lines[LOG_LINES][LOG_WIDTH];
 extern u32 log_count;                         /* lines ever logged; the newest is log_lines[(log_count-1) % LOG_LINES] */

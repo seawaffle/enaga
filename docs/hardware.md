@@ -422,7 +422,9 @@ full-speed USB MIDI, audio and mass storage device with TinyUSB (`firmware/third
   3. CTRLR reset.
   4. Wait for USB0PHYCLKGD (CFGCHIP2 bit 17; within 10 ms on the unit, HW-59).
   5. Wrapper masks 0x01FF1E1F.
-  6. SOFTCONN.
+  6. POWER.HSENAB off (it is on after the reset; the original firmware writes POWER = 0x40). Left on, the core
+     chirps and a computer runs it at high speed, where the full-speed descriptors are wrong (unit session 6).
+  7. SOFTCONN.
 - **Interrupts:** event 19 on CPU interrupt 10. Status comes from the wrapper with CTRLR.UINT = 0: INTMASKEDR,
   cleared through INTCLRR, then a write of 0 to EOIR. The core's own INTRTX / INTRRX / INTRUSB must not be read in
   this mode, since a read clears them (SPRUH79C 33.2.8.13.1, 33.4.9, 33.4.23-33.4.27). TinyUSB is patched to
@@ -646,6 +648,8 @@ unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it mut
     - **Both at once** for five minutes: no clicks or dropouts either way. Note the computer and its sample rate
       setting (48 kHz).
     - USB MIDI and USB DRIVE still work alongside. Unplug while playing: nothing crashes; plug back in and it plays.
+    - **Heavy app:** record while the synth plays many voices (or CHECK's LOAD page at 64 voices): still no clicks.
+      Each recording's end logs `USB AUDIO IN L<underruns> U<ring gaps>`, both 0 when it was clean.
 22. **The UI toolkit and the newer screens (E5 steps 5-8).** Copy `widgets/ENAGA/APPS/WIDGETS` into the card's
     `/ENAGA/APPS`, with a few `.WAV` files in a `/SAMPLES` folder.
     - **Menu and SETTINGS:** a thin rule under each title, the current line on a lit bar (SETTINGS too, which used
