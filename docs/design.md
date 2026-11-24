@@ -542,6 +542,21 @@ Its card is staged by `tools/unit_card.py` (the dry run, steps 1-10, passes 141/
       read-modify-write committed a packet whenever both halves were full).
     - For the emulator (via the user): with double packet buffering, a TX endpoint interrupts when TXPKTRDY
       clears (at the load, if the other half is free), not again when the packet is sent.
+  - Round 4 (build `9a4d6133`, 2026-11-23): **USB DRIVE works**: a 102 MB file copied to it and back is identical,
+    the drive mounts, ejects and keeps the apps. Writes ran at about 155 KiB/s (11 minutes), about the unit's
+    single-sector write speed, though the drive writes 16 sectors a command; the limit is not yet known (see the
+    next item). **USB audio works** in IN modes 1-3 (`L0 U0`) and fails in mode 0 (`U4006`: the ring emptied twice
+    as fast, so with two packets pending the core sent more than one a frame, which is the babble). Playback no
+    longer hangs the player; the meters follow it. Now fixed at one packet a frame, double-buffered, with
+    ISOUPDATE; the selector is gone, and the end of a recording logs `USB AUDIO IN L<underruns> U<ring gaps>`.
+    One packet a frame needs the SOF handled within a frame, which an app callback longer than 1 ms prevented
+    (`test_a_heavy_callback_does_not_cost_packets`: a quarter of the packets empty, samples lost), so the USB
+    interrupt now nests in the app's callback, as the watchdog, UARTs and SYNC IN already did.
+- USB DRIVE speed: about 155 KiB/s writing on the unit (round 4). With the SD card's multi-block writes at about
+  2,000 KiB/s, the time goes on USB: about 380 us a 64-byte packet, single-buffered (a NAK while the CPU empties
+  the FIFO; how soon the computer retries is the computer's). To measure before changing anything: the read
+  speed, and whether double buffering the OUT endpoint helps (the TRM is not clear that a second packet waiting
+  raises its own interrupt, the trap the IN side fell into).
   - Earlier plan: the user started a Claude session on the Windows PC with a read-only brief: raw sectors 0-63 and
     the partition start over USB vs a card reader, a USBPcap capture of drive mount / playback / recording, and
     scripted play / record tests. Debug from its evidence. Also ask whether STATUS showed a crash row.
