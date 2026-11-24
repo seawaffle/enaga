@@ -472,13 +472,17 @@ built from the released SDK, and USB MIDI passed; still to check there are DIN M
 of the input routes, which need equipment. The exit test passed as a simulation (a fresh agent with only the
 downloads); a person doing it moves to E6. USB uses test IDs until pid.codes grants one.
 
-E5 ("E5 plan"): steps 1-4 (battery, SYNC polarity, USB DRIVE, USB audio) are done on the emulator and merged
-(2026-11-22); the exit, step 9, is a unit session over checklist steps 19-21, with 16, 17 and 7 still owed from E4.
-Its card is staged by `tools/unit_card.py` (the dry run, steps 1-10, passes 141/141).
+E5 ("E5 plan"): steps 1-8 are merged (battery, SYNC polarity, USB DRIVE, USB audio, the UI toolkit's second and
+third parts, an outside developer's list, the synth and menu on the toolkit) and released as 0.3.0 (2026-11-23).
+On the unit (session 6, Windows) USB DRIVE and USB audio work after four rounds of fixes: full speed, the SD
+remount, single-buffered bulk endpoints, one isochronous IN packet a frame. Still owed for the exit: a recording
+under a heavy app, checklist steps 7, 16, 17, 19 and 22, and the drive's write speed (about 155 KiB/s).
+Its card is staged by `tools/unit_card.py`.
 
 ## Open items
 
-- **Unit session 6 (2026-11-22, E5 exit, in progress; Windows host): USB DRIVE and USB audio fail on the unit.**
+- **Unit session 6 (2026-11-22/23, E5 exit, in progress; Windows host): USB DRIVE and USB audio failed on the unit;
+  both work since round 4 (below).**
   Build under test: `a24ba51d` (branch `usb-audio-requests`, c9df676), card a 4 GB Toshiba microSDHC in a PNY
   adapter.
   - USB DRIVE: Windows lists the drive but asks to format it, with endless errors until the page is ended. Ending
@@ -2013,3 +2017,9 @@ On the emulator, the request computers send as a stream starts, SET_CUR of the e
   interfaces or endpoints is refused and logged on the status page as `USB REQ <type> <request> <value> <index>`
   (the first eight), so the next surprise shows itself. `tests/test_usb_audio.py` covers both.
 
+### Version 0.3.0
+
+`VERSION` in `firmware/build.py`, `ENAGA_VERSION`, the USB device release (`bcdDevice` 0x0030), the README and the
+getting-started version go to 0.3.0 for E5's work so far: battery and power, SYNC polarity, USB DRIVE, USB audio,
+the UI toolkit's additions, runtime 64-bit division and `<enaga/string.h>`, and the USB fixes from unit session 6.
+ABI_VERSION stays 0: apps built for 0.2.0 must be rebuilt.

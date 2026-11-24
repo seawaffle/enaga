@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Package the tic6x toolchain (tools/tic6x, from tools/build_tic6x_*.sh) for a release, with its sources.
 
-    python3 -B tools/package_toolchain.py v0.2.0          # -> build/dist/enaga-toolchain-v0.2.0-*.tar.xz
+    python3 -B tools/package_toolchain.py v0.3.0          # -> build/dist/enaga-toolchain-v0.3.0-*.tar.xz
 
 Writes two archives:
   enaga-toolchain-<tag>-linux-x86_64.tar.xz   tic6x/: what building an app needs. Host programs stripped, target

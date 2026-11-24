@@ -19,11 +19,11 @@ In the folder you downloaded them to, unpack the SDK, then the compiler into the
 build tool looks for it. The commands from here on run in that folder:
 
 ```sh
-unzip enaga-sdk-v0.2.0.zip
-tar -xf enaga-toolchain-v0.2.0-linux-x86_64.tar.xz -C enaga-sdk-v0.2.0/tools
+unzip enaga-sdk-v0.3.0.zip
+tar -xf enaga-toolchain-v0.3.0-linux-x86_64.tar.xz -C enaga-sdk-v0.3.0/tools
 ```
 
-You should now have `enaga-sdk-v0.2.0/tools/tic6x/bin/tic6x-elf-g++`. The SDK and the toolchain are the same
+You should now have `enaga-sdk-v0.3.0/tools/tic6x/bin/tic6x-elf-g++`. The SDK and the toolchain are the same
 version as the firmware, and an app needs firmware of the same version: the interface is provisional until 1.0.
 
 The compiler's source is published next to it (`enaga-toolchain-<version>-source.tar`, with how it was built).
@@ -37,7 +37,7 @@ Copy the template to a folder of your own, anywhere. Its name becomes the app's 
 upper case (`my-synth` shows as MY-SYNTH), unless you give the build another (step 3):
 
 ```sh
-cp -r enaga-sdk-v0.2.0/template ~/my-synth
+cp -r enaga-sdk-v0.3.0/template ~/my-synth
 ```
 
 `app.cpp` is a small synth with one voice: the pads and MIDI notes play it, and knobs A-D set its wave, attack,
@@ -47,7 +47,7 @@ release and level. Every `.cpp` and `.c` file in the folder is part of the app. 
 ## 3. Build it
 
 ```sh
-python3 enaga-sdk-v0.2.0/tools/build_app.py ~/my-synth
+python3 enaga-sdk-v0.3.0/tools/build_app.py ~/my-synth
 ```
 
 This writes `~/my-synth/build/APP.ENA`, the package you put on the card. Warnings stop the build

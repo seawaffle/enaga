@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Make the Enaga SDK: what building an app needs, without the rest of the repository.
 
-    python3 -B tools/make_sdk.py v0.2.0                  # -> build/dist/enaga-sdk-v0.2.0.zip
+    python3 -B tools/make_sdk.py v0.3.0                  # -> build/dist/enaga-sdk-v0.3.0.zip
 
 The zip holds enaga-sdk-<tag>/ with the headers (include/), the app runtime and the DSP library's sources
 (runtime/), the build tool (tools/build_app.py, tools/paths.py), the app template (template/), the examples, the

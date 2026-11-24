@@ -22,7 +22,7 @@ ENAGA = paths.ROOT
 GCC, AS, LD, OBJCOPY, OBJDUMP, NM = (paths.tool(n) for n in ("gcc", "as", "ld", "objcopy", "objdump", "nm"))
 OUT = paths.BUILD / "firmware"
 
-VERSION = (0, 2, 0)
+VERSION = (0, 3, 0)
 LOAD = 0xC0000000
 # Every GCC frame must fit in the 16 KiB that Enaga's interrupt entry leaves below the interrupted stack pointer
 # (firmware/start.s, "Interrupt stack gap"): GCC can release a frame a few cycles before its last reads of it.
