@@ -217,6 +217,8 @@ int32_t tud_msc_scsi_cb(uint8_t lun, uint8_t const scsi_cmd[16], void *buffer, u
 void usb_init(void)
 {
     const tusb_rhport_init_t init = { .role = TUSB_ROLE_DEVICE, .speed = TUSB_SPEED_FULL };
+    enaga_usb_phy_start();                     /* first: TinyUSB's dcd_init touches the core before its PHY hook,
+                                                * and the core must be powered on (PSC1) before any access */
     tusb_init(0, &init);
 }
 

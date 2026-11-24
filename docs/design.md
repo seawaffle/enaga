@@ -2073,3 +2073,44 @@ buffers in DDR, L2 RAM, L1D RAM and shared RAM across eight cache splits, firmwa
 So Enaga keeps L2 and L1D all cache, and apps get no fast-memory API. The original firmware also makes all of L2
 cache (it keeps 16 KiB of L1D as RAM for its audio DMA buffers). Not measured: an app whose code and data together
 overflow 256 KiB; if one turns up, the branch's MEMORY page can be rerun.
+
+### Register writes diffed against the original firmware (2026-11-24)
+
+The smpltrek-re side captured the original firmware's register accesses in the emulator, phase by phase (its
+`docs/stock-register-writes/`: USB0, the codec and I2C0, McASP0 and EDMA, MMC/SD and the SD commands), and gave the
+emulator a capture (`capture_start` / `capture_take`, `codec_log`, `sd_log`). `tools/register_capture.py` runs
+Enaga through the same phases with the same ranges and raw format (the input app: boot, USB attach, bus reset,
+enumeration, MIDI out, the audio interfaces on, streaming and off, suspend, detach, each input route, power-off;
+the battery app: USB DRIVE opened, read, written and ejected, with the remount). The emulator's own
+`stock_register_tables.py --raw` lays it out like the stock tables. What the diff shows:
+- **Fixed: USB0 touched before it was powered.** TinyUSB's `dcd_init` reads and writes INTRUSBE and clears the
+  wrapper's interrupts before its PHY hook, which is where Enaga enabled PSC1 module 1. Accessing a module that is
+  still off is undefined on the chip (it worked on the unit, and the core's reset just after undid the writes; the
+  original firmware never does it). `usb_init` now starts the PHY before `tusb_init`, and the hook skips a second
+  start. `test_usb.test_the_core_is_powered_before_it_is_touched` fails on the old order.
+- **The same as the original:** the PHY bring-up (CFGCHIP2 0x0972, PSC, CTRLR reset, the clock-good wait, POWER 0
+  then 0x40), the codec's whole start-up (49 writes against Enaga's 42: the same values in the same order; the
+  extra seven are the original's first route), every McASP0 register, the SD clock (CLKRT 3) and the card's
+  start-up commands with CMD55 at RCA 0 until CMD3. The input routes put the same input into the same converter
+  as the original's for every source (byte for byte the original writes 21 and 24 as 0xFC when it changes route,
+  Enaga keeps the 0xF8 both write at start-up), with the HIGH levels at +10 and +21 dB.
+- **Different by design, kept:**
+  - The audio DMA buffers are in DDR (the original's are in L1D RAM), with 128-frame blocks against 256, and a
+    transfer-complete interrupt.
+  - The SD driver moves data by CPU with multi-block commands; the original uses EDMA, and also sends CMD6 (high
+    speed) and ACMD51, at the same 23 MHz clock.
+  - USB: the audio IN FIFO is double-buffered and loaded for the next frame (ISOUPDATE), where the original's is
+    single-buffered without ISOUPDATE. The original's way of knowing a packet went (TX interrupt, never
+    FIFONOTEMPTY) is safe only single-buffered; Enaga's audio class serves IN on SOF and does not depend on it.
+    MIDI and the drive's bulk endpoints are single-buffered, 64 bytes, as the original's.
+  - USB: SOF interrupts only while a stream is open (the original keeps them on); TinyUSB masks and unmasks the
+    wrapper's interrupt around its critical sections (about 2,500 pairs over the run), which the original never
+    does; the endpoint interrupt enables follow the open endpoints (the original enables all).
+- **The original's card-reader mode runs at high speed:** it resets USB and comes back with HSENAB left on, a
+  mass-storage-only configuration and CPPI DMA. Enaga's drive is a function of the full-speed composite device. At
+  about 150 KiB/s the drive is far from full speed's limit, so this is not yet the bottleneck.
+- **Emulator reset values:** 13 registers the original writes differ from SPRUH79C in the model (the USB interrupt
+  enables, McASP clock controls, ICSAR, CFGCHIP2, SUSPSRC, MMCST1). Enaga writes each whole (the endpoint
+  interrupt enables at the first bus reset, before any endpoint can interrupt) or only reads status, so none
+  affects it.
+
