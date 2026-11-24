@@ -137,7 +137,7 @@ DDR is 128 MiB at `0xC0000000`-`0xC7FFFFFF` (hardware.md "Memory").
 | Enaga code, data, stacks, DMA rings | 4 MiB at `0xC0000000`; 0.1.0 uses about 190 KB plus a 256 KB stack | Enaga |
 | App image (code, data, bss) | from `ENAGA_APP_BASE` = `0xC0400000`, as large as the app | app |
 | App heap | from the end of the image, rounded up to 4 KiB, to the end of DDR (`ENAGA_APP_LIMIT` = `0xC8000000`) | app (`new`, `malloc`, samples) |
-| L1P, L1D, L2 | all cache since E1 (Enaga sets it at start-up); part of L2 as RAM for audio-critical code and buffers stays **open** | to be measured on the unit |
+| L1P, L1D, L2 | all cache since E1 (Enaga sets it at start-up); L2 as RAM for apps measured and set aside (log, 2026-11-24) | measured on the unit |
 
 So an app has the whole 124 MiB above Enaga for its image plus heap. For comparison, the original firmware's
 image and static buffers take about 21 MiB and its default heap is 64 MiB. App assets live on the card in the
@@ -425,6 +425,28 @@ E6, 1.0: a review of the whole API before freezing it (names, the C interface, w
 exit test of the SDK, the pid.codes USB IDs, the Lofi-12 XT and CyDrums run by someone with one, and the public
 release.
 
+## 1.0 addition: input gain (draft, 2026-11-24)
+
+Something the hardware has that apps cannot reach yet: a draft for the API review, not built.
+
+**Input gain.** The codec's input amplifiers (registers 15 and 16, the left and right ADC PGAs) go from 0 to 59.5
+dB in 0.5 dB steps. Enaga uses 0 except HIZ HIGH (+10 dB) and DYNAMIC_MIC HIGH (+21 dB), so an app has three levels
+per source and nothing between them. The draft:
+- `int enaga::system::input_gain(float db)`: extra gain on top of what the source and level set, 0 to 59.5 dB,
+  rounded to 0.5 dB, the total capped at 59.5. Returns 0, -1 out of range, -2 if the codec did not answer.
+  `float enaga::system::input_gain()` reads it back. C: `input_gain(half_db)`, an integer 0-119, and its getter.
+- **No break in the sound:** unlike `input()`, which silences `in` for about 10 ms, the gain changes live. The
+  codec steps its amplifier 0.5 dB a sample (soft-stepping: bits 1-0 of registers 19 and 22, 00 in every route,
+  per the data sheet, SLAS509; to be heard on the unit), so a knob can drive it. Main context: one I2C write each side, well under a millisecond.
+- The gain stays through `input()` changes of source or level and goes back to 0 when the app stops, as the
+  input does. It has no effect on `ENAGA_INPUT_USB`; for that an app scales `in` itself.
+- One value for both channels. A pair (`input_gain(left, right)`) is an open question: the stereo line input is
+  the only source where the two sides could want different gains.
+- Testable on the emulator, which models the codec's registers. On the unit: a quiet source with the gain swept,
+  listening for steps or clicks.
+- Not in the draft: the codec's automatic gain control (registers 26-31), for recording at a steady level. It could
+  follow as `input_agc(target_db)` if an app asks.
+
 ## Phases
 
 | Phase | Content | Exit |
@@ -481,6 +503,7 @@ Its card is staged by `tools/unit_card.py`.
 
 ## Open items
 
+- Input gain ("1.0 addition: input gain"): one value or a left/right pair; build before or at the API review.
 - **Unit session 6 (2026-11-22/23, E5 exit, in progress; Windows host): USB DRIVE and USB audio failed on the unit;
   both work since round 4 (below).**
   Build under test: `a24ba51d` (branch `usb-audio-requests`, c9df676), card a 4 GB Toshiba microSDHC in a PNY
@@ -601,7 +624,6 @@ Its card is staged by `tools/unit_card.py`.
   smpltrek-re session M1, well inside the 6 ms sampling and two-sample release).
 - LED map: 53 addresses known only from the code, 24 seen on another channel of their LED (docs/hardware.md
   "LED map"; smpltrek-re session L1); the level-to-brightness steps. Left/right on the line outputs (headphones confirmed in M1, the inputs in session 1).
-- The L2 split between cache and RAM.
 - The SDK should give apps unaligned-safe load/store helpers for packed formats (misaligned LDW/STW/LDDW round
   the address down without a fault) and say that a null read returns garbage rather than trapping (smpltrek-re
   session M1; docs/hardware.md "Processor and memory"). A debug-build null check is worth considering.
@@ -2035,3 +2057,19 @@ missing local file. `make()` checks the local files before it starts and raises 
 the tools report that with a hint to use a larger `--card-mib`. A `--file` path that is an app's `APP.ENA` (FAT
 names ignore case) is an error. `tests/test_card_files.py` covers the panel's card, the widgets example browsing to
 a long name on an `Emulation` card, and the errors.
+
+### Fast memory measured and set aside (2026-11-24)
+
+Part of L2 (or L1D, or the 128 KiB of shared RAM) as RAM that apps could allocate from was drafted for 1.0 and
+measured on the unit first, by a MEMORY page added to CHECK on the branch `fast-memory` (not merged; it holds the
+page, the draft and the full table). Three loops (a delay line, random interpolated reads, one pass) timed on
+buffers in DDR, L2 RAM, L1D RAM and shared RAM across eight cache splits, firmware 0.3.0:
+- L2 RAM was 1-4% faster than the same 64 KiB buffer in DDR through the cache. L1D reaches L2 RAM and L2 cache the
+  same way, so L2 RAM only saves the misses of a buffer the cache would drop.
+- L1D RAM gained nothing; halving L1D cost a 64 KiB delay line 7%.
+- Shared RAM was DDR's speed cached and 3-8 times slower uncached.
+- A smaller cache cost random reads on a 1 MiB buffer 13-21% and the LOAD page's voices up to 7%.
+
+So Enaga keeps L2 and L1D all cache, and apps get no fast-memory API. The original firmware also makes all of L2
+cache (it keeps 16 KiB of L1D as RAM for its audio DMA buffers). Not measured: an app whose code and data together
+overflow 256 KiB; if one turns up, the branch's MEMORY page can be rerun.
