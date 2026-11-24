@@ -8,8 +8,8 @@
  * interrupt 6 <- event 46 (UART1_INT, the panel MCU's bytes), CPU interrupt 7 <- event 38 (UART0_INT, MIDI DIN) and
  * CPU interrupt 9 <- event 72 (GPIO_B7INT, SYNC IN) and CPU interrupt 10 <- event 19 (USB0_INT) are not.
  *
- * Handlers run with interrupts off, except the app's audio callback, during which the watchdog, UART1, UART0 and
- * the SYNC IN edge may nest (audio.c), so irq_active counts the handlers running. */
+ * Handlers run with interrupts off, except the app's audio callback, during which the watchdog, UART1, UART0,
+ * the SYNC IN edge and USB0 may nest (audio.c), so irq_active counts the handlers running. */
 #define INTC     0x01800000u
 #define INTMUX1  (INTC + 0x104)
 #define INTMUX2  (INTC + 0x108)

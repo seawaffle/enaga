@@ -218,8 +218,6 @@ static void status_page(u32 ms)
         gfx_dec(24, 39, (int)(usb_audio_out_packets % 100000u), usb_audio_out_streaming() ? 15 : 8);
         gfx_text(66, 39, "I", 10);
         gfx_dec(72, 39, (int)(usb_audio_in_packets % 100000u), usb_audio_in_streaming() ? 15 : 8);
-        gfx_text(108, 39, "M", 10);
-        gfx_dec(114, 39, usb_audio_in_mode, 15);
     }
     gfx_text(0, 48, "AUDIO", 10);
     gfx_dec(36, 48, audio_status, 15);

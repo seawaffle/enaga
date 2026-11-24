@@ -158,12 +158,6 @@ void menu_event(const enaga_event_t *e)
         if (e->id == ENAGA_KEY_OK || e->id == ENAGA_KEY_CLR) menu_status = 0;
         if (e->id == ENAGA_KEY_UP) status_scroll++;
         if (e->id == ENAGA_KEY_DOWN) status_scroll--;
-        if (e->id == ENAGA_KEY_LEFT || e->id == ENAGA_KEY_RIGHT) {   /* USB audio IN's feeding, for the unit tests */
-            char line[] = "USB IN MODE 0";
-            usb_audio_in_mode = (usb_audio_in_mode + (e->id == ENAGA_KEY_RIGHT ? 1 : 3)) & 3;
-            line[12] = (char)('0' + usb_audio_in_mode);
-            log_line(line);
-        }
         return;
     }
     switch (e->id) {
