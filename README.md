@@ -180,17 +180,18 @@ panel:
 ```sh
 python3 -B tools/panel.py examples/synth              # then open http://127.0.0.1:8766, press Enable audio
 python3 -B tools/panel.py examples/tone -- --port 8770 # options after -- go to the panel (stock_ui.py --help)
+python3 -B tools/panel.py examples/synth --file "/SAMPLES/Kick long name.wav=kick.wav"   # more files on the card
 ```
 
-It builds the firmware and the apps, puts them on a fresh card image (`build/panel/card.img`) and starts the panel
-on Enaga's update file; Ctrl-C stops it. The emulator runs the synth at about 0.8x real time on a current PC, so
+It builds the firmware and the apps, puts them on a fresh 64 MiB card image (`build/panel/card.img`; `--card-mib`
+for another size) with any `--file` files, long names included, and starts the panel on Enaga's update file; Ctrl-C stops it. The emulator runs the synth at about 0.8x real time on a current PC, so
 heavy patches break up.
 
 Without `ENAGA_EMULATOR` the emulator tests are skipped; `tests/test_dsp.py` (the DSP library on the host) needs
 only `g++`, and `test_sysimage.py` and `test_api_docs.py` need nothing. `tools/emulate.py` writes the last screen to
 `build/emulate/frame.png`, the captured output to `build/emulate/audio.wav` (32-bit samples, as the codec gets
 them), and a JSON report. Its other options (`--help`): `--card-mib` for a larger card, `--file` to put files on it
-(8.3 names), `--turn` for the knobs, `--power-off` (the app's `stop()` runs, as when the unit is switched off) and
+(long names too), `--turn` for the knobs, `--power-off` (the app's `stop()` runs, as when the unit is switched off) and
 `--get` to save files from the card afterwards. In Python, `Emulation` in the same file does each step by step.
 
 ## Layout
@@ -208,7 +209,7 @@ them), and a JSON report. Its other options (`--help`): `--card-mib` for a large
 | `loader/` | The package loader (freestanding C, used by the firmware and the tests) |
 | `firmware/` | Enaga itself: `hal/` drivers, `kernel/` (interrupts, audio engine, app host, menu, settings, device detection, exceptions, watchdog, main loop), `start.s`, `link.ld`, `build.py` |
 | `examples/` | `synth` (the virtual analogue synthesizer); `widgets` (the UI toolkit); `tone` (STEP 1-8 play 750 Hz x step); `cxxcheck` (exercises the C++ runtime) |
-| `tests/` | `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board; `test_check.py` and `unit/check`: the CHECK app for sessions on a unit; `test_synth.py`: the synth example; `test_files.py` and `apps/files`: the file service; `test_streams.py` and `apps/streams`: streams and WAV; `test_menu.py` and `apps/menu`: the Enaga menu, boot policy, app switching and settings; `test_dsp.py` and `dsp/`: the DSP library on the host; `test_ui.py` and `ui/`: the UI toolkit on the host, `test_widgets.py`: on the firmware; `test_midi.py`, `test_clock.py`, `test_usb.py`, `test_usb_drive.py`, `test_usb_audio.py`, `test_input.py`: MIDI, the clock and SYNC, USB MIDI, USB DRIVE, USB audio, input selection; `test_battery.py`: the battery; `test_sysimage.py`: the update files for each device; `test_sdk.py`: the SDK and the packaged toolchain, built from outside the repository; `test_bytes.py`: the byte helpers; `test_api_docs.py`: every public name is in docs/api.md |
+| `tests/` | `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board; `test_check.py` and `unit/check`: the CHECK app for sessions on a unit; `test_synth.py`: the synth example; `test_files.py` and `apps/files`: the file service; `test_streams.py` and `apps/streams`: streams and WAV; `test_menu.py` and `apps/menu`: the Enaga menu, boot policy, app switching and settings; `test_dsp.py` and `dsp/`: the DSP library on the host; `test_ui.py` and `ui/`: the UI toolkit on the host, `test_widgets.py`: on the firmware; `test_midi.py`, `test_clock.py`, `test_usb.py`, `test_usb_drive.py`, `test_usb_audio.py`, `test_input.py`: MIDI, the clock and SYNC, USB MIDI, USB DRIVE, USB audio, input selection; `test_battery.py`: the battery; `test_sysimage.py`: the update files for each device; `test_card_files.py`: extra files, long names included, on the emulator tools' cards; `test_sdk.py`: the SDK and the packaged toolchain, built from outside the repository; `test_bytes.py`: the byte helpers; `test_api_docs.py`: every public name is in docs/api.md |
 | `tools/` | `build_app.py`, `emulate.py`, `panel.py` (apps live in the emulator's web panel), `card.py` (FAT and exFAT card images through Enaga's own FatFs), `unit_card.py` and `unit_dry_run.py` (files for a session on a unit, and the session walked on the emulator), `sysimage.py` (the update-file format), `paths.py`, toolchain build scripts; `make_sdk.py` and `package_toolchain.py` (release archives) |
 | `docs/` | `getting-started.md` (an app from the SDK), `api.md` (the app interface reference), `design.md` (decisions, architecture, plan, log), `hardware.md` (the hardware notes) |
 
