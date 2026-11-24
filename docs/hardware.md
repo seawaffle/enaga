@@ -648,6 +648,10 @@ unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it mut
     - **Both at once** for five minutes: no clicks or dropouts either way. Note the computer and its sample rate
       setting (48 kHz).
     - USB MIDI and USB DRIVE still work alongside. Unplug while playing: nothing crashes; plug back in and it plays.
+    - **If recording fails** (unit session 6: babble on most IN packets at full speed): STATUS, LEFT / RIGHT choose
+      how the IN endpoint is fed, `M` 0-3 on the UA line, taken when the next recording starts. Record ten seconds
+      in each mode; each recording's end logs `IN M<mode> L<underruns> U<ring gaps>`. Note which modes record
+      cleanly.
 22. **The UI toolkit and the newer screens (E5 steps 5-8).** Copy `widgets/ENAGA/APPS/WIDGETS` into the card's
     `/ENAGA/APPS`, with a few `.WAV` files in a `/SAMPLES` folder.
     - **Menu and SETTINGS:** a thin rule under each title, the current line on a lit bar (SETTINGS too, which used

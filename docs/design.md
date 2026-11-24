@@ -525,6 +525,23 @@ Its card is staged by `tools/unit_card.py` (the dry run, steps 1-10, passes 141/
     five `test_usb_drive` tests fail; with them, all pass. `test_usb` also checks HSMODE and `high_speed_resets`.
     Not asked for yet: high-speed rules in the host (512-byte bulk, bInterval in microframes, device qualifier),
     needed only if Enaga moves to high speed on purpose.
+  - Round 3 (`FINDINGS3.md`, build `ea4d223f`, 2026-11-23): the unit enumerates at Full-Speed, playback works at
+    the USB level (EP 0x03 OUT, all URBs succeed), apps survive USB DRIVE. Still failing:
+    - **USB DRIVE never mounts**: the drive sends INQUIRY's 36 bytes and then never its CSW (from plug-in; earlier,
+      a CSW then no sense data). Cause, from SPRUH79C 33.2.7.1.2.1.2: with double packet buffering TXPKTRDY clears
+      and the interrupt comes when a packet is *loaded*; when it is later sent there is no interrupt. TinyUSB's
+      MUSB port waits for FIFONOTEMPTY to clear before completing an IN transfer, so the completion never came
+      (at high speed the packet had usually gone before the ISR looked). Bulk endpoints are now single-buffered.
+      The emulator raises an interrupt as each packet leaves, so it could not show this (relay below).
+    - **Recording babbles**: 97.7 % of EP 0x83 IN packets end in BABBLE_DETECTED, two good packets every 134
+      frames, though the samples in the good ones are right and continuous (the packets carry 48 frames each).
+      Not explained. Diagnostics: STATUS LEFT / RIGHT choose `usb_audio_in_mode` (0 double-buffered with both halves
+      loaded and ISOUPDATE, as before; 1 one packet a frame with ISOUPDATE; 2 the same without; 3 single-buffered
+      without), shown as `M` on the UA line and taken when a stream starts; the stream's end logs
+      `IN M<mode> L<underruns> U<ring gaps>`. UNDERRUN is now cleared without writing TXPKTRDY back (the
+      read-modify-write committed a packet whenever both halves were full).
+    - For the emulator (via the user): with double packet buffering, a TX endpoint interrupts when TXPKTRDY
+      clears (at the load, if the other half is free), not again when the packet is sent.
   - Earlier plan: the user started a Claude session on the Windows PC with a read-only brief: raw sectors 0-63 and
     the partition start over USB vs a card reader, a USBPcap capture of drive mount / playback / recording, and
     scripted play / record tests. Debug from its evidence. Also ask whether STATUS showed a crash row.
