@@ -4,7 +4,8 @@
     ENAGA_EMULATOR=/path/to/emulator python3 -B tools/emulate.py examples/tone --key 32@300000000
 
 Builds the firmware (firmware/build.py) and the app (tools/build_app.py), writes the package to
-/ENAGA/APPS/<NAME>/APP.ENA on a FAT card image (4 MiB unless --card-mib says otherwise, with --file adding more),
+/ENAGA/APPS/<NAME>/APP.ENA on a FAT card image (4 MiB unless --card-mib says otherwise; --file adds more files,
+long names included, as /SAMPLES/Kick long name.wav=kick.wav; the card is built by tools/card.py),
 boots the firmware as the bootloader would leave it, plays the scripted keys, knob turns and power-off, and
 reports Enaga's state, log, audio statistics and the captured output. The last frame (frame.png) and audio
 (audio.wav: stereo, 48 kHz, 32-bit samples, the codec's words as captured) are saved under build/emulate/, and
@@ -52,6 +53,12 @@ def turn(emu, encoder, detents, phase_ms=3):
             emu.run(phase_ms * MS)
 
 
+def same_card_path(path, card_paths):
+    """Whether `path` names one of `card_paths` on the card (FAT names ignore case)."""
+    key = "/" + path.lstrip("/").casefold()
+    return any("/" + p.lstrip("/").casefold() == key for p in card_paths)
+
+
 class Emulation:
     """Enaga firmware + optional app card on the C++ emulator core."""
 
@@ -62,7 +69,7 @@ class Emulation:
     def __init__(self, app_dir=None, name=None, card_files=None, bootloader_file="SmplTrek.bin", card_mib=4):
         paths.use_emulator()
         from cpu import CPU
-        from media import build_card
+        import card
         self.firmware = firmware_build.build()
         self.names = self.firmware["symbols"]
         files = dict(card_files or {})
@@ -73,10 +80,13 @@ class Emulation:
             local = WORK / "emulate" / f"{name}.ENA"
             local.parent.mkdir(parents=True, exist_ok=True)
             local.write_bytes(package)
-            files[f"/ENAGA/APPS/{name}/APP.ENA"] = local
-        card = None
+            app_path = f"/ENAGA/APPS/{name}/APP.ENA"
+            if same_card_path(app_path, files):
+                raise ValueError(f"a card file collides with the app's {app_path}")
+            files[app_path] = local
+        image = None
         if files:
-            card = build_card(WORK / "emulate" / "card.img", files, card_mib).read_bytes()
+            image = card.make(WORK / "emulate" / "card.img", card_mib, "fat", files).read_bytes()
         self.cpu = CPU()
         self.cpu.enable_board(profile=1)
         self.cpu.map(0xC0000000, 0x8000000, 7)
@@ -84,8 +94,8 @@ class Emulation:
         if bootloader_file is not None:
             self.cpu.write(self.BOOTLOADER_NAME_AT, bootloader_file.encode() + b"\0")
         self.cpu.reset(entry, return_address=None)
-        if card is not None:
-            self.cpu.sd_load(card)
+        if image is not None:
+            self.cpu.sd_load(image)
         for pins in ENCODER_PINS:                 # the encoders at rest
             for bank, pin in pins:
                 self.cpu.gpio_input(bank, pin, True)
@@ -173,7 +183,7 @@ def main(argv=None):
                     help="hold POWER at CYCLE: the app's stop() runs and the unit switches off (the run ends there)")
     ap.add_argument("--card-mib", type=int, default=4, help="card size: a power of two, 2-1024 MiB")
     ap.add_argument("--file", action="append", default=[], metavar="CARD_PATH=LOCAL",
-                    help="put a local file on the card (8.3 names), as /SAMPLES/KICK.WAV=kick.wav")
+                    help='put a local file on the card, as "/SAMPLES/Kick long name.wav=kick.wav" (can be repeated)')
     ap.add_argument("--get", action="append", default=[], metavar="CARD_PATH",
                     help="after the run, save this file from the card under build/emulate/card/")
     args = ap.parse_args(argv)
@@ -187,9 +197,18 @@ def main(argv=None):
         events.append((int(at, 0), "turn", (int(encoder), int(detents))))
     if args.power_off is not None:
         events.append((args.power_off, "power_off", ()))
-    files = dict(item.split("=", 1) for item in args.file)
+    import card
+    try:
+        files = card.file_args(args.file)
+        emu = Emulation(args.app_dir, card_files=files, card_mib=args.card_mib)
+    except card.CardFull as error:
+        print(f"emulate: {error}; use a larger --card-mib", file=sys.stderr)
+        return 2
+    except (ValueError, FileNotFoundError) as error:
+        print(f"emulate: {error}", file=sys.stderr)
+        return 2
     out = WORK / "emulate"
-    with Emulation(args.app_dir, card_files={k: Path(v) for k, v in files.items()}, card_mib=args.card_mib) as emu:
+    with emu:
         now = 0
         result = None
         for at, kind, data in sorted(events, key=lambda e: e[0]) + [(args.cycles, None, ())]:

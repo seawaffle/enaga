@@ -6,7 +6,7 @@
 
 Builds tools/cardtool.c once (host gcc) with firmware/third_party/fatfs and firmware/hal/ff_unicode.c under the
 firmware's FatFs configuration, plus formatting. Images are 2 MiB to 1 GiB, a power of two (the emulator's
-card). From Python: make(), put(), get(), listdir(), free().
+card). From Python: make(), put(), get(), listdir(), free(), and file_args() for the tools' --file options.
 """
 import hashlib
 import re
@@ -48,16 +48,46 @@ def run(image, *args, check=True):
     return result
 
 
+class CardFull(RuntimeError):
+    """A file did not fit on the card."""
+
+
 def make(image, size_mb=64, fs="fat", files=None):
-    """A new image; `files` maps card paths to bytes or local paths."""
+    """A new image; `files` maps card paths to bytes or local paths. FileNotFoundError for a missing local file,
+    CardFull when the files do not fit."""
     if size_mb not in (2, 4, 8, 16, 32, 64, 128, 256, 512, 1024):
         raise ValueError("card size must be a power of two from 2 to 1024 MiB")
+    files = files or {}
+    for card_path, content in files.items():
+        if not isinstance(content, (bytes, bytearray)) and not Path(content).is_file():
+            raise FileNotFoundError(f"{content}: no such file (for {card_path})")
     image = Path(image)
     image.parent.mkdir(parents=True, exist_ok=True)
     run(image, "make", size_mb, fs)
-    for card_path, content in (files or {}).items():
-        put(image, card_path, content)
+    for card_path, content in files.items():
+        try:
+            put(image, card_path, content)
+        except RuntimeError:
+            size = len(content) if isinstance(content, (bytes, bytearray)) else Path(content).stat().st_size
+            if size > free(image):            # a failed put leaves the image as it was
+                raise CardFull(f"{card_path} ({size} bytes) does not fit on the {size_mb} MiB card") from None
+            raise
     return image
+
+
+def file_args(items):
+    """--file CARD_PATH=LOCAL options as {card path: local Path}, ~ expanded. ValueError for a malformed option,
+    FileNotFoundError for a missing local file."""
+    files = {}
+    for item in items:
+        card_path, sep, local = item.partition("=")
+        if not sep or not card_path or not local:
+            raise ValueError(f"--file {item!r}: expected CARD_PATH=LOCAL")
+        local = Path(local).expanduser()
+        if not local.is_file():
+            raise FileNotFoundError(f"--file {item!r}: {local}: no such file")
+        files[card_path] = local
+    return files
 
 
 def put(image, card_path, content):

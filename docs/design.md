@@ -2023,3 +2023,15 @@ On the emulator, the request computers send as a stream starts, SET_CUR of the e
 getting-started version go to 0.3.0 for E5's work so far: battery and power, SYNC polarity, USB DRIVE, USB audio,
 the UI toolkit's additions, runtime 64-bit division and `<enaga/string.h>`, and the USB fixes from unit session 6.
 ABI_VERSION stays 0: apps built for 0.2.0 must be rebuilt.
+
+### Long names on the emulator tools' cards (2026-11-24)
+
+An app with a file browser needed samples on the panel's card. `tools/panel.py` now takes `--file CARD_PATH=LOCAL`
+(repeatable) and `--card-mib` (default 64), as `tools/emulate.py` already did. Both tools now build their cards with
+`tools/card.py`, through the firmware's own FatFs configuration, instead of the emulator's `media.build_card`. That
+builder's FatFs has long names off, so `--file` paths had been limited to 8.3. Now a card holds any name the unit
+can read, spaces and Unicode included. `card.py` gains `file_args()` for the options: it expands `~` and stops on a
+missing local file. `make()` checks the local files before it starts and raises `CardFull` when a file does not fit;
+the tools report that with a hint to use a larger `--card-mib`. A `--file` path that is an app's `APP.ENA` (FAT
+names ignore case) is an error. `tests/test_card_files.py` covers the panel's card, the widgets example browsing to
+a long name on an `Emulation` card, and the errors.
