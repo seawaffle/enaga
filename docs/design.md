@@ -2035,3 +2035,29 @@ missing local file. `make()` checks the local files before it starts and raises 
 the tools report that with a hint to use a larger `--card-mib`. A `--file` path that is an app's `APP.ENA` (FAT
 names ignore case) is an error. `tests/test_card_files.py` covers the panel's card, the widgets example browsing to
 a long name on an `Emulation` card, and the errors.
+
+### From PR #1's list: sample formats, rate conversion, the whole run's audio, two notes (2026-11-24)
+
+PR #1 (an outside developer) brought a fix and two doc notes, and offered two more things. The fix, 64-bit
+division in apps, went into 0.3.0 (E5 step 7). The rest is done here, written afresh (the PR's code for the offers
+was never posted):
+- **Sample formats** (`runtime/dsp/sample.c`, `<enaga/dsp.h>`): `enaga_pcm_to_float` and `enaga_pcm_to_int16`
+  from 8-bit unsigned, 16-, 24- and 32-bit signed and 32-bit float WAV data, read byte by byte (any address: the
+  C674x rounds a misaligned word access down), every `stride`-th sample to take a channel out of interleaved data;
+  int16 rounded and saturated. `enaga_int16_to_float` and `enaga_float_to_int16` go back and forth for playing
+  and recording; `enaga_pcm_format` maps a `wav::Format` to the format.
+- **Rate conversion:** a streaming 64-tap Kaiser-windowed sinc (beta 8.6) in 64 interpolated phases, cut off at
+  0.95 of the lower rate's Nyquist, with the ratio exact in 32.32 fixed point (no drift) and no division (the
+  ratio by shift and subtract). Measured on the host: from 44.1 kHz flat to 19 kHz, -0.6 dB at 20 kHz; from 96
+  kHz, 26 kHz -44 dB and 28 kHz and up -89 dB or more (32 taps lost 2 dB at 19 kHz and let 26 kHz through at
+  -24 dB). Output 0 is input 0's instant; any blocking gives the same samples (tested with 7 inputs and 3 outputs
+  a call). About 128 multiply-adds an output: for converting on load, not per voice. `Resampler`
+  (`<enaga/dsp/sample.hpp>`) wraps it; a second channel shares the first's 16.6 KB table.
+- **The whole run's audio:** `Emulation(keep_audio=True)` drains the emulator's capture ring (0.68 s) every run
+  slice through `audio_tail`, keeping left and right in step if words are ever lost; `tools/emulate.py` uses it,
+  so `audio.wav` covers the whole run and the report gives its length and any lost words. The panel's sound
+  still breaks up, as it runs slower than real time; that is not addressed.
+- **api.md:** the knob pushes' numbering (`PUSH_B` is 0, `PUSH_A` 1, unlike the encoders' A-D) in the keys table and
+  a note under it; `<atomic>` read-modify-write works on 32-bit types only (8- and 16-bit fail to link), in the
+  wording given in the review.
+

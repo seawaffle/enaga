@@ -7,12 +7,13 @@ Builds the firmware (firmware/build.py) and the app (tools/build_app.py), writes
 /ENAGA/APPS/<NAME>/APP.ENA on a FAT card image (4 MiB unless --card-mib says otherwise; --file adds more files,
 long names included, as /SAMPLES/Kick long name.wav=kick.wav; the card is built by tools/card.py),
 boots the firmware as the bootloader would leave it, plays the scripted keys, knob turns and power-off, and
-reports Enaga's state, log, audio statistics and the captured output. The last frame (frame.png) and audio
-(audio.wav: stereo, 48 kHz, 32-bit samples, the codec's words as captured) are saved under build/emulate/, and
-with --get, files from the card afterwards. See README.md, "Testing without a unit", for the emulator.
+reports Enaga's state, log, audio statistics and the captured output. The last frame (frame.png) and the audio
+of the whole run (audio.wav: stereo, 48 kHz, 32-bit samples, the codec's words as captured) are saved under
+build/emulate/, and with --get, files from the card afterwards. See README.md, "Testing without a unit", for the emulator.
 
 In Python, `Emulation` does the same step by step: run(cycles), key(key, down), turn(encoder, detents),
-power_off() (the app's stop() runs, as when the unit is switched off) and card_file(path).
+power_off() (the app's stop() runs, as when the unit is switched off) and card_file(path). With keep_audio=True
+it collects the audio as it runs (the emulator itself keeps only the last 0.68 s): `audio_wav()` gives it as a WAV.
 """
 import argparse
 import importlib.util
@@ -66,7 +67,8 @@ class Emulation:
     # "SmplTrek.bin" at 0xC70A8BA0; firmware/kernel/device.c). None leaves DDR empty, as no known bootloader.
     BOOTLOADER_NAME_AT = 0xC70A8BA0
 
-    def __init__(self, app_dir=None, name=None, card_files=None, bootloader_file="SmplTrek.bin", card_mib=4):
+    def __init__(self, app_dir=None, name=None, card_files=None, bootloader_file="SmplTrek.bin", card_mib=4,
+                 keep_audio=False):
         paths.use_emulator()
         from cpu import CPU
         import card
@@ -100,6 +102,30 @@ class Emulation:
             for bank, pin in pins:
                 self.cpu.gpio_input(bank, pin, True)
         self.inputs = []
+        self.keep_audio = keep_audio
+        self.audio = bytearray()                  # the codec's slot words since the start, when keep_audio
+        self.audio_slot = None                    # the slot (0 left, 1 right) of the first word kept
+        self.audio_seen = 0                       # words transmitted so far
+        self.audio_lost = 0                       # words the emulator's ring dropped before they were collected
+
+    def drain_audio(self):
+        """Collects the slot words transmitted since the last call (run() calls it every slice when keep_audio)."""
+        data, slot, self.audio_seen, lost = self.cpu.audio_tail(self.audio_seen)
+        self.audio_lost += lost
+        if not data:
+            return
+        if self.audio_slot is None:
+            self.audio_slot = slot
+        elif slot != (self.audio_slot + len(self.audio) // 4) & 1:   # words lost: keep left and right in step
+            data = data[4:]
+        self.audio += data
+
+    def audio_wav(self):
+        """(wav bytes, info) of the audio collected with keep_audio, or (None, None) if there is none."""
+        if not self.audio:
+            return None, None
+        from audio_capture import stereo_wav
+        return stereo_wav(bytes(self.audio), self.audio_slot)
 
     def word(self, name, signed=False):
         value = int.from_bytes(self.cpu.read(self.names[name], 4), "little")
@@ -142,6 +168,8 @@ class Emulation:
         try:
             while self.cpu.state()["cycles"] < end:
                 state = self.cpu.run(min(slice_cycles, end - self.cpu.state()["cycles"]))
+                if self.keep_audio:
+                    self.drain_audio()
                 if state["status"] != "budget":
                     error = f"stopped: {state['status']} at {state['pc']:#010x}"
                     break
@@ -200,7 +228,7 @@ def main(argv=None):
     import card
     try:
         files = card.file_args(args.file)
-        emu = Emulation(args.app_dir, card_files=files, card_mib=args.card_mib)
+        emu = Emulation(args.app_dir, card_files=files, card_mib=args.card_mib, keep_audio=True)
     except card.CardFull as error:
         print(f"emulate: {error}; use a larger --card-mib", file=sys.stderr)
         return 2
@@ -231,11 +259,11 @@ def main(argv=None):
         if oled["complete_frames"]:
             from display import png
             (out / "frame.png").write_bytes(png(frame))
-        raw_audio, audio = emu.cpu.audio_output()
-        if raw_audio:
-            from audio_capture import stereo_wav
-            wav, _ = stereo_wav(raw_audio, audio["first_capture_slot"])
+        wav, wav_info = emu.audio_wav()
+        if wav:
             (out / "audio.wav").write_bytes(wav)
+            report["audio_file"] = dict(frames=wav_info["frames"], seconds=round(wav_info["frames"] / 48000, 3),
+                                        lost_words=emu.audio_lost)
         for path in args.get:
             data = emu.card_file(path)
             local = out / "card" / path.lstrip("/")
@@ -247,7 +275,7 @@ def main(argv=None):
                 print(f"{path}: {len(data)} bytes, saved as {local}")
         (out / "result.json").write_text(json.dumps(report, indent=2, sort_keys=True, default=str) + "\n")
         print(json.dumps({k: report[k] for k in ("app_status", "app_name", "crash_reason", "audio_status", "audio_blocks",
-                                                 "audio_overruns", "audio_cycles_peak", "interrupts", "log")}, indent=1))
+                                                 "audio_overruns", "audio_cycles_peak", "interrupts", "log", "audio_file") if k in report}, indent=1))
         print(f"run: {result}; report {out / 'result.json'}")
         return 1 if result and result["error"] else 0
 

@@ -308,6 +308,64 @@ static inline float enaga_envelope_step(enaga_envelope *e, const enaga_envelope_
 /* n steps into out: the same values as n calls of enaga_envelope_step. */
 void enaga_envelope_render(enaga_envelope *e, const enaga_envelope_shape *s, float *out, int n);
 
+/* ---- Sample formats: WAV sample data to float or int16, and back ---- */
+
+/* The sample formats of WAV files (<enaga/wav.hpp>): the value is the bits per sample, 33 for 32-bit float. */
+enum { ENAGA_PCM_U8 = 8, ENAGA_PCM_S16 = 16, ENAGA_PCM_S24 = 24, ENAGA_PCM_S32 = 32, ENAGA_PCM_FLOAT = 33 };
+
+/* The format of a WAV's samples from its header's encoding (1 PCM, 3 float) and bits, or -1 if unknown. */
+static inline int enaga_pcm_format(int encoding, int bits) {
+    if (encoding == 1) return bits == 8 || bits == 16 || bits == 24 || bits == 32 ? bits : -1;
+    return encoding == 3 && bits == 32 ? ENAGA_PCM_FLOAT : -1;
+}
+static inline int enaga_pcm_bytes(int format) { return format == ENAGA_PCM_FLOAT ? 4 : format / 8; }
+
+/* n samples of `format` from src, little-endian at any alignment (read byte by byte), every stride-th sample:
+ * stride 1 for mono or for interleaved samples kept interleaved, or the channel count with src at a channel's
+ * first sample to take that channel out. Floats are full scale at ±1; 8-bit WAV is unsigned. */
+void enaga_pcm_to_float(const void *src, int format, int stride, float *out, int n);
+/* The same into int16 (half the memory of float), rounded to nearest and saturated. */
+void enaga_pcm_to_int16(const void *src, int format, int stride, int16_t *out, int n);
+/* out = gain x in / 32768: int16 samples back to float, for playing them. */
+void enaga_int16_to_float(const int16_t *in, float *out, int n, float gain);
+/* out = in x 32768, rounded to nearest and saturated: float to 16-bit, for writing a 16-bit WAV. */
+void enaga_float_to_int16(const float *in, int16_t *out, int n);
+
+/* ---- Rate conversion: windowed sinc, a fixed ratio, block by block ---- */
+
+/* A 64-tap Kaiser-windowed sinc in 64 phases, linearly interpolated between them: flat to 0.86 of the lower
+ * rate's Nyquist (19 kHz from 44.1 kHz), and what would alias into the band below that is about 89 dB down. The
+ * table (16.6 KB) depends only on the two rates: one serves every channel converting between them. Each output
+ * costs about 128 multiply-adds, so convert when a sample is loaded, not per voice in the audio callback (to play
+ * at a pitch, interpolate). */
+#define ENAGA_RESAMPLE_TAPS 64
+#define ENAGA_RESAMPLE_PHASES 64
+
+static inline uint32_t enaga_resample_table_size(void) {             /* floats */
+    return (ENAGA_RESAMPLE_PHASES + 1) * ENAGA_RESAMPLE_TAPS;
+}
+/* Fills table (enaga_resample_table_size() floats) with the filter for in_rate to out_rate (Hz, 1 to 1,000,000):
+ * cut off at 0.95 of the lower rate's Nyquist, so going down removes what would alias. */
+void enaga_resample_table(float *table, uint32_t in_rate, uint32_t out_rate);
+
+typedef struct {
+    const float *table;
+    uint32_t step_int, step_frac;   /* in_rate / out_rate in 32.32 fixed point */
+    uint32_t frac;                  /* where the next output lies after the current input, a 32-bit fraction */
+    uint32_t skip;                  /* inputs to take before the next output */
+    uint32_t write;                 /* window position */
+    float window[2 * ENAGA_RESAMPLE_TAPS];   /* the last TAPS inputs, written twice so they are always in a row */
+} enaga_resampler;
+
+/* Starts a conversion from the beginning of a sound, with a table made for the same rates. */
+void enaga_resampler_init(enaga_resampler *r, const float *table, uint32_t in_rate, uint32_t out_rate);
+/* Converts up to n_in samples from in into out, at most max_out of them; returns how many it wrote and sets
+ * *used to how many inputs it took. If it filled out, call again, with the inputs not yet used (none, if all
+ * were): outputs may be waiting even when every input was taken. Output 0 is
+ * input 0's instant, with no delay; each output needs ENAGA_RESAMPLE_TAPS / 2 inputs after it, so at the end of
+ * a sound feed that many zeros to get the last outputs. Mono: one resampler per channel. */
+int enaga_resample(enaga_resampler *r, const float *in, int n_in, float *out, int max_out, int *used);
+
 #ifdef __cplusplus
 }
 #endif

@@ -45,6 +45,20 @@ def component(channel, period):
 @unittest.skipUnless(build_app.tools_present(), "tic6x GCC not built (tools/build_tic6x_*.sh)")
 @unittest.skipUnless(paths.emulator_present(), "ENAGA_EMULATOR not set to the SmplTrek emulator directory")
 class E1(unittest.TestCase):
+    def test_the_whole_runs_audio_is_kept(self):
+        """keep_audio collects past the emulator's 0.68 s ring: the tone example for 1.5 s, every word in order (the
+        last stretch is what the ring still holds) and left and right in step."""
+        with Emulation(ENAGA / "examples" / "tone", keep_audio=True) as emu:
+            self.assertIsNone(emu.run(BOOT + 1500 * MS)["error"])
+            raw, info = emu.cpu.audio_output()
+            self.assertEqual(emu.audio_lost, 0)
+            self.assertEqual(len(emu.audio) // 4, info["transmitted_words"])
+            self.assertEqual(bytes(emu.audio[-len(raw):]), raw)
+            wav, wav_info = emu.audio_wav()
+            self.assertGreater(wav_info["frames"], 2 * 32767)
+            self.assertEqual(emu.audio_slot, (info["first_capture_slot"] + info["transmitted_words"]
+                                              - info["captured_words"]) & 1)
+
     def test_device_from_the_bootloaders_file_name(self):
         """The device is told by the update file name its bootloader left in DDR (firmware/kernel/device.c)."""
         for file, device, name in [("Lofi-12 XT.bin", 2, "LOFI-12 XT"), ("CyDrums.bin", 3, "CYDRUMS"),
