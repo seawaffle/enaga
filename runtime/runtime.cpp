@@ -199,6 +199,10 @@ const enaga_host_t &host() { return *g_host; }
 
 void *operator new(size_t bytes) { return checked_alloc(bytes); }
 void *operator new[](size_t bytes) { return checked_alloc(bytes); }
+namespace std {
+const nothrow_t nothrow{};                      // libsupc++'s, which apps do not link
+}
+
 void *operator new(size_t bytes, const std::nothrow_t &) noexcept { return heap_alloc(bytes); }      // nullptr when out
 void *operator new[](size_t bytes, const std::nothrow_t &) noexcept { return heap_alloc(bytes); }
 void operator delete(void *pointer) noexcept { heap_free(pointer); }
