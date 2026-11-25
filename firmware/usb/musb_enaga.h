@@ -36,11 +36,12 @@
 static const uintptr_t MUSB_BASES[] = { ENAGA_USB0 + 0x400 };
 
 int enaga_usb_phy_start(void);                /* usb.c: PSC, CFGCHIP2, reset, PHY clock; 0 or -1 */
+extern int usb_phy_status;                    /* usb.c: 0 once started */
 
 static inline void musb_dcd_phy_init(uint8_t rhport)
 {
     (void)rhport;
-    enaga_usb_phy_start();
+    if (usb_phy_status != 0) enaga_usb_phy_start();   /* usb_init starts it before dcd_init */
 }
 
 TU_ATTR_ALWAYS_INLINE static inline void musb_dcd_int_enable(uint8_t rhport)
