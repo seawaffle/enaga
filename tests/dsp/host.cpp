@@ -1488,6 +1488,9 @@ static void dynamics() {
         for (int i = 36000; i < 48000; i++) after = std::max(after, double(std::fabs(s[i])));
         near("limiter: a sine 6 dB over comes out at the ceiling", held, 1.0, 0.01);
         near("limiter: back to unity after the release", after, 0.5, 0.005);
+        int changed = 0;
+        for (int i = 40000; i < 48000; i++) changed += s[i] != in_s[i - int(sine.latency())];
+        check(changed == 0, "limiter: after the release, the input exactly again", changed, 0);
 
         // A lone spike 20 dB over after silence, at look-aheads down to the least: at the ceiling, never over.
         for (float lookahead : {0.0f, 0.0005f, 0.004f, 0.1f}) {

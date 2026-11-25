@@ -333,7 +333,7 @@ typedef struct {
     float *delay_l, *delay_r, *box, *blocks;  /* box: the gains - 1 of the last `length` samples */
     uint32_t mask, length, write;   /* length: the look-ahead in samples, the fade's length */
     int32_t block_count, block, in_block;
-    float partial, window, released, sum, inv_length;
+    float partial, window, depth, sum, inv_length;   /* depth: the released reduction, 1 - gain */
     float ceiling, release, rate;
     float lowest;                   /* the lowest gain applied in the last process call */
 } enaga_limiter;

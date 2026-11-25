@@ -2245,7 +2245,8 @@ The fourth of the library additions before the API review.
     `key_r`) for ducking, and reports `reduction_db()` for a meter.
   - `Limiter`: look-ahead. Each sample's needed gain is held for at least the look-ahead L (the minimum over the
     current 16-sample block and the last ceil(L / 16) blocks, a little longer than L, so it errs safe), released
-    one-pole where it rises, and averaged over L (a box filter); the signal is delayed L - 1. When a peak leaves,
+    where it rises (the reduction, 1 - gain, fades by a one-pole and is flushed to exactly 0 below 1e-7, so the
+    gain gets back to exactly 1), and averaged over L (a box filter); the signal is delayed L - 1. When a peak leaves,
     the box holds L values all at or below its need, so the gain is down to it, reached in a straight line. A
     clamp at the ceiling catches rounding. The box keeps gain - 1, so with nothing to limit the gain is exactly 1
     and the signal passes untouched. The box sum is rebuilt each block, so the running sum does not drift. L is at
@@ -2262,7 +2263,7 @@ The fourth of the library additions before the API review.
   grid within half a step, held at 12 kHz, mono = stereo's left); compressor (static curve, knee, makeup, attack
   and release time constants, side chain, chunking changes nothing); limiter (no sample over the ceiling on noise
   bursts 12 dB over, spikes 20 dB over at look-aheads from the least to the most, smooth gain, the input exactly
-  and `latency()` late below the ceiling, a sine at the ceiling and back to unity after the release, blocks of any
+  and `latency()` late below the ceiling, a sine at the ceiling and the input exactly again after the release, blocks of any
   size the same, mono = stereo's left); waveform pixels (steps, stereo, zoomed-in line, marks), zoom, scroll,
   frames and columns both ways, a growing recording, the scope. A scratch app with each piece builds for the
   target with cl6x.

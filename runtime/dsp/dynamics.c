@@ -125,7 +125,8 @@ void enaga_compressor_process(enaga_compressor *c, float *left, float *right, in
  * leaves, the box holds L values all held from its need or lower, so its gain is down to the need, and it
  * reached there smoothly over L samples. L is at least a block, so each block reads its delay lines and the box
  * (all written before it) in loops apart from its writes, and the buffers are a block longer than L. A final clamp at the ceiling catches what rounding lets through.
- * The box keeps gain - 1, so with nothing to limit its sum is exactly 0 and the gain exactly 1. */
+ * The box keeps gain - 1, and the release fades the reduction to exactly 0, so with nothing to limit the box's sum
+ * is exactly 0 and the gain exactly 1. */
 
 #define LIMITER_BLOCK 16
 
@@ -158,7 +159,8 @@ void enaga_limiter_init(enaga_limiter *l, float *memory, float lookahead_s, floa
     l->block_count = (int32_t)((length + LIMITER_BLOCK - 1) / LIMITER_BLOCK);
     l->block = l->in_block = 0;
     for (i = 0; i < (uint32_t)l->block_count; i++) l->blocks[i] = 1.0f;
-    l->partial = l->window = l->released = 1.0f;
+    l->partial = l->window = 1.0f;
+    l->depth = 0.0f;
     l->sum = 0.0f;
     l->inv_length = enaga_reciprocal((float)length);
     l->rate = rate;
@@ -175,9 +177,9 @@ void enaga_limiter_process(enaga_limiter *l, float *left, float *right, int n) {
     float g[LIMITER_BLOCK], old[LIMITER_BLOCK], kept[LIMITER_BLOCK], late_l[LIMITER_BLOCK], late_r[LIMITER_BLOCK];
     float *restrict const dl = l->delay_l, *restrict const dr = l->delay_r, *restrict const box = l->box;
     const uint32_t mask = l->mask, length = l->length, late = length - 1;
-    const float ceiling = l->ceiling, need_ceiling = ceiling * 0.99999f, release = l->release, keep = 1.0f - release;
+    const float ceiling = l->ceiling, need_ceiling = ceiling * 0.99999f, keep = 1.0f - l->release;
     const float inv_length = l->inv_length;
-    float partial = l->partial, window = l->window, released = l->released, sum = l->sum, lowest = 1.0f;
+    float partial = l->partial, window = l->window, depth = l->depth, sum = l->sum, lowest = 1.0f;
     uint32_t w = l->write;
     int o = 0, i;
     while (o < n) {
@@ -194,12 +196,14 @@ void enaga_limiter_process(enaga_limiter *l, float *left, float *right, int n) {
         for (i = 0; i < m; i++) g[i] = g[i] > need_ceiling ? need_ceiling * enaga_reciprocal(g[i]) : 1.0f;
         for (i = 0; i < m; i++) old[i] = box[(w + (uint32_t)i - length) & mask];
         for (i = 0; i < m; i++) {
-            float held, toward;
+            float held, fading;
             partial = g[i] < partial ? g[i] : partial;
             held = partial < window ? partial : window;
-            toward = keep * released + release * held;      /* below held when rising, above it when falling */
-            released = held < toward ? held : toward;
-            kept[i] = released - 1.0f;
+            /* The reduction, 1 - gain: down to what is held at once, and fading away (to exactly 0) after. */
+            fading = keep * depth;
+            fading = fading < 1e-7f ? 0.0f : fading;
+            depth = 1.0f - held > fading ? 1.0f - held : fading;
+            kept[i] = -depth;
             sum += kept[i] - old[i];
             g[i] = 1.0f + sum * inv_length;
         }
@@ -245,7 +249,7 @@ void enaga_limiter_process(enaga_limiter *l, float *left, float *right, int n) {
     l->write = w & mask;
     l->partial = partial;
     l->window = window;
-    l->released = released;
+    l->depth = depth;
     l->sum = sum;
     l->lowest = lowest;
 }
