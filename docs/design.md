@@ -587,7 +587,8 @@ Its card is staged by `tools/unit_card.py`.
     interrupt now nests in the app's callback, as the watchdog, UARTs and SYNC IN already did.
 - **USB work (decided 2026-11-25), one branch each, in this order:**
   1. A debug port: Enaga's log, state, screen and memory over a second USB MIDI cable (log, 2026-11-25). No
-     setting: it is silent until asked, and its share of the MIDI IN buffer is capped.
+     setting: it is silent until asked, and its share of the MIDI IN buffer is capped. It also takes keys, knobs
+     and pads from the computer, so sessions on a unit can be scripted.
   2. USB DRIVE speed (below): measure with the debug port first, then double-buffer the OUT endpoint or move the
      packets in the interrupt. Target 700 KiB/s or more at full speed.
   3. High speed: research spike. The core already came up at high speed on the unit (session 6). It needs
@@ -2369,3 +2370,24 @@ photographs of STATUS.
     stale frames wait in the ring for the next reader. Fix with the USB work: drain the ring while nobody reads.
   - Underruns rose by one now and then as Windows opened and closed short streams; none during the 30 s streams.
   - `peek` at a refused address printed a traceback; the tool now prints one line.
+- **Remote input (protocol 2), added at the user's request** so that a unit can be driven by a script: the log,
+  STATUS and SCREEN to see, cable 0 for MIDI, USB audio both ways, USB DRIVE for files, and now KEY, TURN, PAD,
+  PRESSURE and RELEASE to act. What is left for a person: DIN MIDI, SYNC, the analog inputs and outputs, the
+  battery, power-up and flashing.
+  - **Where it enters** (`main.c` `remote_*`): keys are OR'd into the switch word, so their events, F1 + POWER and
+    the menu's release of held keys are the unit's own code path; knobs add detents to the next pass; pads are
+    delivered as press, pressure and release (raw readings are the MCU's, and a remote pad must not be released
+    by the physical pad's idle readings).
+  - **POWER** only while F1 is down: alone it would switch the unit off, which a computer must not do.
+  - **Waiting for the effect:** each input's answer comes once a frame has been drawn in a later loop pass than
+    the request (`kernel_drawn`), after the next poll_inputs, so a script's SCREEN shows the result without
+    guessing delays.
+  - **Who is in charge:** while remote input is in use a 3 x 3 square shows at the top right. It is drawn on the
+    canvas just before the frame is converted and the pixels put back after, so apps that draw only what changed
+    never keep it, and SCREEN shows the app's own frame. Any key, knob or pad on the unit releases everything the
+    computer held, as do RELEASE, a computer silent for 2 s while the port has something to send, and USB going.
+  - **Cost:** nothing while unused beyond a few comparisons per pass; no change for apps.
+  - **Tests** (`RemoteInput`, on `tests/apps/keys`, which now logs knobs too): keys with the mark on the display
+    and not in SCREEN, a chord's order, knobs either way, pads with pressure and RELEASE, POWER refused alone and
+    opening and closing the menu with F1 (held 1.5 s: no switch-off), the unit taking over, a computer gone quiet;
+    and STEP 1 from the computer sending the MIDI app's note.

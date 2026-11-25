@@ -17,12 +17,18 @@
  * app gets a release for every key and pad press it was given (when the menu opens, at once), and none for a press
  * it was not. An app can also open the menu (open_menu): it opens after the app's callback returns.
  *
+ * The debug port (usb_debug.c) can press keys, turn knobs and press pads from a computer (remote_*): keys join the
+ * switch word, so they make the same events and chords as the unit's own (POWER only with F1, for the menu: a
+ * computer cannot switch the unit off); knobs add detents; pads give press, pressure and release (no raw readings).
+ * While remote input is in use a mark shows at the top right of the screen, and any key, knob or pad on the unit
+ * takes over: everything held from the computer is let go.
+ *
  * Settings (settings.c) are read after the card is mounted: the volume, the display's brightness, the pad
  * thresholds, and AUTO OFF, which switches off after that long without a key, knob, pad press or POWER, unless the
  * app says it is busy. */
 
 extern char __bss_start[], __bss_end[];
-static u64 last_keys;
+static u64 last_keys, last_physical;        /* the switch word as delivered (with remote keys), and the unit's own */
 static int encoder_last[5];
 static u32 a0_last_ms, a0_sent;
 static int power_seen_up, power_was_down, power_chord;
@@ -32,6 +38,12 @@ volatile u32 kernel_stage, kernel_passes;
 static u32 power_down_since, last_draw, last_input;
 static int powering_off;                     /* survives a stop() that fails or overruns during shutdown */
 static int display_dma;                      /* frames by EDMA once the audio engine has powered it */
+static u64 remote_keys;                      /* remote input (usb_debug.c): keys held, */
+static int remote_power;                     /* POWER held (with F1), */
+static int remote_turns[5];                  /* detents not yet delivered, */
+static u16 remote_pads;                      /* pads held */
+int remote_active;
+u32 kernel_drawn;
 
 static void log_cache(u32 was, u32 now)     /* "CACHE 443 00>444 FF": L2, L1P, L1D modes and DDR MARs */
 {
@@ -179,6 +191,7 @@ static void on_pad(int channel, unsigned value)
     if (channel >= 15) { battery_reading(value); return; }   /* channel 15 is the battery (power.c) */
     e.id = (u16)channel; e.ms = timer_ms();
     if (pad_state[channel] == PAD_UP && value >= pad_press_level) {
+        if (remote_active) remote_release();  /* the unit's own pad takes over */
         pad_state[channel] = PAD_RISING;
         pad_peak[channel] = (u16)value;
         pressure_start(channel);
@@ -194,6 +207,86 @@ static void on_pad(int channel, unsigned value)
     if (pad_state[channel] != PAD_UP) pressure_update(channel, value, &e);
     e.type = ENAGA_EVENT_PAD; e.value = (int)value;
     deliver(&e);
+}
+
+/* ---- Remote input, from the debug port (usb_debug.c) ---- */
+
+int remote_key(int key, int down)
+{
+    if (key == REMOTE_POWER) {
+        if (down && !((last_keys >> ENAGA_KEY_F1) & 1)) return -1;   /* POWER alone switches off: not from a computer */
+        remote_power = down;
+    } else if (key < 0 || key >= ENAGA_KEY_COUNT) {
+        return -1;
+    } else if (down) {
+        remote_keys |= (u64)1 << key;
+    } else {
+        remote_keys &= ~((u64)1 << key);
+    }
+    remote_active = 1;
+    return 0;                                 /* delivered by the next poll_inputs, as a change in the switch word */
+}
+
+void remote_turn(int encoder, int detents)
+{
+    if (encoder < 0 || encoder >= 5) return;
+    remote_turns[encoder] += detents;
+    remote_active = 1;
+}
+
+int remote_pad(int pad, int velocity)
+{
+    enaga_event_t e;
+    u16 bit;
+    if (pad < 0 || pad >= 15 || velocity < 0 || velocity > 127) return -1;
+    bit = (u16)(1u << pad);
+    e.id = (u16)pad; e.ms = timer_ms();
+    if (velocity && !(remote_pads & bit)) {
+        remote_pads |= bit;
+        e.type = ENAGA_EVENT_PAD_PRESS; e.value = velocity;
+        deliver(&e);
+    } else if (!velocity && (remote_pads & bit)) {
+        remote_pads &= (u16)~bit;
+        e.type = ENAGA_EVENT_PAD_RELEASE; e.value = 0;
+        deliver(&e);
+    }
+    remote_active = 1;
+    return 0;
+}
+
+int remote_pressure(int pad, int pressure)
+{
+    enaga_event_t e;
+    if (pad < 0 || pad >= 15 || pressure < 0 || pressure > 127 || !(remote_pads & (1u << pad))) return -1;
+    e.type = ENAGA_EVENT_PAD_PRESSURE; e.id = (u16)pad; e.value = pressure; e.ms = timer_ms();
+    deliver(&e);
+    return 0;
+}
+
+void remote_release(void)                     /* keys go up at the next poll_inputs; pads at once */
+{
+    int i;
+    remote_keys = 0;
+    remote_power = 0;
+    for (i = 0; i < 5; i++) remote_turns[i] = 0;
+    for (i = 0; i < 15; i++)
+        if ((remote_pads >> i) & 1) remote_pad(i, 0);
+    remote_active = 0;
+}
+
+/* A 3 x 3 square at the top right while remote input is in use: on the display only. The canvas gets its pixels
+ * back after the frame has been converted, so apps that draw only what changed never keep it, and the debug
+ * port's SCREEN shows the app's frame as drawn. */
+static u8 under_mark[9];
+
+static void remote_mark(int on)
+{
+    int x, y;
+    for (y = 0; y < 3; y++)
+        for (x = 0; x < 3; x++) {
+            u8 *pixel = &canvas[y * CANVAS_W + 125 + x];
+            if (on) { under_mark[3 * y + x] = *pixel; *pixel = 15; } else *pixel = under_mark[3 * y + x];
+        }
 }
 
 int status_scroll;                            /* menu.c moves it; clamped here */
@@ -279,10 +372,16 @@ static void battery_warning(u32 ms)
 
 static void poll_inputs(u32 ms)
 {
-    u64 keys = keys_poll(ms), changed = keys ^ last_keys;
+    u64 physical = keys_poll(ms), keys, changed;
     int i;
     enaga_event_t e;
     e.ms = ms;
+    if (physical != last_physical) {          /* the unit's own keys take over from remote input */
+        last_physical = physical;
+        if (remote_active) remote_release();
+    }
+    keys = physical | remote_keys;
+    changed = keys ^ last_keys;
     for (i = 0; changed && i < ENAGA_KEY_COUNT; i++)
         if ((changed >> i) & 1) {
             e.type = ENAGA_EVENT_KEY; e.id = (u16)i; e.value = (int)((keys >> i) & 1);
@@ -291,10 +390,13 @@ static void poll_inputs(u32 ms)
     last_keys = keys;
     encoders_poll();
     for (i = 0; i < 5; i++)
-        if (encoder_count[i] != encoder_last[i]) {
-            e.type = ENAGA_EVENT_ENCODER; e.id = (u16)i; e.value = encoder_count[i] - encoder_last[i];
+        if (encoder_count[i] != encoder_last[i] && remote_active) remote_release();   /* likewise its knobs */
+    for (i = 0; i < 5; i++)
+        if (encoder_count[i] != encoder_last[i] || remote_turns[i]) {
+            e.type = ENAGA_EVENT_ENCODER; e.id = (u16)i; e.value = encoder_count[i] - encoder_last[i] + remote_turns[i];
             encoder_last[i] = encoder_count[i];
-            deliver(&e);
+            remote_turns[i] = 0;
+            if (e.value) deliver(&e);
         }
     uart1_poll();                             /* pads arrive through on_pad */
     if (usb_poll(ms)) last_input = ms;        /* USB MIDI bytes into the parser */
@@ -311,7 +413,7 @@ static void poll_inputs(u32 ms)
  * F1 first), and holding it on then does not switch off. */
 static void poll_power(u32 ms)
 {
-    if (!power_key_down()) {
+    if (!power_key_down() && !remote_power) {
         power_seen_up = 1;                    /* a hand still on the key from switching on never counts */
         power_was_down = power_chord = 0;
     } else if (power_seen_up) {
@@ -332,7 +434,7 @@ static void poll_power(u32 ms)
 
 void kernel_loop(void)
 {
-    int busy, filing;
+    int busy, filing, marked;
     irq_global_enable();
     if (powering_off) shutdown();                /* the app failed in stop() on the way out */
     if (!app_current) {                          /* start-up with no app, or an app was just dropped */
@@ -341,7 +443,8 @@ void kernel_loop(void)
         app_pads = 0;
         if (crash_reason[0]) {                   /* a crash: the status page shows why (OK: the menu) */
             menu_active = menu_status = 0;
-            last_keys = keys_reset(timer_ms());  /* a key the app was handling when it hung is not pressed again */
+            last_keys = last_physical = keys_reset(timer_ms());  /* a key the app was handling when it hung is not pressed again */
+            remote_release();
         }
     }
     for (;;) {
@@ -373,8 +476,12 @@ void kernel_loop(void)
             else if (app_current && !menu_active && app_current->draw) app_current->draw(app_current->context, canvas);
             else status_page(ms);
             battery_warning(ms);
+            kernel_drawn = kernel_passes;
             kernel_stage = 6;
-            if (display_dma) gfx_present_dma(); else gfx_present();
+            marked = remote_active;
+            if (marked) remote_mark(1);
+            if (display_dma) gfx_present_dma(); else gfx_present();   /* the canvas is converted before these return */
+            if (marked) remote_mark(0);
         }
         kernel_stage = 7;
         /* Sleep until the next interrupt: the audio block (every 1.33 ms), UART1 (each byte from the panel MCU,
@@ -429,7 +536,7 @@ void main(void)
     apps_mount();
     settings_load();
     files_write_probe();
-    last_keys = keys_reset(timer_ms());       /* keys held through start-up do not become events */
+    last_keys = last_physical = keys_reset(timer_ms());   /* keys held through start-up do not become events */
     boot_menu = (last_keys >> ENAGA_KEY_F1) & 1;   /* F1 held through start-up: the menu, no app */
     uart1_irq_start();                        /* the MCU's bytes by interrupt from here (start-up may have lost some) */
     irq_enable(1u << IRQ_UART1);

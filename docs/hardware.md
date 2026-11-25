@@ -443,9 +443,16 @@ full-speed USB MIDI, audio and mass storage device with TinyUSB (`firmware/third
   python3 -B tools/usb_debug.py status                    # version, app, crash, audio, USB and SD counters
   python3 -B tools/usb_debug.py screen shot.png           # the screen, in place of a photo
   python3 -B tools/usb_debug.py peek usb_drive_errors --elf build/firmware/enaga.elf
+  python3 -B tools/usb_debug.py press F1 POWER            # keys from the computer (POWER only with F1: the menu)
+  python3 -B tools/usb_debug.py turn VALUE 3              # a knob, by detents
+  python3 -B tools/usb_debug.py pad 5 --velocity 90       # a pad
   ```
 
-  `peek` reads RAM, the USB0 wrapper's registers and SYSCFG0, not the MUSB core's (reading its interrupt
+  Keys, knobs and pads from the computer are delivered as the unit's own (pads as press, pressure and release,
+  without raw readings), and each answers once a frame has been drawn after it, so a `screen` next shows its
+  effect. While they are in use a small square shows at the top right of the display (not in `screen`'s image);
+  pressing or turning anything on the unit lets go of everything the computer held, as does the computer going
+  quiet for 2 s or USB going. A computer cannot switch the unit off. `peek` reads RAM, the USB0 wrapper's registers and SYSCFG0, not the MUSB core's (reading its interrupt
   registers clears them). The port needs the firmware the tool came with: an older firmware has one cable.
 - **Endpoints and IDs:** the MIDI interface uses bulk endpoints 0x01 and 0x81 (64 bytes), audio isochronous
   0x03 and 0x83 (196 bytes), the mass storage interface (USB DRIVE, interface 4) 0x02 and 0x82. The USB IDs are

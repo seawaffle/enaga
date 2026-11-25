@@ -24,14 +24,25 @@
  *   05 PEEK <address: 5 bytes> <words: 1>     05 <address: 5 bytes> <word: 5 bytes> ..., 1-32 words read from
  *                                                RAM (DDR, shared RAM, L2) or the USB0 wrapper's and SYSCFG0's
  *                                                registers; 7F <command> "<reason>" if not allowed
+ *   06 KEY <key> <1 down, 0 up>               06, once a frame has been drawn after it (see below)
+ *   07 TURN <encoder 0-4> <detents: 2>        07, likewise; detents are 14-bit two's complement
+ *   08 PAD <pad 0-14> <velocity>              08, likewise; velocity 1-127 presses, 0 releases
+ *   09 PRESSURE <pad> <0-127>                 09, likewise; the pad must be held from here
+ *   0A RELEASE                                0A, likewise: every key and pad held from here let go
  *   anything else                             7F <command> "UNKNOWN"
+ *
+ * Remote input (06-0A) goes through main.c's remote_*: keys and pads as if pressed on the unit, keys 0-47 as
+ * enaga_key and 48 for POWER, which is refused ("NOT ALLOWED") unless F1 is down, as it would switch the unit off.
+ * The answer waits until the input has been delivered and a frame drawn after it, so a SCREEN asked for next
+ * shows its effect. Remote input is let go when the computer releases it, stops reading (below), or USB goes,
+ * and when anything on the unit is pressed or turned.
  *
  * One request is answered at a time: a new one waits for the message being sent to finish, then replaces the
  * rest of the answer under way (LOG ON and OFF act at once). If nothing can be sent for DEBUG_STALL_MS (the computer stopped reading), the log stops and the answer
  * is dropped (the message under way still ends whole), so a forgotten port does not hold up the app's MIDI for
  * long. */
 
-#define DEBUG_PROTOCOL  1
+#define DEBUG_PROTOCOL  2
 #define DEBUG_CABLE     1
 #define DEBUG_STALL_MS  2000u
 #define DEBUG_SHARE     128u                   /* bytes of TinyUSB's MIDI IN buffer the debug port may fill */
@@ -39,7 +50,7 @@
 #define MESSAGE_MAX     (8 + 128 + 2)          /* the longest: a screen row */
 #define PEEK_MAX        32u
 
-enum { HELLO, LOG_ON, LOG_OFF, STATUS, SCREEN, PEEK, LOST = 2, ERROR = 0x7F };
+enum { HELLO, LOG_ON, LOG_OFF, STATUS, SCREEN, PEEK, KEY, TURN, PAD, PRESSURE, RELEASE, LOST = 2, ERROR = 0x7F };
 
 u32 usb_debug_requests, usb_debug_messages;    /* counted for tests and STATUS */
 
@@ -60,6 +71,7 @@ static u32 answer_step;                        /* how far: the status line or sc
 static u8 screen[CANVAS_W * CANVAS_H];         /* the frame being sent, copied when asked for */
 static u32 peek_address, peek_words;
 static u32 progress_ms;                        /* when something was last sent */
+static u32 input_pass;                         /* kernel_passes when the remote input being answered was given */
 
 /* ---- Building messages ---- */
 
@@ -196,10 +208,19 @@ static void peek_message(void)
     finish();
 }
 
-/* The next message of the answer under way into `message`; 0 when it is done. */
+/* The next message of the answer under way into `message`; 0 when it is done, -1 while it waits for a frame. */
 static int next_answer(void)
 {
     switch (answering) {
+    case KEY: case TURN: case PAD: case PRESSURE: case RELEASE:
+        if (answer_step) return 0;
+        /* Keys reach the app at the next pass's poll_inputs, pads at once: a frame drawn in a later pass than the
+         * request's comes after either. */
+        if ((int)(kernel_drawn - input_pass) <= 0) return -1;
+        answer_step = 1;
+        begin(answering);
+        finish();
+        return 1;
     case STATUS: return status_line(answer_step++);
     case SCREEN: return screen_row(answer_step++);
     case PEEK: if (answer_step++) return 0; peek_message(); return 1;
@@ -257,6 +278,27 @@ static void start(const u8 *request, u32 request_bytes)
         answering = command;
         answer_step = 0;
         break;
+    case KEY: case TURN: case PAD: case PRESSURE: case RELEASE: {
+        int refused = 0;
+        if (command == RELEASE) remote_release();
+        else if (request_bytes != (command == TURN ? 4u : 3u)) refused = 1;
+        else if (command == KEY) refused = remote_key(request[1], request[2]) < 0;
+        else if (command == TURN) {
+            int detents = request[2] | request[3] << 7;
+            if (request[1] >= 5) refused = 1;
+            else remote_turn(request[1], detents & 0x2000 ? detents - 0x4000 : detents);
+        } else if (command == PAD) refused = remote_pad(request[1], request[2]) < 0;
+        else refused = remote_pressure(request[1], request[2]) < 0;
+        if (refused) {
+            error(command, "NOT ALLOWED");
+            answering = -1;
+            return;
+        }
+        input_pass = kernel_passes;
+        answering = command;
+        answer_step = 0;
+        break;
+    }
     case PEEK: {
         u32 address = 0, i;
         for (i = 0; i < 5 && 1 + i < request_bytes; i++) address |= (u32)request[1 + i] << (7 * i);
@@ -304,6 +346,7 @@ void usb_debug_poll(void)
 {
     if (!tud_mounted()) {
         log_on = 0; answering = -1; message_bytes = message_sent = 0; receiving = 0; has_pending = 0;
+        if (remote_active) remote_release();
         return;
     }
     if (!log_on && answering < 0 && !has_pending && message_sent == message_bytes) { progress_ms = timer_ms(); return; }
@@ -317,12 +360,14 @@ void usb_debug_poll(void)
             start(pending, pending_bytes);
             continue;
         }
-        if (next_answer()) continue;
-        answering = -1;
+        int next = next_answer();
+        if (next > 0) continue;
+        if (next == 0) answering = -1;         /* -1: the answer waits for a frame; log lines go meanwhile */
         if (!next_log()) { progress_ms = timer_ms(); return; }
     }
     if (timer_ms() - progress_ms > DEBUG_STALL_MS) {   /* the computer stopped reading: nothing more after the */
         log_on = 0;                                    /* message under way, which ends whole if it ever reads */
         answering = -1;
+        if (remote_active) remote_release();           /* and nothing stays held by a computer gone quiet */
     }
 }

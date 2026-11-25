@@ -1,6 +1,6 @@
 """The debug port (firmware/usb/usb_debug.c, tools/usb_debug.py) on the emulator: a second USB MIDI cable carrying
 Enaga's log, its state, the screen and memory words as SysEx, driven through tools/usb_debug.py's Client over the
-emulator's USB host, while cable 0 stays the app's MIDI, intact.
+emulator's USB host, while cable 0 stays the app's MIDI, intact; and keys, knobs and pads pressed from the computer.
 
     ENAGA_EMULATOR=/path/to/emulator python3 -B -m unittest tests.test_usb_debug
 """
@@ -62,11 +62,12 @@ class EmulatorTransport:
             waited += 0.005
 
 
-@unittest.skipUnless(paths.emulator_present() and build_app.tools_present(), "needs ENAGA_EMULATOR and the toolchain")
-class UsbDebug(unittest.TestCase):
+class Emulated(unittest.TestCase):
+    APP = "midi"
+
     def setUp(self):
         from emulate import Emulation
-        self.emu = Emulation(HERE / "apps" / "midi")
+        self.emu = Emulation(HERE / "apps" / self.APP)
         self.addCleanup(self.emu.close)
         self.assertIsNone(self.emu.run(BOOT)["error"])
         self.emu.cpu.usb_attach()
@@ -80,10 +81,13 @@ class UsbDebug(unittest.TestCase):
         self.emu.key(STEP1 + step - 1, False)
         self.transport.run_ms(10)
 
+
+@unittest.skipUnless(paths.emulator_present() and build_app.tools_present(), "needs ENAGA_EMULATOR and the toolchain")
+class UsbDebug(Emulated):
     def test_two_cables_and_hello(self):
         config = bytes(self.config["configuration"]) if isinstance(self.config, dict) else bytes(self.config)
         self.assertIn(bytes([6, 0x25, 0x01, 2, 1, 5]), config)          # MIDI OUT endpoint: 2 embedded jacks (1, 5)
-        self.assertEqual(self.client.hello(), "ENAGA 0.3.0 1")
+        self.assertEqual(self.client.hello(), "ENAGA 0.3.0 2")
 
     def test_the_log_kept_and_as_it_happens(self):
         self.client.log(True)
@@ -177,7 +181,94 @@ class UsbDebug(unittest.TestCase):
         self.transport.run_ms(10)
         self.assertEqual(self.client.log_lines(0.1), [])                 # ... which does not come: the log stopped
         self.assertIn("M90 7F 64", self.emu.report()["log"])
-        self.assertEqual(self.client.hello(), "ENAGA 0.3.0 1")           # and the port still answers
+        self.assertEqual(self.client.hello(), "ENAGA 0.3.0 2")           # and the port still answers
+
+    def test_a_remote_key_is_a_key(self):
+        """STEP 1 pressed from the computer sends the app's note, as the unit's own key does."""
+        self.client.press("STEP1")
+        self.transport.receive(0.05)
+        self.assertIn(bytes([0x09, 0x90, 60, 100]), [self.transport.midi[i:i + 4]
+                                                     for i in range(0, len(self.transport.midi), 4)])
+
+
+@unittest.skipUnless(paths.emulator_present() and build_app.tools_present(), "needs ENAGA_EMULATOR and the toolchain")
+class RemoteInput(Emulated):
+    """Keys, knobs and pads from the debug port, seen by tests/apps/keys, which logs every event."""
+    APP = "keys"
+
+    def log(self):
+        return self.emu.report()["log"]
+
+    def marked(self):
+        """The mark on the display (not on the canvas, which SCREEN shows)."""
+        from display import pixels
+        self.transport.run_ms(5)                                         # the frame's DMA
+        shown = pixels(self.emu.cpu.oled_frame()[0])
+        return all(shown[128 * y + x] == 255 for y in range(3) for x in range(125, 128))
+
+    def test_keys_and_the_mark(self):
+        self.client.key("STEP1", True)
+        self.assertEqual(self.log()[-1], "K32 1")
+        self.assertTrue(self.marked())                                   # the answer came after a frame
+        frame = self.client.screen()
+        self.assertFalse(all(frame[y][x] == 15 for y in range(3) for x in range(125, 128)))   # the app's frame
+        self.client.key(32, False)
+        self.assertEqual(self.log()[-1], "K32 0")
+        self.client.press("F2", "F3")
+        self.assertEqual(self.log()[-4:], ["K26 1", "K20 1", "K20 0", "K26 0"])
+        self.client.release()
+        self.assertFalse(self.marked())
+        with self.assertRaisesRegex(KeyError, "not a key"):
+            self.client.key("STEP17", True)
+
+    def test_knobs(self):
+        self.client.turn("VALUE", -3)
+        self.client.turn("A", 200)
+        self.assertEqual(self.log()[-2:], ["E4 -3", "E0 200"])
+
+    def test_pads_and_pressure(self):
+        self.client.pad(5, 90)
+        self.client.pressure(5, 40)
+        self.client.pad(5, 0)
+        self.assertEqual(self.log()[-3:], ["P5 90", "A5 40", "P5 0"])
+        with self.assertRaisesRegex(RuntimeError, "NOT ALLOWED"):
+            self.client.pressure(5, 40)                                  # not held
+        self.client.pad(14, 127)
+        self.client.release()
+        self.assertEqual(self.log()[-2:], ["P14 127", "P14 0"])
+
+    def test_power_only_opens_the_menu(self):
+        with self.assertRaisesRegex(RuntimeError, "NOT ALLOWED"):
+            self.client.key("POWER", True)                               # alone it would switch the unit off
+        self.client.key("F1", True)
+        self.client.key("POWER", True)
+        self.assertEqual(self.emu.word("menu_active"), 1)
+        self.assertEqual(self.log()[-2:], ["K19 1", "K19 0"])            # the app let go of F1 as the menu opened
+        self.transport.run_ms(1500)                                      # POWER held: still on
+        self.assertEqual(self.emu.word("menu_active"), 1)
+        self.client.release()
+        self.client.press("F1", "POWER")
+        self.assertEqual(self.emu.word("menu_active"), 0)
+
+    def test_the_unit_takes_over(self):
+        self.client.key("STEP1", True)
+        self.client.pad(3, 64)
+        self.emu.key(STEP1 + 1, True)                                    # STEP 2 on the unit
+        self.transport.run_ms(30)
+        self.assertEqual(self.log()[-3:], ["P3 0", "K32 0", "K33 1"])
+        self.assertEqual(self.emu.word("remote_active"), 0)
+        self.emu.key(STEP1 + 1, False)
+        self.transport.run_ms(30)
+
+    def test_a_computer_gone_quiet_lets_go(self):
+        self.client.key("STEP1", True)
+        self.client.log(True)
+        for i in range(10):                                              # log lines pile up; nobody reads
+            self.client.ask(usb_debug.STATUS)
+            self.transport.run_ms(5)
+        self.transport.run_ms(2500)
+        self.assertIn("K32 0", self.log())
+        self.assertEqual(self.emu.word("remote_active"), 0)
 
 
 if __name__ == "__main__":

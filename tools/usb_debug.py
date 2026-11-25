@@ -9,7 +9,16 @@ firmware/usb/usb_debug.c.
     python3 -B tools/usb_debug.py screen shot.png         # the screen as shown last
     python3 -B tools/usb_debug.py peek 0xC0001000 4       # words of RAM, or USB0 wrapper / SYSCFG0 registers
     python3 -B tools/usb_debug.py peek usb_tx_lost --elf build/firmware/enaga.elf   # a firmware variable by name
+    python3 -B tools/usb_debug.py press F1 POWER          # keys, held together then let go (POWER only with F1)
+    python3 -B tools/usb_debug.py turn VALUE -3           # a knob (A-D, VALUE), by detents
+    python3 -B tools/usb_debug.py pad 5 --velocity 90     # a pad pressed and let go
+    python3 -B tools/usb_debug.py release                 # everything held from the computer let go
     python3 -B tools/usb_debug.py ports                   # the MIDI ports seen, to pick one with --port
+
+Each input answers once a frame has been drawn after it, so a `screen` straight after shows its effect. Scripts
+use Client (press, key, turn, pad, pressure, release, screen, status, log_lines ...) the same way. While input
+from the computer is in use the unit shows a small square at the top right; pressing or turning anything on the
+unit lets go of it.
 
 Needs python-rtmidi (pip install python-rtmidi), on Windows, macOS and Linux. The port is found by asking each
 Enaga MIDI port in turn (debug-looking names first); --port NAME picks one (a part of its name). A HELLO that goes
@@ -22,8 +31,15 @@ import time
 import zlib
 from pathlib import Path
 
-COMMANDS = {"hello": 0, "log_on": 1, "log_off": 2, "status": 3, "screen": 4, "peek": 5}
 HELLO, LOG, LOST, STATUS, SCREEN, PEEK, ERROR = 0, 1, 2, 3, 4, 5, 0x7F
+KEY, TURN, PAD, PRESSURE, RELEASE = 6, 7, 8, 9, 10
+
+# enaga_key (include/enaga/abi.h), and POWER as the debug port numbers it
+KEYS = {"PUSH_B": 0, "PUSH_A": 1, "PUSH_C": 2, "PUSH_D": 3, "PUSH_VALUE": 4, "SELECT_LEFT": 8, "SELECT_RIGHT": 9,
+        "OCTAVE_LEFT": 16, "UP": 17, "RIGHT": 18, "F1": 19, "F3": 20, "F7": 21, "F5": 22, "OK": 23, "LEFT": 24,
+        "DOWN": 25, "F2": 26, "F4": 27, "F8": 28, "F6": 29, "CLR": 30, "OCTAVE_RIGHT": 31, "POWER": 48,
+        **{f"STEP{n}": 31 + n for n in range(1, 17)}}
+ENCODERS = {"A": 0, "B": 1, "C": 2, "D": 3, "VALUE": 4}
 HEADER = bytes([0xF0, 0x7D, 0x45])
 
 
@@ -114,6 +130,42 @@ class Client:
         data = self.answer(PEEK, lambda got: got)[0]
         return [unnumber(data[5 + 5 * i:10 + 5 * i]) for i in range(words)]
 
+    # ---- Remote input: each call returns once the unit has drawn a frame after it ----
+
+    def _input(self, command, data=b""):
+        self.ask(command, data)
+        self.answer(command, lambda got: got)
+
+    def key(self, key, down):
+        """A key (a KEYS name or its number) down or up."""
+        self._input(KEY, bytes([key_number(key), 1 if down else 0]))
+
+    def press(self, *keys, hold=0.0):
+        """Keys pressed in order, held `hold` seconds (on the computer's clock), let go in reverse."""
+        for k in keys:
+            self.key(k, True)
+        if hold:
+            time.sleep(hold)
+        for k in reversed(keys):
+            self.key(k, False)
+
+    def turn(self, encoder, detents):
+        """A knob (A-D, VALUE, or 0-4) turned by detents (-8192 to 8191)."""
+        encoder = ENCODERS[encoder.upper()] if isinstance(encoder, str) else encoder
+        self._input(TURN, bytes([encoder]) + number(detents & 0x3FFF, 2))
+
+    def pad(self, pad, velocity=100):
+        """Pad 0-14 pressed with velocity 1-127, or let go with 0."""
+        self._input(PAD, bytes([pad, velocity]))
+
+    def pressure(self, pad, pressure):
+        """Pressure 0-127 on a pad held with pad()."""
+        self._input(PRESSURE, bytes([pad, pressure]))
+
+    def release(self):
+        """Every key and pad held from here let go; the unit's mark goes."""
+        self._input(RELEASE)
+
     def log(self, on=True):
         self.ask(1 if on else 2)
 
@@ -129,6 +181,17 @@ class Client:
                 others.append((c, data))
         self.waiting = others + self.waiting
         return out
+
+
+def key_number(key):
+    if isinstance(key, int):
+        return key
+    name = key.upper()
+    if name.isdigit():
+        return int(name)
+    if name not in KEYS:
+        raise KeyError(f"{key}: not a key ({', '.join(KEYS)})")
+    return KEYS[name]
 
 
 # ---- USB MIDI event packets (for transports that see the raw stream: the emulator's) ---------------------------
@@ -306,6 +369,17 @@ def main(argv=None):
     peek.add_argument("address", help="an address (0x...) or, with --elf, a symbol")
     peek.add_argument("words", type=int, nargs="?", default=1)
     peek.add_argument("--elf", type=Path, help="the firmware's ELF, for symbols (build/firmware/enaga.elf)")
+    press = sub.add_parser("press", help="keys held together, then let go")
+    press.add_argument("keys", nargs="+", help=f"key names ({', '.join(KEYS)}) or numbers")
+    press.add_argument("--hold", type=int, default=0, help="milliseconds to hold them")
+    turn = sub.add_parser("turn", help="a knob, by detents")
+    turn.add_argument("encoder", choices=list(ENCODERS), type=str.upper)
+    turn.add_argument("detents", type=int)
+    pad = sub.add_parser("pad", help="a pad pressed and let go")
+    pad.add_argument("pad", type=int, choices=range(15), metavar="PAD", help="0-14")
+    pad.add_argument("--velocity", type=int, default=100, choices=range(1, 128), metavar="1-127")
+    pad.add_argument("--hold", type=int, default=0, help="milliseconds to hold it")
+    sub.add_parser("release", help="everything held from the computer let go")
     sub.add_parser("ports", help="the MIDI ports seen")
     args = ap.parse_args(argv)
     if args.command == "ports":
@@ -338,6 +412,19 @@ def run(client, args):
         address = int(args.address, 0) if args.address[:1].isdigit() else elf_symbol(args.elf, args.address)
         for i, word in enumerate(client.peek(address, args.words)):
             print(f"{address + 4 * i:08X}  {word:08X}  {word}")
+    elif args.command in ("press", "turn", "pad", "release"):
+        try:
+            if args.command == "press":
+                client.press(*args.keys, hold=args.hold / 1000)
+            elif args.command == "turn":
+                client.turn(args.encoder, args.detents)
+            elif args.command == "pad":
+                client.pad(args.pad, args.velocity)
+                if args.hold:
+                    time.sleep(args.hold / 1000)
+                client.pad(args.pad, 0)
+        finally:
+            client.release()                   # nothing left held, and the unit's mark goes
     return 0
 
 
