@@ -2,7 +2,9 @@
 """Capture Enaga's peripheral register accesses phase by phase on the emulator, for diffing against the stock's.
 
 The emulator's capture (cpu.capture_start, cpu.codec_log, cpu.sd_log) records every access to USB0, SYSCFG0, the
-PSCs, I2C0, McASP0, the EDMA3 controller and MMCSD0, plus the codec's register writes and the SD card's commands.
+PSCs, I2C0, McASP0, the EDMA3 controller and MMCSD0, plus the codec's register writes and the SD card's commands;
+where the emulator has cpu.psc_violations, each phase also lists the accesses to a module its PSC has not enabled
+(tests/test_usb.py expects none).
 The ranges, the phase names and the raw format are those of the emulator's stock_register_capture.py, so the
 stock tables (smpltrek-re docs/stock-register-writes) and Enaga's line up phase by phase:
 
@@ -27,9 +29,9 @@ stock tables (smpltrek-re docs/stock-register-writes) and Enaga's line up phase 
 
     python3 tools/register_capture.py [--output build/register-capture]
 
-Writes raw.json (a list of the two runs). The emulator's stock_register_tables.py --raw ... --output ... turns it
-into tables; its function column names stock functions, so this script also writes symbols.json (Enaga's
-firmware symbols, name to address) for the diff (tools/register_diff.py) to name Enaga's PCs.
+Writes raw.json (a list of the two runs) and symbols.json (Enaga's firmware symbols, name to address). The
+emulator's stock_register_tables.py --raw raw.json --all-runs --symbols symbols.json --output ... turns them into
+tables, both runs' phases each under its own name and the PCs named by Enaga's functions.
 """
 import argparse
 import json
@@ -61,7 +63,8 @@ def capture(scenario):
     result = dict(scenario=scenario, project=f"tests/apps/{app}", phases=[], fault=None)
     with Emulation(ENAGA / "tests" / "apps" / app, app.upper()) as emu:
         cpu = emu.cpu
-        since = dict(codec=0, sd=0)
+        since = dict(codec=0, sd=0, psc=0)
+        psc_log = hasattr(cpu, "psc_violations")
         cpu.capture_start(RANGES)
         current = ["boot"]
 
@@ -85,6 +88,8 @@ def capture(scenario):
             mmio = cpu.capture_take()
             codec, since["codec"] = cpu.codec_log(since["codec"])
             sd, since["sd"] = cpu.sd_log(since["sd"])
+            if psc_log:
+                extra["psc_violations"], since["psc"] = cpu.psc_violations(since["psc"])
             result["phases"].append(dict(name=name, end=cpu.cycles(), mmio=mmio, codec=codec, sd=sd, **extra))
             current[0] = None
 
@@ -197,9 +202,10 @@ def main(argv=None):
     for result in runs:
         print(f'== {result["scenario"]}' + (f'  FAULT {result["fault"]}' if result["fault"] else ""))
         for phase in result["phases"]:
-            extra = {k: v for k, v in phase.items() if k not in ("name", "end", "mmio", "codec", "sd")}
+            extra = {k: v for k, v in phase.items() if k not in ("name", "end", "mmio", "codec", "sd", "psc_violations")}
+            psc = f'  psc {len(phase["psc_violations"])}' if "psc_violations" in phase else ""
             print(f'  {phase["name"]:14} mmio {len(phase["mmio"]):6}  codec {len(phase["codec"]):4}  '
-                  f'sd {len(phase["sd"]):5}  {extra if extra else ""}')
+                  f'sd {len(phase["sd"]):5}{psc}  {extra if extra else ""}')
     return 1 if any(r["fault"] for r in runs) else 0
 
 

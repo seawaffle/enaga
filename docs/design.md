@@ -2087,7 +2087,10 @@ the battery app: USB DRIVE opened, read, written and ejected, with the remount).
   wrapper's interrupts before its PHY hook, which is where Enaga enabled PSC1 module 1. Accessing a module that is
   still off is undefined on the chip (it worked on the unit, and the core's reset just after undid the writes; the
   original firmware never does it). `usb_init` now starts the PHY before `tusb_init`, and the hook skips a second
-  start. `test_usb.test_the_core_is_powered_before_it_is_touched` fails on the old order.
+  start. `test_usb.test_no_module_is_touched_while_powered_off` runs both capture runs (boot, USB attach,
+  enumeration, MIDI, audio streaming, suspend, detach, the input routes, power-off, a USB DRIVE session) on the
+  emulator's PSC violation log and expects no access to a module that is not enabled; it fails on the old order
+  (3 at boot, all in `dcd_init`) and skips on an emulator without the log.
 - **The same as the original:** the PHY bring-up (CFGCHIP2 0x0972, PSC, CTRLR reset, the clock-good wait, POWER 0
   then 0x40), the codec's whole start-up (49 writes against Enaga's 42: the same values in the same order; the
   extra seven are the original's first route), every McASP0 register, the SD clock (CLKRT 3) and the card's

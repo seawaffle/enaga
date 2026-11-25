@@ -194,20 +194,20 @@ class Usb(unittest.TestCase):
         self.press(1)
         self.assertEqual(self.take(), bytes([0x09, 0x90, 60, 100]))       # nothing stale from the unplugged time
 
-    def test_the_core_is_powered_before_it_is_touched(self):
-        """No USB0 access before PSC1 module 1 (USB0) is enabled: TinyUSB's dcd_init used to touch INTRUSBE and the
-        wrapper before its PHY hook, which powers the core (found by diffing against the stock's register writes)."""
+    def test_no_module_is_touched_while_powered_off(self):
+        """No access to a peripheral whose PSC module is not enabled, through boot, USB (attach, enumeration, MIDI,
+        audio streaming, suspend, detach), the input routes, power-off and a USB DRIVE session: TinyUSB's dcd_init
+        used to touch the USB0 core before its PHY hook powered it (found by diffing against the stock's writes)."""
+        import register_capture
         from emulate import Emulation
-        self.emu = Emulation(HERE / "apps" / "midi")
-        self.addCleanup(self.emu.close)
-        if not hasattr(self.emu.cpu, "capture_start"):
-            self.skipTest("the emulator has no register capture")
-        self.emu.cpu.capture_start([(0x01E00000, 0x01E10000), (0x01E27A04, 0x01E27A08)], writes_only=True)
-        self.assertIsNone(self.emu.run(BOOT)["error"])
-        rows = self.emu.cpu.capture_take(stop=True)
-        first_core = next(i for i, r in enumerate(rows) if r["address"] < 0x01E10000)
-        enabled = next(i for i, r in enumerate(rows) if r["address"] == 0x01E27A04 and r["value"] & 7 == 3)
-        self.assertLess(enabled, first_core)
+        with Emulation(HERE / "apps" / "midi") as emu:
+            if not hasattr(emu.cpu, "psc_violations") or not hasattr(emu.cpu, "capture_start"):
+                self.skipTest("the emulator has no PSC violation log")
+        for scenario in ("main", "drive"):
+            result = register_capture.capture(scenario)
+            self.assertIsNone(result["fault"], scenario)
+            for phase in result["phases"]:
+                self.assertEqual(phase["psc_violations"], [], f'{scenario} {phase["name"]}')
 
 
 if __name__ == "__main__":
