@@ -451,8 +451,9 @@ full-speed USB MIDI, audio and mass storage device with TinyUSB (`firmware/third
   Keys, knobs and pads from the computer are delivered as the unit's own (pads as press, pressure and release,
   without raw readings), and each answers once a frame has been drawn after it, so a `screen` next shows its
   effect. While they are in use a small square shows at the top right of the display (not in `screen`'s image);
-  pressing or turning anything on the unit lets go of everything the computer held, as does the computer going
-  quiet for 2 s or USB going. A computer cannot switch the unit off. `peek` reads RAM, the USB0 wrapper's registers and SYSCFG0, not the MUSB core's (reading its interrupt
+  pressing or turning anything on the unit lets go of everything the computer held, as do 5 s without any request
+  from the computer (a script holding longer uses `Client.wait`, which asks HELLO each second) and USB going. A
+  computer cannot switch the unit off. `peek` reads RAM, the USB0 wrapper's registers and SYSCFG0, not the MUSB core's (reading its interrupt
   registers clears them). The port needs the firmware the tool came with: an older firmware has one cable.
 - **Endpoints and IDs:** the MIDI interface uses bulk endpoints 0x01 and 0x81 (64 bytes), audio isochronous
   0x03 and 0x83 (196 bytes), the mass storage interface (USB DRIVE, interface 4) 0x02 and 0x82. The USB IDs are

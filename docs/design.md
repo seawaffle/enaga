@@ -2385,9 +2385,33 @@ photographs of STATUS.
   - **Who is in charge:** while remote input is in use a 3 x 3 square shows at the top right. It is drawn on the
     canvas just before the frame is converted and the pixels put back after, so apps that draw only what changed
     never keep it, and SCREEN shows the app's own frame. Any key, knob or pad on the unit releases everything the
-    computer held, as do RELEASE, a computer silent for 2 s while the port has something to send, and USB going.
+    computer held, as do RELEASE, a computer silent for 2 s while the port has something to send, USB going, and
+    5 s without any request (`REMOTE_HOLD_MS`, added after the unit session below).
   - **Cost:** nothing while unused beyond a few comparisons per pass; no change for apps.
   - **Tests** (`RemoteInput`, on `tests/apps/keys`, which now logs knobs too): keys with the mark on the display
     and not in SCREEN, a chord's order, knobs either way, pads with pressure and RELEASE, POWER refused alone and
-    opening and closing the menu with F1 (held 1.5 s: no switch-off), the unit taking over, a computer gone quiet;
-    and STEP 1 from the computer sending the MIDI app's note.
+    opening and closing the menu with F1 (held 1.5 s: no switch-off), the unit taking over, a computer gone quiet,
+    a hold kept by `Client.wait` for 7 s and let go 5 s after the last request; and STEP 1 from the computer
+    sending the MIDI app's note.
+  - **On the unit (2026-11-25, Windows 11 26200, build 169b7c1c; `~/smpltrek-debug/remote-input/
+    FINDINGS-remote-input.md` on the user's machine): all twelve checks passed.**
+    - CHECK's pages changed by holding F4 from the computer. Keys counted once a press, chords came in order, a held
+      key lit its LED, knobs moved the VOL and VALUE LEDs, pads gave velocity and pressure. POWER alone was refused
+      and the unit stayed on; F1 + POWER opened the menu, DOWN and UP moved in it, and F1 + POWER closed it.
+    - Taking over by hand worked for a key, a knob and a pad, and unplugging USB let go within a second or two.
+      MIDI notes and CC from remote presses reached a monitor on the MIDI port.
+    - A press (two inputs, each answered after a frame) took 100 ms, a screen 50 ms, and a whole command line,
+      Python start included, about 250 ms.
+    - With nobody at the unit, a script went MIDI → CARD, ran the card test and read its result from the log:
+      `CARD W 1676 R 7501`, `CARD S 2068 517/S`, in 9.4 s.
+    - **The gap:** a program killed while holding STEP 1 left it held. After 36 s it was still held, through another
+      program opening and closing the port, and it ended only when a key was pressed on the unit. Windows keeps
+      reading the endpoint after the program is gone, so the 2 s stall never comes. Fixed with `REMOTE_HOLD_MS`:
+      5 s without a request lets go, and `Client.wait` (used by `press --hold`, `pad --hold` and the helper)
+      asks HELLO each second.
+    - The tool's rough edges, also fixed: an unplugged port raised rtmidi's own error as a traceback (now a
+      ConnectionError, one line), and an unknown key's message was printed in a KeyError's quotes.
+    - Seen in passing, not remote input: `USB_AUDIO_OUT` counted an overrun for nearly every packet while no app
+      read USB input (the ring-drain fix planned with the USB work). The count stopped after a replug, since
+      Windows no longer streamed to the unit; `USB_AUDIO_IN UNDERRUNS` went 0 → 357 across the unplug. CHECK's
+      PAD MSG/S read 82 just after the menu closed (its one-second window spans the pause).

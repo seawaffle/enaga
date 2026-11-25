@@ -35,7 +35,9 @@
  * enaga_key and 48 for POWER, which is refused ("NOT ALLOWED") unless F1 is down, as it would switch the unit off.
  * The answer waits until the input has been delivered and a frame drawn after it, so a SCREEN asked for next
  * shows its effect. Remote input is let go when the computer releases it, stops reading (below), or USB goes,
- * and when anything on the unit is pressed or turned.
+ * when anything on the unit is pressed or turned, and after REMOTE_HOLD_MS without any request: a program killed
+ * while holding a key never says so, and Windows goes on reading the port (unit session, 2026-11-25), so a
+ * script holding longer sends something meanwhile (usb_debug.py's Client.wait sends HELLO each second).
  *
  * One request is answered at a time: a new one waits for the message being sent to finish, then replaces the
  * rest of the answer under way (LOG ON and OFF act at once). If nothing can be sent for DEBUG_STALL_MS (the computer stopped reading), the log stops and the answer
@@ -45,6 +47,7 @@
 #define DEBUG_PROTOCOL  2
 #define DEBUG_CABLE     1
 #define DEBUG_STALL_MS  2000u
+#define REMOTE_HOLD_MS  5000u                  /* remote input let go after this long without a request */
 #define DEBUG_SHARE     128u                   /* bytes of TinyUSB's MIDI IN buffer the debug port may fill */
 #define REQUEST_MAX     16
 #define MESSAGE_MAX     (8 + 128 + 2)          /* the longest: a screen row */
@@ -72,6 +75,7 @@ static u8 screen[CANVAS_W * CANVAS_H];         /* the frame being sent, copied w
 static u32 peek_address, peek_words;
 static u32 progress_ms;                        /* when something was last sent */
 static u32 input_pass;                         /* kernel_passes when the remote input being answered was given */
+static u32 request_ms;                         /* when the last request came */
 
 /* ---- Building messages ---- */
 
@@ -333,6 +337,7 @@ void usb_debug_byte(u8 byte)                   /* a byte the computer sent on th
             for (i = 2; i < request_bytes; i++) pending[i - 2] = request[i];
             pending_bytes = request_bytes - 2;
             has_pending = 1;
+            request_ms = timer_ms();
             usb_debug_requests++;
         }
         return;
@@ -349,6 +354,7 @@ void usb_debug_poll(void)
         if (remote_active) remote_release();
         return;
     }
+    if (remote_active && !has_pending && timer_ms() - request_ms > REMOTE_HOLD_MS) remote_release();
     if (!log_on && answering < 0 && !has_pending && message_sent == message_bytes) { progress_ms = timer_ms(); return; }
     for (;;) {
         if (message_sent < message_bytes) {

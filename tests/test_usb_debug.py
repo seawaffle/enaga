@@ -260,6 +260,20 @@ class RemoteInput(Emulated):
         self.emu.key(STEP1 + 1, False)
         self.transport.run_ms(30)
 
+    def test_a_hold_lasts_while_the_computer_asks(self):
+        """A program killed while holding a key never lets go, and Windows keeps reading the port (unit session,
+        2026-11-25): the unit lets go after 5 s without a request. Client.wait keeps a hold going."""
+        self.client.key("STEP1", True)
+        self.client.wait(7)                                              # HELLO each second
+        self.assertEqual(self.log()[-1], "K32 1")
+        self.assertEqual(self.emu.word("remote_active"), 1)
+        self.client.messages(0)                                          # the HELLO answers are not left waiting
+        self.transport.run_ms(4000)
+        self.assertEqual(self.log()[-1], "K32 1")
+        self.transport.run_ms(1500)                                      # 5 s without a request: let go
+        self.assertEqual(self.log()[-1], "K32 0")
+        self.assertEqual(self.emu.word("remote_active"), 0)
+
     def test_a_computer_gone_quiet_lets_go(self):
         self.client.key("STEP1", True)
         self.client.log(True)

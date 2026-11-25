@@ -18,7 +18,7 @@ firmware/usb/usb_debug.c.
 Each input answers once a frame has been drawn after it, so a `screen` straight after shows its effect. Scripts
 use Client (press, key, turn, pad, pressure, release, screen, status, log_lines ...) the same way. While input
 from the computer is in use the unit shows a small square at the top right; pressing or turning anything on the
-unit lets go of it.
+unit lets go of it, as does 5 s without any request (Client.wait keeps a hold going).
 
 Needs python-rtmidi (pip install python-rtmidi), on Windows, macOS and Linux. The port is found by asking each
 Enaga MIDI port in turn (debug-looking names first); --port NAME picks one (a part of its name). A HELLO that goes
@@ -140,12 +140,24 @@ class Client:
         """A key (a KEYS name or its number) down or up."""
         self._input(KEY, bytes([key_number(key), 1 if down else 0]))
 
+    def wait(self, seconds):
+        """Wait, keeping what is held from here held: the unit lets go of remote input after 5 s without a
+        request, so this asks HELLO each second. Messages that arrive meanwhile are kept for later calls."""
+        end = self.clock() + seconds
+        asked = self.clock()
+        while self.clock() < end:
+            got = self.transport.receive(min(end - self.clock(), 0.25))
+            self.waiting += [m for m in (decode(s) for s in got) if m]
+            if self.clock() - asked >= 1.0 and self.clock() < end:
+                self.hello()
+                asked = self.clock()
+
     def press(self, *keys, hold=0.0):
         """Keys pressed in order, held `hold` seconds (on the computer's clock), let go in reverse."""
         for k in keys:
             self.key(k, True)
         if hold:
-            time.sleep(hold)
+            self.wait(hold)
         for k in reversed(keys):
             self.key(k, False)
 
@@ -268,7 +280,10 @@ class RtMidiTransport:
         self.buffer = bytearray()
 
     def send(self, sysex):
-        self.midi_out.send_message(list(sysex))
+        try:
+            self.midi_out.send_message(list(sysex))
+        except Exception as e:                 # rtmidi's errors: the port went away (unplugged)
+            raise ConnectionError(f"the debug port went away ({e})") from e
 
     def receive(self, timeout):
         out, end = [], time.monotonic() + timeout
@@ -388,8 +403,8 @@ def main(argv=None):
     client = open_port(args.port)
     try:
         return run(client, args)
-    except (RuntimeError, TimeoutError, KeyError) as e:   # refused, no answer, an unknown symbol: one line
-        print(f"usb_debug: {e}", file=sys.stderr)
+    except (RuntimeError, TimeoutError, KeyError, ConnectionError) as e:   # refused, no answer, unknown, unplugged
+        print(f"usb_debug: {e.args[0] if isinstance(e, KeyError) and e.args else e}", file=sys.stderr)
         return 1
 
 
@@ -421,10 +436,13 @@ def run(client, args):
             elif args.command == "pad":
                 client.pad(args.pad, args.velocity)
                 if args.hold:
-                    time.sleep(args.hold / 1000)
+                    client.wait(args.hold / 1000)
                 client.pad(args.pad, 0)
         finally:
-            client.release()                   # nothing left held, and the unit's mark goes
+            try:
+                client.release()               # nothing left held, and the unit's mark goes
+            except ConnectionError:
+                pass
     return 0
 
 
