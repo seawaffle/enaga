@@ -207,6 +207,14 @@ class UsbDrive(unittest.TestCase):
         self.assertGreaterEqual(in_packets, 2048)                # and each command's status
         self.assertGreaterEqual(out_packets, 256)
         self.assertGreater(in_wait, 0)
+        empty, queued = self.words("enaga_musb_in_empty", 3)[2], self.words("enaga_musb_in_queued", 3)[2]
+        backlog, alone = self.words("enaga_musb_out_backlog", 3)[2], self.words("enaga_musb_out_alone", 3)[2]
+        self.assertGreaterEqual(empty + queued, 2048 - 16)        # each packet loaded by an interrupt, not the first
+        self.assertAlmostEqual(backlog + alone, out_packets, delta=4)   # each OUT packet read (one arriving unarmed counts twice in out_packets)
+        self.assertGreater(self.emu.word("usb_isr_count"), 0)
+        print(f"\nemulator: IN empty {empty} queued {queued}, OUT backlog {backlog} alone {alone}, "
+              f"ISR {self.emu.word('usb_isr_count')} x avg {self.emu.word('usb_isr_us') / max(1, self.emu.word('usb_isr_count')):.1f} us, "
+              f"max {self.emu.word('usb_isr_max_us')} us")
 
     def test_ok_ends_it(self):
         self.open_drive()

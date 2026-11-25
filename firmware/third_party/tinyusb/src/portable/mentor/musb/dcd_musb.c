@@ -294,6 +294,7 @@ TU_ATTR_ALWAYS_INLINE static inline void hwfifo_flush(musb_regs_t* musb, unsigne
 /* Enaga: bulk packet timing (musb_enaga.h). */
 volatile uint32_t enaga_musb_in_packets[5], enaga_musb_in_wait_us[5];
 volatile uint32_t enaga_musb_out_packets[5], enaga_musb_out_gap_us[5];
+volatile uint32_t enaga_musb_in_empty[5], enaga_musb_in_queued[5], enaga_musb_out_backlog[5], enaga_musb_out_alone[5];
 static uint32_t enaga_in_loaded[5], enaga_out_last[5];
 
 // write to txfifo using pipe_state_t info
@@ -341,6 +342,8 @@ static void process_epin_isr(uint8_t rhport, musb_regs_t *musb_regs, uint8_t epn
       enaga_musb_tx_busy++;
       return;
     }
+    if (csrl & MUSB_TXCSRL1_FIFONE) enaga_musb_in_queued[epnum]++;   /* Enaga: a packet still waits: the host is */
+    else enaga_musb_in_empty[epnum]++;          /* the slower side; both halves empty: it waited for this interrupt */
     pipe_write(musb_regs, pipe, epnum);
   } else {
     /* Enaga: every packet is loaded. Bulk FIFOs are double-buffered (dcd_edpt_open), and the C6748's core
@@ -411,6 +414,8 @@ static void process_epout_isr(uint8_t rhport, musb_regs_t *musb_regs, uint8_t ep
   }
 
   const bool is_short = pipe_read(musb_regs, pipe, epnum);
+  if (ep_csr->rx_csrl & MUSB_RXCSRL1_RXRDY) enaga_musb_out_backlog[epnum]++;   /* Enaga: the next packet was */
+  else enaga_musb_out_alone[epnum]++;           /* already waiting (the host was ahead of this interrupt), or not */
 
   // Transfer completes on a short packet or when the rx buffer is filled.
   if (is_short || pipe->remaining == 0) {

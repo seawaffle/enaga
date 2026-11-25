@@ -2451,6 +2451,17 @@ per bulk endpoint, each packet's time from load to its TX interrupt, and the tim
   when_txpktrdy_clears`); the drive, MIDI and debug tests pass on it.
   - With 0.96 ms of SD time per 8 KiB, about 1 MiB/s is the ceiling reading if the packets now go at full speed;
     overlapping the card with the USB transfer is the next step if that falls short of 700 KiB/s.
+- **On the unit with double buffering** (build 8898abb9; `~/smpltrek-debug/drive-speed/FINDINGS-drive-speed.md`):
+  writing 95.6-96.0 s (0.21 MiB/s), reading 84.5 s (0.24 MiB/s), the mount 31.9 s (from 53), hashes matching. One
+  packet every 0.25 ms in both directions, for the mount and the copies, buffered or not: 1.3-1.7 times faster,
+  not the several times hoped for. USB audio nobody reads: `OVERRUNS 0` after a 10 s tone. MIDI and the debug port
+  as before. 0.25 ms is two 125 us microframes, which fits two explanations: the host schedules one full-speed
+  transaction per two microframes (the NAKs added retries on top before), or the unit's USB interrupt answers that
+  late. Counted next (STATUS `USB_DRIVE_FIFO`, `USB_ISR`): at each TX interrupt, whether the other FIFO half still
+  held a packet (the host is the slower side) or the FIFO was empty (the host waited for the interrupt), and the
+  same for OUT; and the interrupt handler's time. On the emulator the handler takes 1 us and every interrupt finds
+  a packet still queued. If the host is the limit, 64-byte full-speed packets cannot go much faster, and high speed
+  (step 3) is the way.
 - **USB audio nobody reads** (the first debug-port session): with no app on USB input, the computer's packets
   filled the ring and each one counted an overrun. The audio interrupt now trims the ring to its 3 ms target each
   block while USB input is unused (`usb_audio_unread`), so the counter means what it says and an app switching to

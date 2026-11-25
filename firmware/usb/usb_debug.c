@@ -184,7 +184,12 @@ static int status_line(u32 step)
              add_hex(sd_io_status); break;
     case 14: add_text("BATTERY "); add_signed(battery_level()); break;
     case 15: add_text("LOG_COUNT "); add_dec(log_count); break;
-    case 18: break;                            /* the end: the command alone */
+    case 18: add_text("USB_DRIVE_FIFO IN_EMPTY "); add_dec(enaga_musb_in_empty[2]); add_text(" IN_QUEUED ");
+             add_dec(enaga_musb_in_queued[2]); add_text(" OUT_BACKLOG "); add_dec(enaga_musb_out_backlog[2]);
+             add_text(" OUT_ALONE "); add_dec(enaga_musb_out_alone[2]); break;
+    case 19: add_text("USB_ISR "); add_dec(usb_isr_count); add_text(" US "); add_dec(usb_isr_us); add_text(" MAX_US ");
+             add_dec(usb_isr_max_us); break;
+    case 20: break;                            /* the end: the command alone */
     default: return 0;
     }
     finish();

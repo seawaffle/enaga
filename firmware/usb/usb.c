@@ -130,6 +130,8 @@ void usb_drive_share(int on)
         i = tu_edpt_number(EP_DRIVE_IN);
         enaga_musb_in_packets[i] = enaga_musb_in_wait_us[i] = 0;
         enaga_musb_out_packets[i] = enaga_musb_out_gap_us[i] = 0;
+        enaga_musb_in_empty[i] = enaga_musb_in_queued[i] = enaga_musb_out_backlog[i] = enaga_musb_out_alone[i] = 0;
+        usb_isr_count = usb_isr_us = usb_isr_max_us = 0;
     }
     drive_shared = on;
     drive_attention = on;                      /* the computer is told the medium changed */
@@ -260,10 +262,17 @@ void usb_init(void)
     tusb_init(0, &init);
 }
 
+u32 usb_isr_count, usb_isr_us, usb_isr_max_us;
+
 void usb_isr(void)
 {
+    u32 start = tsc_read(), us;
     tud_int_handler(0);
     REG32(ENAGA_USB0_EOIR) = 0;
+    us = (tsc_read() - start) / 372u;
+    usb_isr_count++;
+    usb_isr_us += us;
+    if (us > usb_isr_max_us) usb_isr_max_us = us;
 }
 
 int usb_poll(u32 ms)                           /* main loop: returns the MIDI bytes received */
