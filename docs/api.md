@@ -317,7 +317,7 @@ In `<enaga/app.hpp>`. Main context.
 
 | Function | Does |
 |---|---|
-| `enaga::log(text)` | one line on Enaga's log (its status page shows the last lines) |
+| `enaga::log(text)` | one line on Enaga's log, up to 39 characters (its status page shows the last lines, and `tools/usb_debug.py log` shows them on a computer as they happen: [docs/usb-debug.md](usb-debug.md)) |
 | `enaga::ms()` | milliseconds since power-on |
 | `enaga::fatal(reason)` | stops the app at once; Enaga shows `reason` and keeps running. Does not return |
 | `enaga::system::open_menu()` | opens the Enaga menu once the current callback returns, as F1 + POWER does |
