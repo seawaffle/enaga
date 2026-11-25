@@ -779,20 +779,59 @@ the same object.
 
 ### Math
 
-Fast float math without libm, in `enaga::dsp` (C: `enaga_` + the same name, `<enaga/dsp/math.h>`).
+Two kinds of float math:
+- **Fast** math in `enaga::dsp` (C: `enaga_` and the same name, `<enaga/dsp/math.h>`), made for audio code. It is
+  inline, has no branches (so cl6x can pipeline loops that use it), never divides, and its accuracy is stated per
+  function.
+- **The standard functions** of `<cmath>` and `<math.h>` (`std::sin`, `sinf`, ...; see below), within 1 ulp.
 
 | Function | C | Gives | Accuracy |
 |---|---|---|---|
 | `exp2(x)` | `enaga_exp2` | 2^x, x clamped to ±126 | relative 3e-7 |
 | `exp(x)` | `enaga_exp` | e^x | as `exp2` |
-| `log2(x)` | `enaga_log2` | log₂ x, x > 0 | absolute 1e-4 |
+| `log2(x)` | `enaga_log2` | log₂ x, x > 0 | absolute 2e-7 for 0.5-2, else 2e-7 × \|log₂ x\| |
+| `log(x)`, `log10(x)` | `enaga_log`, `enaga_log10` | natural and base-10 logarithms, x > 0 | as `log2` |
+| `pow(x, y)` | `enaga_pow` | x^y for x > 0; 0 for x ≤ 0 | relative 3e-7 + 1.4e-7 × \|y log₂ x\| |
+| `db_to_gain(db)`, `gain_to_db(g)` | `enaga_db_to_gain`, `enaga_gain_to_db` | decibels to an amplitude ratio and back (0 dB = 1); `gain_to_db` floors at -600 dB | as `exp2`, `log2` |
 | `semitones(s)` | `enaga_semitones` | the frequency ratio of `s` semitones | as `exp2` |
+| `sqrt(x)`, `rsqrt(x)` | `enaga_sqrt`, `enaga_rsqrt` | √x for x ≥ 0 (0 below), 1 / √x for 1e-37 < x < 1e37 | relative 3e-7 |
+| `sin(x)`, `cos(x)` | `enaga_sin`, `enaga_cos` | in radians | absolute 4e-6 + 1e-7 × \|x\| |
+| `tan(x)` | `enaga_tan` | in radians | relative 2e-5 for \|x\| ≤ 1.5 |
 | `sin_turns(t)`, `cos_turns(t)` | `enaga_sin_turns`, `enaga_cos_turns` | sin and cos of 2π t, `t` in turns, any value | absolute 4e-6 |
 | `tan_pi(x)` | `enaga_tan_pi` | tan(π x) for 0-0.49 (clamped): a filter's prewarped cutoff, x = cutoff / rate | relative 1e-4 |
+| `atan(x)`, `atan2(y, x)` | `enaga_atan`, `enaga_atan2` | the angle in radians; `atan2` in (-π, π], 0 at the origin | absolute 5e-7 |
+| | `enaga_atan_unit(t)` | atan t for 0 ≤ t ≤ 1 only, the polynomial under both | absolute 2e-7 |
+| `asin(x)`, `acos(x)` | `enaga_asin`, `enaga_acos` | x clamped to [-1, 1] | absolute 1e-6; 4e-4 within 1e-6 of ±1 |
+| `tanh(x)` | `enaga_tanh` | the smooth saturation curve, exactly ±1 from \|x\| = 9.1 | relative 6e-7 |
+| `soft_clip(x)` | `enaga_soft_clip` | x for small x, smoothly to ±1 at \|x\| ≥ 1.5 (cheaper than `tanh`) | exact cubic |
 | `reciprocal(x)` | `enaga_reciprocal` | 1 / x without a division, 1e-37 < \|x\| < 1e37 | relative 2e-7 |
-| `soft_clip(x)` | `enaga_soft_clip` | x for small x, smoothly to ±1 at \|x\| ≥ 1.5 | exact cubic |
+| `abs(x)`, `copysign(x, s)` | `enaga_abs`, `enaga_copysign` | \|x\|; x with the sign of s | exact |
+| `wrap(x)` | `enaga_wrap` | x - floor(x), in [0, 1) (\|x\| < 2^31): wraps a phase | exact |
 | `clamp(x, lo, hi)`, `lerp(a, b, t)`, `floor_int(x)` | `enaga_clamp`, `enaga_lerp`, `enaga_floor_int` | the usual | |
 | `pi` | `ENAGA_PI` | π | |
+
+**The standard functions.** `#include <cmath>` (or `<math.h>` in C) gives the float functions of the C standard,
+from `runtime/libm.c`. An app links only the ones it calls.
+- **Trigonometric and hyperbolic:** `sin`, `cos`, `sincosf`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sinh`,
+  `cosh`, `tanh`.
+- **Exponentials and logarithms:** `exp`, `exp2`, `expm1`, `log`, `log2`, `log10`, `log1p`, `pow`.
+- **Roots and distances:** `sqrt`, `cbrt`, `hypot`.
+- **Rounding and parts:** `floor`, `ceil`, `trunc`, `round`, `lround`, `rint`, `lrint`, `nearbyint`, `fmod`,
+  `modf`, `frexp`, `ldexp`, `scalbn`.
+- **The rest:** `fabs`, `copysign`, `fmin`, `fmax`, `fdim`; the classification macros (`isnan`, `isinf`,
+  `isfinite`, `signbit`, `fpclassify`), `INFINITY`, `NAN`, and POSIX's `M_PI` and its kin.
+
+C names end in `f` (`sinf`); in C++, `std::sin` takes a float. Every function is within 1 ulp of the exact result
+over the whole float range, `sin` of 1e30 included. `tests/test_dsp.py` measures each against the host's libm, and
+`tests/test_math.py` checks them on the emulated C674x. They work in double internally, which costs several times
+more than the fast functions (on the emulator: `std::sin` about 300 cycles a call against `sin`'s 80, `std::pow`
+830 against 195). So use them where accuracy or porting matters, and the fast ones in `audio`.
+
+**Only float.** There are no double math functions: `std::sin(1.0)` is a compile error ("use of deleted
+function"), as is `std::sqrt(2)` with an integer. In C, `sin(x)` is an undeclared function. Write `1.0f`, or use
+float variables. A double constant such as `M_PI` makes a whole expression double, so write `(float)M_PI`, or
+`enaga::dsp::pi`. Files built by cl6x (`*.ti.c`) get TI's own `<math.h>` instead, whose double functions are not
+there to link; use the `enaga_` functions in them.
 
 `Random(seed)`: xorshift32. `next()` (32 bits), `bipolar()` [-1, 1), `unipolar()` [0, 1),
 `add_noise(out, n, level)` (adds white noise, a block function), `state()` (the state, for C code).
@@ -812,6 +851,8 @@ C functions from `<enaga/dsp.h>`, callable from C++ as they are. Block functions
 | `enaga_soft_clip_buffer(buf, n, drive)` | buf = soft_clip(drive × buf) |
 | `enaga_ramp_stereo_add(in, left, right, n, &gl, &gr, step_l, step_r)` | pans `in` into `left` / `right` with gains stepping by `step_l` / `step_r` each sample (click-free gain changes); `gl` and `gr` are left at their final values |
 | `enaga_exp2_buffer(buf, n)`, `enaga_reciprocal_buffer(buf, n)`, `enaga_tan_pi_buffer(buf, n)` | the math function on every value |
+| `enaga_sqrt_buffer(buf, n)` | buf = sqrt(buf) (cl6x: 8 cycles a value) |
+| `enaga_tanh_buffer(buf, n, drive)` | buf = tanh(drive × buf), saturation (cl6x: 18 cycles a value) |
 | `enaga_noise_add(&state, out, n, level)` | adds white noise (`Random::add_noise`) |
 
 The math buffers are for control values too: gather every voice's pitch or cutoff into one array and convert them
@@ -1062,7 +1103,8 @@ The `_memory` functions give the floats of zeroed memory the `_init` functions n
   64-bit division (`__c6xabi_divlli` and the like) because libgcc's would pull in the C++ unwinder, which an app
   cannot link. If a link fails with `undefined reference to __exidx_start`, some other libgcc helper has done
   the same; report it.
-- **No libm:** use the DSP library's math.
+- **Math:** `<cmath>` and `<math.h>` give the standard float functions, within 1 ulp; no double functions
+  ("Math" under the DSP library). The DSP library's own math is faster, for audio code.
 - **Stack:** a function's frame is limited to 16 KiB, and VLAs and `alloca` are refused at build time (Enaga's
   interrupt entry uses the 16 KiB below the stack pointer). Put large arrays in statics or on the heap.
 - **Static constructors** run before the app object is made; **destructors never run**.

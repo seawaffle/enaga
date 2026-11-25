@@ -53,15 +53,15 @@ The points below are the overview; [docs/api.md](docs/api.md) is the full refere
 - The canvas is 128 x 128 pixels, one byte per pixel, grey 0 (black) to 15.
 - Apps are C++20 with `-fno-exceptions -fno-rtti`. The freestanding standard library offers headers such as
   `<array>`, `<algorithm>`, `<span>`, `<optional>`, `<variant>`, `<type_traits>`, `<bit>`, `<atomic>` and
-  `<numbers>`. `new`/`delete` work on the app's heap (everything above Enaga, about 124 MiB). There is no
-  libm yet, and no allocating standard containers. Global destructors never run: Enaga discards an app's
+  `<numbers>`. `new`/`delete` work on the app's heap (everything above Enaga, about 124 MiB). `<cmath>`
+  has the standard float functions (no double ones); there are no allocating standard containers. Global destructors never run: Enaga discards an app's
   memory after calling `stop()`. A function's stack frame is limited to 16 KiB and VLAs and `alloca` are
   refused at build time (Enaga's interrupt entry protects the 16 KiB below the stack pointer; see
   `firmware/start.s`): put large arrays in statics or on the heap.
 - Panel LEDs by name, levels 0-10, from the main loop: `enaga::pad_led(pad, r, g, b)`, `step_led(n, red, green)`,
   `button_led(key, red, green)`, `vol_led`, `mic_led`, `value_led`. Enaga switches them all off when an app stops.
-- `<enaga/dsp.hpp>` is the DSP library: fast math without libm (`exp2`, `semitones`, `sin_turns`, `tan_pi`,
-  `soft_clip`), band-limited oscillators, wavetable oscillators on the app's tables (with a morph between two),
+- `<enaga/dsp.hpp>` is the DSP library: fast math (`exp2`, `semitones`, `sin`, `tanh`, `sqrt`, `pow`, `atan2`,
+  `tan_pi`, decibels and more), band-limited oscillators, wavetable oscillators on the app's tables (with a morph between two),
   a state-variable filter (and a two-stage cascade), cookbook biquads (low- and high-pass, band-pass, notch,
   all-pass, peak, shelves), FIR filters on the app's taps, a one-pole, ADSR envelopes, LFOs, delay lines (with
   modulated, interpolated block reads), a chorus, a stereo delay and a reverb; hard sync between oscillators

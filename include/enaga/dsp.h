@@ -39,6 +39,8 @@ void enaga_mix_product(float *out, const float *a, const float *b, int n, float 
 void enaga_exp2_buffer(float *buf, int n);                               /* buf = enaga_exp2(buf) */
 void enaga_reciprocal_buffer(float *buf, int n);                         /* buf = enaga_reciprocal(buf) */
 void enaga_tan_pi_buffer(float *buf, int n);                             /* buf = enaga_tan_pi(buf) */
+void enaga_sqrt_buffer(float *buf, int n);                               /* buf = enaga_sqrt(buf) */
+void enaga_tanh_buffer(float *buf, int n, float drive);                  /* buf = enaga_tanh(drive * buf) */
 /* left += in * gl, right += in * gr, where gl and gr step by step_l and step_r before each sample (a gain ramp
  * across the block); *gl and *gr are left at their final values. */
 void enaga_ramp_stereo_add(const float *in, float *left, float *right, int n, float *gl, float *gr,

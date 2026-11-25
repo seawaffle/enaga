@@ -504,6 +504,11 @@ Its card is staged by `tools/unit_card.py`.
 ## Open items
 
 - Input gain ("1.0 addition: input gain"): one value or a left/right pair; build before or at the API review.
+- **Library additions before the API review (2026-11-24), one branch each:** (1) math: fast functions and libm
+  (log, 2026-11-24); (2) a sample player with `wav::load`, a main-to-audio message queue, voice allocation (the
+  synth's, made generic); (3) step-sequencing helpers (swing, note lengths with their note-offs, probability),
+  note names and scales, parameter smoothing; (4) a limiter and compressor, DC blocker, bitcrusher, and a waveform
+  view widget; (5) host-side DSP testing for app developers, and a small sampler example.
 - **Unit session 6 (2026-11-22/23, E5 exit, in progress; Windows host): USB DRIVE and USB audio failed on the unit;
   both work since round 4 (below).**
   Build under test: `a24ba51d` (branch `usb-audio-requests`, c9df676), card a 4 GB Toshiba microSDHC in a PNY
@@ -2141,4 +2146,33 @@ was never posted):
 - **api.md:** the knob pushes' numbering (`PUSH_B` is 0, `PUSH_A` 1, unlike the encoders' A-D) in the keys table and
   a note under it; `<atomic>` read-modify-write works on 32-bit types only (8- and 16-bit fail to link), in the
   wording given in the review.
+
+### Math: fast functions and the standard float functions (2026-11-24)
+
+The first of the library additions before the API review. Apps had a dozen math functions and no libm at all:
+`sqrtf`, `tanhf`, `powf` or `sinf` in radians failed to link, and there was no `<cmath>` or `<math.h>` to include.
+- **Fast math** (`<enaga/dsp/math.h>`, `enaga::dsp`): `sqrt`, `rsqrt`, `tanh`, `sin`, `cos` and `tan` in radians,
+  `atan`, `atan2`, `asin`, `acos`, `log`, `log10`, `pow`, `db_to_gain`, `gain_to_db`, `abs`, `copysign`, `wrap`.
+  Inline, without branches or division, the same results from GCC and cl6x. Polynomials fitted near-minimax on the
+  host (Lawson's reweighting) and measured in float: `tanh` an odd degree-9 polynomial below 0.55 and
+  1 - 2 / (e^2x + 1) above, relative 6e-7; `atan` degree 15 on [0, 1] with 1 / x beyond, absolute 5e-7; `sqrt`
+  three Newton steps from the bit guess, 3e-7. `log2` moved from absolute 1e-4 (degree 6 on [1, 2)) to 2e-7
+  (degree 8 on [sqrt(1/2), sqrt(2))), so `pow` and decibels are usable; the meters use it. `enaga_sqrt_buffer`
+  and `enaga_tanh_buffer` (saturation with a drive), pipelined by cl6x at 8 and 18 cycles a value.
+- **libm** (`runtime/libm.c`, `include/libm/math.h` and `cmath` on GCC's system include path): the C standard's
+  float functions, from `sinf` to `fmodf`, built into the DSP library's archive so an app links only what it
+  calls. Each works in double, which the C674x adds, multiplies and converts in hardware, and stays within 1 ulp
+  over the whole float range. sin, cos and tan reduce their argument by Cody and Waite below 1.6e6 and by Payne and
+  Hanek's method above, with 2/pi's bits from mpmath, so `sinf(1e30)` is right. No run-time division (cl6x's would
+  need TI's library): 1 / x is the float guess refined in double. Rounding, `fmodf` (long division of the
+  mantissas), `frexpf` and the rest are exact.
+- **Only float:** the double functions are left out, and `<cmath>` deletes their overloads, so `std::sin(1.0)` is a
+  compile error rather than a silently slow double computation. Decided here; the review may revisit it.
+- **Tests:** `tests/test_dsp.py` builds libm for the host under other names and measures every function against
+  the host's libm on random bit patterns and sweeps: all within 1 ulp, the exact ones bit for bit. It also covers
+  the fast functions' stated accuracy. `tests/test_math.py` runs `tests/apps/math` on the emulated C674x and checks
+  11,515 results against Python's math. The cl6x and GCC builds give identical bits. A double call fails to
+  compile.
+- **Cost** (emulator, per call; its cycle counts are not exact for pipelined loops, so relative only): `std::sin`
+  about 300 cycles against `enaga::dsp::sin`'s 80; `std::pow` 830 against 195; `std::tanh` 780 against 200.
 

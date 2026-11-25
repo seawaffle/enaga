@@ -12,6 +12,25 @@
 
 using namespace enaga::dsp;
 
+// runtime/libm.c, built with ENAGA_LIBM_HOST: its functions as enaga_host_<name>, beside the host's libm.
+extern "C" {
+#define UNARY(f) float enaga_host_##f(float);
+#define BINARY(f) float enaga_host_##f(float, float);
+UNARY(sinf) UNARY(cosf) UNARY(tanf) UNARY(asinf) UNARY(acosf) UNARY(atanf) UNARY(sinhf) UNARY(coshf) UNARY(tanhf)
+UNARY(expf) UNARY(exp2f) UNARY(expm1f) UNARY(logf) UNARY(log2f) UNARY(log10f) UNARY(log1pf) UNARY(sqrtf) UNARY(cbrtf)
+UNARY(fabsf) UNARY(truncf) UNARY(floorf) UNARY(ceilf) UNARY(roundf) UNARY(rintf) UNARY(nearbyintf)
+BINARY(atan2f) BINARY(powf) BINARY(hypotf) BINARY(copysignf) BINARY(fminf) BINARY(fmaxf) BINARY(fdimf) BINARY(fmodf)
+#undef UNARY
+#undef BINARY
+void enaga_host_sincosf(float, float *, float *);
+long enaga_host_lroundf(float);
+long enaga_host_lrintf(float);
+float enaga_host_ldexpf(float, int);
+float enaga_host_scalbnf(float, int);
+float enaga_host_frexpf(float, int *);
+float enaga_host_modff(float, float *);
+}
+
 static int failures = 0;
 static void check(bool ok, const char *what, double got, double want) {
     if (!ok) {
@@ -42,6 +61,73 @@ static void math() {
     worst = 0;
     for (float x = 1e-3f; x < 1e4f; x *= 1.0137f) worst = std::fmax(worst, std::fabs(log2(x) - std::log2(double(x))));
     near("log2 absolute error", worst, 0, 1e-5);
+    worst = 0;
+    for (float x = 1e-30f; x < 1e30f; x *= 1.00071f) {
+        double want = std::log2(double(x));
+        worst = std::fmax(worst, std::fabs(log2(x) - want) / std::fmax(1.0, std::fabs(want)));
+    }
+    near("log2 error, scaled by |log2 x| beyond 1", worst, 0, 2e-7);
+    worst = 0;
+    for (float x = 0.5f; x <= 2; x += 0.00013f) worst = std::fmax(worst, std::fabs(log2(x) - std::log2(double(x))));
+    near("log2 absolute error, 0.5 to 2", worst, 0, 2e-7);
+    near("log(e)", log(float(M_E)), 1, 3e-7);
+    near("log10(1000)", log10(1000.0f), 3, 1e-6);
+    worst = 0;
+    for (float x = 1e-3f; x < 1e3f; x *= 1.0137f)
+        for (float y = -4; y <= 4; y += 0.37f)
+            worst = std::fmax(worst, std::fabs(pow(x, y) / std::pow(double(x), double(y)) - 1));
+    near("pow relative error (x 1e-3 to 1e3, y -4 to 4)", worst, 0, 6e-6);
+    check(pow(0.0f, 2.0f) == 0 && pow(-2.0f, 2.0f) == 0, "pow of x <= 0 is 0", pow(-2.0f, 2.0f), 0);
+    near("db_to_gain(-6.0206)", db_to_gain(-6.0206f), 0.5, 1e-6);
+    near("gain_to_db(10)", gain_to_db(10.0f), 20, 1e-5);
+    near("gain_to_db(0)", gain_to_db(0.0f), -600, 1e-3);
+    check(abs(-2.5f) == 2.5f && copysign(3.0f, -0.0f) == -3 && copysign(-3.0f, 1.0f) == 3, "abs, copysign", copysign(3.0f, -0.0f), -3);
+    check(wrap(2.25f) == 0.25f && wrap(-0.25f) == 0.75f && wrap(-1e-9f) == 0, "wrap", wrap(-1e-9f), 0);
+    worst = 0;
+    for (float x = 1e-30f; x < 1e30f; x *= 1.00071f) {
+        worst = std::fmax(worst, std::fabs(sqrt(x) / std::sqrt(double(x)) - 1));
+        worst = std::fmax(worst, std::fabs(rsqrt(x) * std::sqrt(double(x)) - 1));
+    }
+    near("sqrt and rsqrt relative error", worst, 0, 3e-7);
+    check(sqrt(0.0f) == 0 && sqrt(-1.0f) == 0, "sqrt of 0 and below", sqrt(-1.0f), 0);
+    worst = 0;
+    for (float x = -100; x <= 100; x += 0.0071f) {
+        double e = 4e-6 + 1e-7 * std::fabs(x);
+        worst = std::fmax(worst, std::fabs(sin(x) - std::sin(double(x))) / e);
+        worst = std::fmax(worst, std::fabs(cos(x) - std::cos(double(x))) / e);
+    }
+    near("sin and cos absolute error, in 4e-6 + 1e-7 |x|", worst, 0, 1);
+    worst = 0;
+    for (float x = -1.5f; x <= 1.5f; x += 0.00071f) worst = std::fmax(worst, std::fabs(tan(x) / std::tan(double(x)) - 1) * (x != 0));
+    near("tan relative error, |x| <= 1.5", worst, 0, 2e-5);
+    worst = 0;
+    for (float x = -1000; x <= 1000; x += x > -2 && x < 2 ? 0.0001f : 0.13f)
+        worst = std::fmax(worst, std::fabs(atan(x) - std::atan(double(x))));
+    near("atan absolute error", worst, 0, 5e-7);
+    worst = 0;
+    for (float a = -3.14159f; a <= 3.14159f; a += 0.00113f)
+        for (float r : {1e-3f, 1.0f, 1e4f}) {
+            float x = float(r * std::cos(double(a))), y = float(r * std::sin(double(a)));
+            worst = std::fmax(worst, std::fabs(atan2(y, x) - std::atan2(double(y), double(x))));
+        }
+    near("atan2 absolute error", worst, 0, 5e-7);
+    check(atan2(0.0f, 0.0f) == 0 && std::fabs(atan2(0.0f, -1.0f) - M_PI) < 1e-6 && atan2(-1.0f, 0.0f) < 0, "atan2 axes",
+          atan2(0.0f, -1.0f), M_PI);
+    worst = 0;
+    double edge = 0;
+    for (float x = -1; x <= 1; x += 0.00013f) {
+        double e = std::fmax(std::fabs(asin(x) - std::asin(double(x))), std::fabs(acos(x) - std::acos(double(x))));
+        if (std::fabs(x) < 1 - 1e-6f) worst = std::fmax(worst, e); else edge = std::fmax(edge, e);
+    }
+    for (float x : {1.0f, -1.0f, 0.9999999f, -0.9999999f})
+        edge = std::fmax(edge, std::fmax(std::fabs(asin(x) - std::asin(double(x))), std::fabs(acos(x) - std::acos(double(x)))));
+    near("asin and acos absolute error", worst, 0, 1e-6);
+    near("asin and acos absolute error near +-1", edge, 0, 4e-4);
+    worst = 0;
+    for (float x = -12; x <= 12; x += x > -1 && x < 1 ? 0.00007f : 0.0013f)
+        worst = std::fmax(worst, std::fabs(tanh(x) / std::tanh(double(x)) - 1) * (x != 0));
+    near("tanh relative error", worst, 0, 6e-7);
+    check(tanh(0.0f) == 0 && tanh(100.0f) == 1 && tanh(-100.0f) == -1, "tanh limits", tanh(100.0f), 1);
     worst = 0;
     for (float t = -3; t <= 3; t += 0.00071f) worst = std::fmax(worst, std::fabs(sin_turns(t) - std::sin(2 * M_PI * t)));
     near("sin_turns absolute error", worst, 0, 4e-6);
@@ -441,6 +527,16 @@ static void blocks() {
         same("exp2_buffer = exp2", e, e2);
         same("reciprocal_buffer = reciprocal", r, r2);
         same("tan_pi_buffer = tan_pi", t, t2);
+        std::vector<float> q = x, q2, h = x, h2;
+        for (float &v : q) v = std::fabs(v) * 1000.0f;
+        q2 = q;
+        h2 = h;
+        enaga_sqrt_buffer(q.data(), 77);
+        enaga_tanh_buffer(h.data(), 77, 3.5f);
+        for (float &v : q2) v = sqrt(v);
+        for (float &v : h2) v = tanh(3.5f * v);
+        same("sqrt_buffer = sqrt", q, q2);
+        same("tanh_buffer = tanh(drive x)", h, h2);
         for (int i = 0; i < 77; i++) { ge[i] = t[i]; k[i] = 2.0f - 1.98f * noise.unipolar(); }
         std::vector<SvfCoefficients> c(77);
         enaga_svf_coefficients_buffer(ge.data(), k.data(), c.data(), 77);
@@ -853,7 +949,128 @@ static void samples() {
     check(made_c == made_a && c == a, "Resampler reset", made_c, made_a);
 }
 
+// libm (runtime/libm.c) against the host's, in units in the last place of the float result.
+static double ulps(float got, double want) {
+    if (std::isnan(want)) return std::isnan(got) ? 0 : 1e9;
+    if (std::isinf(want) || std::fabs(want) > 3.4028234e38) return got == float(want) ? 0 : 1e9;
+    float near_want = float(want);
+    double ulp = std::fabs(double(std::nextafter(std::fabs(near_want), INFINITY)) - std::fabs(near_want));
+    if (std::fabs(want) < 1.1754944e-38) ulp = 1.4012985e-45;           // subnormal: the smallest step
+    return std::fabs(double(got) - want) / ulp;
+}
+
+static uint32_t libm_seed = 12345;
+static float any_float() {                                              // every bit pattern, NaN and inf included
+    libm_seed ^= libm_seed << 13; libm_seed ^= libm_seed >> 17; libm_seed ^= libm_seed << 5;
+    float f;
+    std::memcpy(&f, &libm_seed, 4);
+    return f;
+}
+
+template <class Mine, class Host> static void unary(const char *what, Mine mine, Host host, double limit,
+                                                    float lo, float hi, int n = 200000) {
+    double worst = 0;
+    float at = 0;
+    auto one = [&](float x) {
+        double e = ulps(mine(x), host(double(x)));
+        if (e > worst) { worst = e; at = x; }
+    };
+    for (int i = 0; i < n; i++) {                                       // random bit patterns in [lo, hi]
+        float x = any_float();
+        if (x >= lo && x <= hi) one(x);
+    }
+    for (int i = 0; i <= n / 4; i++) one(lo + (hi - lo) * float(i) / float(n / 4));   // and an even sweep
+    for (float x : {0.0f, -0.0f, INFINITY, -INFINITY, NAN, 1.0f, -1.0f, 1e-45f, -1e-45f, 3.4e38f, -3.4e38f}) one(x);
+    if (worst > limit) std::printf("FAIL %s: %.3g ulps at %.9g\n", what, worst, at), failures++;
+}
+
+static void libm() {
+    unary("sinf", enaga_host_sinf, [](double x) { return std::sin(x); }, 1, -1.6e6f, 1.6e6f);
+    unary("cosf", enaga_host_cosf, [](double x) { return std::cos(x); }, 1, -1.6e6f, 1.6e6f);
+    unary("tanf", enaga_host_tanf, [](double x) { return std::tan(x); }, 1, -1.6e6f, 1.6e6f);
+    unary("sinf, any", enaga_host_sinf, [](double x) { return std::sin(x); }, 1, -INFINITY, INFINITY);
+    unary("cosf, any", enaga_host_cosf, [](double x) { return std::cos(x); }, 1, -INFINITY, INFINITY);
+    unary("tanf, any", enaga_host_tanf, [](double x) { return std::tan(x); }, 1, -INFINITY, INFINITY);
+    unary("sinf, small", enaga_host_sinf, [](double x) { return std::sin(x); }, 1, -4, 4);
+    unary("tanf, small", enaga_host_tanf, [](double x) { return std::tan(x); }, 1, -4, 4);
+    unary("asinf", enaga_host_asinf, [](double x) { return std::asin(x); }, 1, -1, 1);
+    unary("acosf", enaga_host_acosf, [](double x) { return std::acos(x); }, 1, -1, 1);
+    unary("atanf", enaga_host_atanf, [](double x) { return std::atan(x); }, 1, -INFINITY, INFINITY);
+    unary("sinhf", enaga_host_sinhf, [](double x) { return std::sinh(x); }, 1, -100, 100);
+    unary("coshf", enaga_host_coshf, [](double x) { return std::cosh(x); }, 1, -100, 100);
+    unary("tanhf", enaga_host_tanhf, [](double x) { return std::tanh(x); }, 1, -INFINITY, INFINITY);
+    unary("expf", enaga_host_expf, [](double x) { return std::exp(x); }, 1, -87, 89);
+    unary("exp2f", enaga_host_exp2f, [](double x) { return std::exp2(x); }, 1, -126, 129);
+    unary("expm1f", enaga_host_expm1f, [](double x) { return std::expm1(x); }, 1, -INFINITY, 89);
+    unary("logf", enaga_host_logf, [](double x) { return std::log(x); }, 1, -INFINITY, INFINITY);
+    unary("log2f", enaga_host_log2f, [](double x) { return std::log2(x); }, 1, -INFINITY, INFINITY);
+    unary("log10f", enaga_host_log10f, [](double x) { return std::log10(x); }, 1, -INFINITY, INFINITY);
+    unary("log1pf", enaga_host_log1pf, [](double x) { return std::log1p(x); }, 1, -INFINITY, INFINITY);
+    unary("sqrtf", enaga_host_sqrtf, [](double x) { return std::sqrt(x); }, 0.5, -INFINITY, INFINITY);
+    unary("cbrtf", enaga_host_cbrtf, [](double x) { return std::cbrt(x); }, 1, -INFINITY, INFINITY);
+    struct Exact { const char *name; float (*mine)(float); float (*host)(float); };
+    for (const Exact &f : {Exact{"truncf", enaga_host_truncf, truncf}, Exact{"floorf", enaga_host_floorf, floorf},
+                           Exact{"ceilf", enaga_host_ceilf, ceilf}, Exact{"roundf", enaga_host_roundf, roundf},
+                           Exact{"rintf", enaga_host_rintf, rintf}, Exact{"nearbyintf", enaga_host_nearbyintf, nearbyintf},
+                           Exact{"fabsf", enaga_host_fabsf, fabsf}})
+        unary(f.name, f.mine, [&f](double x) { return double(f.host(float(x))); }, 0, -INFINITY, INFINITY);
+
+    double worst[6] = {};
+    for (int i = 0; i < 400000; i++) {
+        float x = any_float(), y = any_float();
+        worst[0] = std::fmax(worst[0], ulps(enaga_host_atan2f(y, x), std::atan2(double(y), double(x))));
+        worst[1] = std::fmax(worst[1], ulps(enaga_host_hypotf(x, y), std::hypot(double(x), double(y))));
+        float r = enaga_host_fmodf(x, y), want = fmodf(x, y);
+        if (!(r == want && std::signbit(r) == std::signbit(want)) && !(std::isnan(r) && std::isnan(want))) worst[2] = 1e9;
+        float m = enaga_host_fminf(x, y), M = enaga_host_fmaxf(x, y);
+        auto signalling = [](float v) { uint32_t u; std::memcpy(&u, &v, 4); return std::isnan(v) && !(u & 0x400000u); };
+        if (!signalling(x) && !signalling(y) && (!(m == fminf(x, y) || (std::isnan(m) && std::isnan(fminf(x, y)))) ||
+            !(M == fmaxf(x, y) || (std::isnan(M) && std::isnan(fmaxf(x, y)))))) worst[3] = 1e9;
+        float px = std::fabs(x) < 1e4f && std::fabs(x) > 1e-4f ? x : 1.5f, py = std::fmod(y, 40.0f);
+        if (std::isnan(py)) py = 2;
+        worst[4] = std::fmax(worst[4], ulps(enaga_host_powf(px, py), std::pow(double(px), double(py))));
+        worst[5] = std::fmax(worst[5], ulps(enaga_host_powf(x, y), std::pow(double(x), double(y))));
+    }
+    near("atan2f ulps", worst[0], 0, 1);
+    near("hypotf ulps", worst[1], 0, 1);
+    check(worst[2] == 0, "fmodf exact", worst[2], 0);
+    check(worst[3] == 0, "fminf and fmaxf", worst[3], 0);
+    near("powf ulps, ordinary", worst[4], 0, 1);
+    near("powf ulps, any", worst[5], 0, 1);
+    for (float x : {0.0f, -0.0f, 1.0f, -1.0f, 2.0f, -2.0f, 0.5f, INFINITY, -INFINITY, NAN, 3.0f, -3.0f})
+        for (float y : {0.0f, -0.0f, 1.0f, -1.0f, 2.0f, 3.0f, -3.0f, 0.5f, -0.5f, INFINITY, -INFINITY, NAN}) {
+            float got = enaga_host_powf(x, y), want = powf(x, y);
+            bool same = (got == want && std::signbit(got) == std::signbit(want)) || (std::isnan(got) && std::isnan(want));
+            if (!same) std::printf("FAIL powf(%g, %g) = %g, want %g\n", x, y, got, want), failures++;
+        }
+    double sc = 0;
+    for (float x = -20; x <= 20; x += 0.0137f) {
+        float s, c;
+        enaga_host_sincosf(x, &s, &c);
+        sc = std::fmax(sc, double(s != enaga_host_sinf(x) || c != enaga_host_cosf(x)));
+    }
+    check(sc == 0, "sincosf = sinf, cosf", sc, 0);
+    check(enaga_host_copysignf(2, -0.0f) == -2 && enaga_host_fdimf(5, 3) == 2 && enaga_host_fdimf(3, 5) == 0,
+          "copysignf, fdimf", enaga_host_copysignf(2, -0.0f), -2);
+    check(enaga_host_lroundf(2.5f) == 3 && enaga_host_lroundf(-2.5f) == -3 && enaga_host_lrintf(2.5f) == 2 &&
+          enaga_host_lrintf(3.5f) == 4, "lroundf, lrintf", enaga_host_lrintf(2.5f), 2);
+    for (int i = 0; i < 100000; i++) {
+        float x = any_float(), w1, w2;
+        int e1, e2, n = int(libm_seed % 600) - 300;
+        float f1 = enaga_host_frexpf(x, &e1), f2 = frexpf(x, &e2);
+        float m1 = enaga_host_modff(x, &w1), m2 = modff(x, &w2);
+        float l1 = enaga_host_ldexpf(x, n), l2 = ldexpf(x, n);
+        auto same = [](float a, float b) { return (a == b && std::signbit(a) == std::signbit(b)) || (std::isnan(a) && std::isnan(b)); };
+        if (!same(f1, f2) || (e1 != e2 && std::isfinite(x)) || !same(m1, m2) || !same(w1, w2) || !same(l1, l2)) {
+            std::printf("FAIL frexpf, modff or ldexpf at %.9g (n %d)\n", x, n);
+            failures++;
+            break;
+        }
+    }
+}
+
 int main() {
+    libm();
     samples();
     math();
     oscillators();

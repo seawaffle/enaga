@@ -1,4 +1,5 @@
-"""The DSP library (include/enaga/dsp) compiled for the host and checked by tests/dsp/host.cpp: math accuracy,
+"""The DSP library (include/enaga/dsp) and libm (runtime/libm.c) compiled for the host and checked by
+tests/dsp/host.cpp: math accuracy (libm's against the host's),
 oscillator pitch, filter response, envelope times, delay time and reverb decay. Needs only a host g++.
 
     python3 -B -m unittest discover -s tests -p test_dsp.py -v
@@ -22,6 +23,9 @@ class Dsp(unittest.TestCase):
             objs.append(out / (src.stem + ".o"))
             subprocess.run(["gcc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", f"-I{ROOT / 'include'}", "-c",
                             "-o", objs[-1], src], check=True)
+        objs.append(out / "libm.o")                                     # libm under enaga_host_ names
+        subprocess.run(["gcc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-DENAGA_LIBM_HOST",
+                        f"-I{ROOT / 'include'}", "-c", "-o", objs[-1], ROOT / "runtime" / "libm.c"], check=True)
         subprocess.run(["g++", "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror",
                         f"-I{ROOT / 'include'}", "-o", out / "host",
                         HERE / "dsp" / "host.cpp", *objs], check=True)
