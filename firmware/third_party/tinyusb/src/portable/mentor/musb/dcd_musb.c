@@ -343,12 +343,13 @@ static void process_epin_isr(uint8_t rhport, musb_regs_t *musb_regs, uint8_t epn
     }
     pipe_write(musb_regs, pipe, epnum);
   } else {
-    // All bytes have been loaded into the FIFO. With double-packet buffering a
-    // second packet may still be waiting in the FIFO when this IRQ fires (the
-    // hardware signals TXRDY clear as soon as a slot frees, not when the wire
-    // transfer finishes). Defer completion until FIFONE == 0 so we don't emit
-    // a duplicate xfer_complete before the final packet has been sent.
-    if (csrl & MUSB_TXCSRL1_FIFONE) {
+    /* Enaga: every packet is loaded. Bulk FIFOs are double-buffered (dcd_edpt_open), and the C6748's core
+     * interrupts when TXPKTRDY clears, which is when a half is free, not when the last packet has gone: a packet
+     * leaving with the other half already empty gives no interrupt (SPRUH79C 33.2.7.1.2.1.2). So the transfer
+     * completes once its last packet is loaded and a half is free for the next transfer's first packet, which
+     * follows it out in order. With both halves full (TXPKTRDY still set), the interrupt when one frees comes
+     * next. An unarmed pipe (the isochronous ones, served on SOF by usb_audio.c) has nothing to complete. */
+    if ((csrl & MUSB_TXCSRL1_TXRDY) || !pipe->armed) {
       return;
     }
     const uint16_t xferred_len = pipe->length;
@@ -815,11 +816,12 @@ bool dcd_edpt_open(uint8_t rhport, tusb_desc_endpoint_t const * ep_desc) {
 
   hwfifo_flush(musb, epn, is_rx, true);
 
-  /* Enaga: one packet per FIFO, bulk too. Double-buffered, the C6748's core clears TXPKTRDY and interrupts when a
-   * packet is loaded, not when it is sent (SPRUH79C 33.2.7.1.2.1.2), so the wait below for FIFONOTEMPTY to clear
-   * got no further interrupt: at full speed, every IN transfer's completion was lost (the mass-storage CSW after
-   * INQUIRY never sent; unit session 6, round 3). Single-buffered, the interrupt means the packet has gone. */
-  TU_ASSERT(hwfifo_config(musb, epn, is_rx, mps, false));
+  /* Enaga: two packets per FIFO for bulk. Single-buffered, the FIFO is empty from a packet's leaving until the
+   * interrupt loads the next, and a host's IN (or OUT) meanwhile is NAKed; Windows then waits about 0.4 ms
+   * before trying again, and USB DRIVE moved one packet per 0.42 ms, 0.15 MiB/s (unit, 2026-11-25). Double-buffered
+   * the next packet is already there. The TX side completes transfers without waiting for the FIFO to empty
+   * (process_epin_isr): waiting for that lost every IN completion before (unit session 6, round 3). */
+  TU_ASSERT(hwfifo_config(musb, epn, is_rx, mps, ep_desc->bmAttributes.xfer == TUSB_XFER_BULK));
   musb->intren_ep[is_rx] |= TU_BIT(epn);
 
   return true;

@@ -353,6 +353,7 @@ void audio_isr(void)
         u32 *tx;
         audio_callback_t fn = callback;
         if (input_quiet && input_quiet != INPUT_QUIET_HOLD) input_quiet--;
+        if (!input_usb) usb_audio_unread();         /* the computer's audio, unread, is not left to pile up */
         if (input_usb) {
             usb_audio_read(in_block, FRAMES);
         } else if (rx_done && !input_quiet && !(input_mic && !audio_headphones())) {

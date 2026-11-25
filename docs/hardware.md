@@ -434,7 +434,8 @@ full-speed USB MIDI, audio and mass storage device with TinyUSB (`firmware/third
 - **The debug port:** the MIDI interface has two cables. Cable 0 is MIDI; cable 1 ("Enaga Debug"; on Windows'
   older MIDI stack "MIDIIN2 (...)" / "MIDIOUT2 (...)") carries Enaga's log, its state, the screen and memory words
   as SysEx, for `tools/usb_debug.py` (`firmware/usb/usb_debug.c` has the protocol). It sends nothing until asked,
-  and fills at most 128 bytes of the MIDI IN buffer, so MIDI waits behind no more than two packets of it. During a
+  and fills at most 128 bytes of the MIDI IN buffer, so MIDI waits behind no more than four packets of it (two in
+  the buffer, two in the FIFO). During a
   session on a unit:
 
   ```

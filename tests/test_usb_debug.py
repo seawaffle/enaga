@@ -124,7 +124,7 @@ class UsbDebug(Emulated):
 
     def test_midi_waits_behind_little_debug_data(self):
         """During a screen (about 23 KB on the debug cable), a note on cable 0 waits behind at most DEBUG_SHARE bytes
-        of it in TinyUSB's buffer and one packet in the FIFO: 48 event packets, not the buffer's 128 and more."""
+        of it in TinyUSB's buffer and the FIFO's two packets: 64 event packets, not the buffer's 128 and more."""
         self.client.ask(usb_debug.SCREEN)
         self.transport.run_ms(5)                                         # the screen starts going
         self.press(1)                                                    # a note on, while nobody reads
@@ -138,7 +138,7 @@ class UsbDebug(Emulated):
         packets = [data[i:i + 4] for i in range(0, len(data), 4)]
         ahead = packets.index(bytes([0x09, 0x90, 60, 100]))
         self.assertGreater(ahead, 0)                                     # the screen was going
-        self.assertLessEqual(ahead, (128 + 64) // 4)
+        self.assertLessEqual(ahead, (128 + 2 * 64) // 4)
 
     def test_status(self):
         status = dict(line.split(" ", 1) for line in self.client.status())

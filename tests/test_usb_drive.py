@@ -184,6 +184,13 @@ class UsbDrive(unittest.TestCase):
         data = self.emu.cpu.read(self.emu.names[name], 4 * count)
         return list(struct.unpack(f"<{count}I", data))
 
+    def test_bulk_fifos_hold_two_packets(self):
+        """Single-buffered, a host's IN or OUT finds the FIFO busy between packets and is NAKed, and Windows waits
+        about 0.4 ms before trying again: 0.15 MiB/s on the unit (2026-11-25). MIDI and the drive hold two."""
+        fifos = {e["number"]: (e["tx_fifo"]["packets"], e["rx_fifo"]["packets"])
+                 for e in self.emu.cpu.usb_state()["endpoints"]}
+        self.assertEqual((fifos[1], fifos[2]), ((2, 2), (2, 2)))
+
     def test_where_the_time_goes(self):
         """The counters STATUS reports for a copy's breakdown, from the page's opening: reads and writes (8 KiB
         callbacks), the time in the SD driver and between callbacks, and the drive's packets with the host's time."""

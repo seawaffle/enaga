@@ -77,6 +77,7 @@ u32  usb_midi_tx_free(void);
 int  usb_midi_stalled(void);                   /* the host has stopped taking MIDI out */
 int  usb_midi_send(const u8 *data, u32 bytes);
 void usb_audio_read(float *in, u32 frames);   /* audio interrupt: the computer's audio (ENAGA_INPUT_USB) */
+void usb_audio_unread(void);                  /* audio interrupt, each block it is not read: drop what piles up */
 void usb_audio_write(const float *out, u32 frames);   /* audio interrupt: the app's output to the computer */
 int  usb_audio_out_streaming(void);
 int  usb_audio_in_streaming(void);

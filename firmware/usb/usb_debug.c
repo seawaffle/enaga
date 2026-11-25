@@ -7,7 +7,7 @@
  * end. Cable 0 stays the app's MIDI port, untouched: the debug port sends only when cable 0 has nothing waiting,
  * and only after the computer has asked for something, so a computer that never opens the port never gets its
  * traffic. It never fills more than DEBUG_SHARE bytes of TinyUSB's MIDI IN buffer, so MIDI waits behind at
- * most that much debug data: two full-speed packets.
+ * most that much debug data (two full-speed packets) and the two packets the FIFO holds: about 0.3 ms.
  *
  * Every message is SysEx with the non-commercial ID: F0 7D 45 <command> <data> F7 (45 is 'E'). Data bytes are
  * 7-bit: text as it is (log lines are ASCII; anything above 7F goes as '?'), numbers as groups of 7 bits, lowest

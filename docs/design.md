@@ -607,7 +607,8 @@ Its card is staged by `tools/unit_card.py`.
   2,000 KiB/s, the time goes on USB: about 380 us a 64-byte packet, single-buffered (a NAK while the CPU empties
   the FIFO; how soon the computer retries is the computer's). To measure before changing anything: the read
   speed, and whether double buffering the OUT endpoint helps (the TRM is not clear that a second packet waiting
-  raises its own interrupt, the trap the IN side fell into).
+  raises its own interrupt, the trap the IN side fell into). Measured 2026-11-25 (log, "USB DRIVE's time"):
+  the packets, both ways; double buffering is on branch usb-drive-speed, awaiting the unit.
   - Earlier plan: the user started a Claude session on the Windows PC with a read-only brief: raw sectors 0-63 and
     the partition start over USB vs a card reader, a USBPcap capture of drive mount / playback / recording, and
     scripted play / record tests. Debug from its evidence. Also ask whether STATUS showed a crash row.
@@ -2415,3 +2416,42 @@ photographs of STATUS.
       read USB input (the ring-drain fix planned with the USB work). The count stopped after a replug, since
       Windows no longer streamed to the unit; `USB_AUDIO_IN UNDERRUNS` went 0 → 357 across the unplug. CHECK's
       PAD MSG/S read 82 just after the menu closed (its one-second window spans the pause).
+
+### USB DRIVE's time (2026-11-25)
+
+Step 2 of the USB work, measuring first. Counters (usb.c, dcd_musb.c; STATUS `USB_DRIVE_TIME`, `USB_DRIVE_PACKETS`,
+from the page's opening): per direction, the 8 KiB callbacks, the time in the SD driver and between callbacks;
+per bulk endpoint, each packet's time from load to its TX interrupt, and the time between OUT packets.
+- **On the unit** (Windows 11 26200, build b8cbeb29, a 20 MiB random file, four rounds; `~/smpltrek-debug/
+  drive-timing/FINDINGS-drive-timing.md` on the user's machine). Writing took 118-124 s (0.16-0.17 MiB/s), reading
+  141-142 s (0.14 MiB/s), buffered or not; both read-backs matched. With the counts before each copy taken away:
+
+  | Round | Callbacks | SD driver | Between callbacks | Packets | Their time |
+  |---|---|---|---|---|---|
+  | read | 2,560 R | 2.5 s (0.96 ms each) | 138.8 s | 328,001 IN | 138.1 s, 0.42 ms each |
+  | write | 2,714 W | 6.3 s (2.3 ms each) | 117.8 s | 347,916 OUT | 120.5 s apart, 0.35 ms each |
+
+  The SD card is 2-5 % of the time. Nearly all of it is the packets: the computer took one 64-byte packet every
+  0.42 ms reading and sent one every 0.35 ms writing, 2-3 a millisecond where full speed carries up to 19.
+  Single-buffered, the FIFO is empty from a packet's leaving until the interrupt loads the next (or, writing,
+  full until it is emptied); the host's token meanwhile is NAKed, and Windows (an xHCI controller, full speed
+  through its transaction translator) tries again only some 0.3-0.4 ms later. The emulator's host retries within
+  microseconds, so it never showed this.
+  - Mounting read about 15,200 sectors (7.4 MiB, FAT32's tables) before D: answered: 53 s each time.
+  - The counters were not zero before the page opened: the host's commands at enumeration (TEST UNIT READY and
+    the like) use the drive's endpoints too.
+- **The fix: double-buffered bulk FIFOs** (dcd_musb.c dcd_edpt_open), so the next packet is waiting when the host
+  asks (IN) and a packet can arrive while the last is emptied (OUT). This is what went wrong in unit session 6:
+  the C6748's core interrupts when TXPKTRDY clears, which double-buffered means a half is free, not that the
+  last packet has gone, and TinyUSB waited for the FIFO to empty before completing a transfer, an interrupt that
+  never comes. Now a transfer completes once its last packet is loaded and a half is free (TXPKTRDY clear): the
+  next transfer's first packet goes into that half and follows in order. MIDI's bulk endpoints are double-buffered
+  too, so a MIDI note can wait behind four packets of debug data instead of three (test bound 64 event packets).
+  The emulator models the core's double-buffered behaviour (its `test_double_buffered_bulk_in_interrupts_only_
+  when_txpktrdy_clears`); the drive, MIDI and debug tests pass on it.
+  - With 0.96 ms of SD time per 8 KiB, about 1 MiB/s is the ceiling reading if the packets now go at full speed;
+    overlapping the card with the USB transfer is the next step if that falls short of 700 KiB/s.
+- **USB audio nobody reads** (the first debug-port session): with no app on USB input, the computer's packets
+  filled the ring and each one counted an overrun. The audio interrupt now trims the ring to its 3 ms target each
+  block while USB input is unused (`usb_audio_unread`), so the counter means what it says and an app switching to
+  USB input starts on recent audio (`test_audio_nobody_reads_does_not_pile_up`).

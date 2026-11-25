@@ -183,6 +183,22 @@ class UsbAudio(unittest.TestCase):
         self.assertFalse(any(any(f) for f in frames(rows)))
         self.assertGreaterEqual(self.word("usb_audio_in_packets"), 200)
 
+    def test_audio_nobody_reads_does_not_pile_up(self):
+        """The computer plays to the unit while the app's input is the line: no overruns (every packet counted one
+        on the unit), and choosing USB input then gives the computer's audio at once, with none lost."""
+        self.start()
+        self.stream([48] * 1500)
+        self.assertEqual(self.word("usb_audio_out_overruns"), 0)
+        self.emu.key(STEP10, True)                                              # USB input, with packets flowing
+        self.stream([48] * 20)
+        self.emu.key(STEP10, False)
+        self.stream([48] * 480)
+        self.assertEqual(self.emu.report()["log"][-1], "I0")
+        rows = self.stream([48] * 500)
+        steps = self.counter_steps(rows)
+        self.assertGreater(steps.get(1, 0), 0.999 * sum(steps.values()), steps)
+        self.assertEqual((self.word("usb_audio_out_overruns"), self.word("usb_audio_out_underruns")), (0, 0))
+
     def test_stopping_the_stream_silences_the_input(self):
         self.usb_input()
         self.start()
