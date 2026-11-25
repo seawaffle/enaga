@@ -705,7 +705,7 @@ In `<enaga/music.hpp>`, namespace `enaga::music`; plain functions for either con
 
 `<enaga/ui.hpp>`, as `enaga::ui::`: a list and a grid, a page of parameters on the knobs, a confirmation dialog,
 text entry, a map of the pads and a file browser, and around them the pieces every screen needs: text built without printf, a status line and key hints,
-a message shown for a moment, bars and meters. They're drawn on the `Canvas` with Enaga's font, so apps look
+a message shown for a moment, bars and meters, and waveforms. They're drawn on the `Canvas` with Enaga's font, so apps look
 alike, and are header-only, with nothing in the firmware. `examples/widgets` uses all of them.
 
 **Driving them.** An app passes its own key and knob callbacks to the widget it is showing and draws it in `draw`.
@@ -869,6 +869,44 @@ other as `?`.
 - `meter_db(amplitude, floor_db)` turns an amplitude (1.0 full scale) into a meter fraction on a decibel scale:
   `floor_db` (-48 by default) and below are 0, and 0 dB is 1. `examples/widgets` meters the input this way, with
   the block's peak passed from `audio` to `update` and a peak mark that holds for a second.
+
+**`Waveform`**: a sample's waveform in a box, for trimming, looping and slicing. Each column shows the lowest and
+highest value of the frames it covers (a stereo sample's two channels together). A long sample shows its shape;
+zoomed in past one frame a column, it is a line through the frames.
+
+```cpp
+enaga::ui::Waveform wave_;
+wave_.set(sample_);                                      // a dsp::Sample, or set(data, frames, channels)
+wave_.zoom(1, start_);                                   // twice as close, start_ staying where it is
+// in draw():
+wave_.draw(canvas, 0, enaga::ui::body_top, 128, 64);
+wave_.mark(canvas, start_);                              // and the end, loop points, the playhead ...
+```
+
+- `set(data, frames, channels)`, or `set(sample)` for anything with `data()`, `frames()` and `channels()`, shows
+  all of it. The data must stay in place while shown.
+- `show(first, count)` and `show_all()` choose the view, kept inside the sample.
+- `zoom(steps, around)` zooms: each step closer halves the frames shown, and negative steps double them. Frame
+  `around` stays at its place on screen. Zooming stops at all of the sample, and in at `Waveform::min_count` (4)
+  frames.
+- `scroll(columns)` moves the view by that many of the last draw's columns, back if negative, stopping at the
+  ends.
+- `first()`, `count()` and `frames()` describe the view and the sample.
+- `draw(canvas, x, y, w, h, grey)` draws it, up to `Waveform::max_width` (128) wide, around a dim centre line.
+- `mark(canvas, frame, grey)`, after `draw`, puts a line the box's height at a frame, if it is in view.
+- `column(frame)` gives the column a frame is in (its first column, when zoomed in past a frame a column), or -1
+  if it is out of view. `frame_at(column)` gives the frame at a column. Use them to draw more marks, or to set a
+  point from a knob.
+- `refresh()` reads again after the frames change. `refresh(frames)` is for a recording that grows: a view of all
+  of it stays all of it, and a zoomed view stays where it is.
+
+The frames are read when the view changes, or after `refresh`, and kept; draws only use what was kept. Reading all
+of a minute of stereo takes a few tens of milliseconds, once. For a live recording, refresh a few times a second
+rather than every frame.
+
+`scope(canvas, x, y, w, h, samples, n, grey)` draws a trace of `n` samples across `w` columns, -1 at the bottom
+and 1 at the top: an oscilloscope of the last block, an LFO's cycle, or a wavetable. It reads every sample each
+time, so it suits short buffers.
 
 **Layout helpers.** `screen_width` (128), `char_width` (6, the font's advance), `line_chars` (21 to a line), and
 `text_right(canvas, y, text, grey, x_end)` for right-aligned text. The font is listed under "Display" above.
@@ -1115,6 +1153,12 @@ For many filters at once, `enaga_svf_coefficients_buffer(g, k, c, n)` computes `
 a = 1 - exp(-2π cutoff / rate); `step(x, a)`, `process(in, out, n, a)` (out may be in), `value()`,
 `reset(y = 0)`.
 
+**`DcBlocker`**: a high-pass a few hertz up that takes out any offset, y = x - x1 + r y1. Put one after a
+waveshaper, an asymmetric distortion or a resonant filter, and on recordings. `DcBlocker(cutoff = 10, rate)` and
+`set(cutoff, rate)` (10 Hz is -3 dB there and 0.1 dB down at 50 Hz); `step(x)`, `process(in, out, n)` (out may be
+in), `reset()`. C: `enaga_dc_blocker`, `enaga_dc_blocker_coefficient(cutoff, rate)`, `enaga_dc_blocker_step`,
+`enaga_dc_blocker_process`.
+
 **`Biquad`, `BiquadCoefficients`**: Audio EQ Cookbook shapes, direct form I.
 `BiquadCoefficients::make(type, frequency, q, rate, gain_db = 0)` with `type` one of `low_pass`, `high_pass`,
 `band_pass` (0 dB at the centre), `notch`, `all_pass`, `peak`, `low_shelf`, `high_shelf`; frequency in Hz (clamped
@@ -1190,6 +1234,45 @@ adds `mix` × the chorus (out may be in).
 
 **`Memory`**: the zeroed heap block behind these classes, freed with its owner; `allocate(floats)`. Use it for C
 state of your own (an `enaga_delay_line` in a `*.ti.c` loop, say).
+
+### Dynamics and the bitcrusher
+
+`<enaga/dsp/dynamics.hpp>`. Each works in place on a left and a right buffer; pass `nullptr` for the right to work
+in mono.
+
+**`Compressor`**: feed-forward, with the channels linked (both get the same gain), peak detection and a soft knee.
+The gain reduction moves in decibels, rising at the attack's rate and falling at the release's.
+
+| Member | Does |
+|---|---|
+| `Compressor(rate = 48000)`, `init(rate)` | starts at -12 dB, 4:1, 5 ms attack, 100 ms release, a 6 dB knee, no makeup gain |
+| `set(threshold_db, ratio, attack_s, release_s, knee_db = 6, makeup_db = 0)` | ratio 1 or more (20 or more is limiting); attack and release are time constants (63 % of the way); `knee_db` is the knee's width around the threshold (0 hard); makeup gain is applied after |
+| `process(left, right, n, key_l = nullptr, key_r = nullptr)` | compresses by the signal's own level, or by a side chain `key_l` / `key_r` (`key_r` nullptr for a mono key): duck a pad under the kick by passing the kick as the key |
+| `reduction_db()` | the gain reduction now, 0 or more, for a meter |
+| `reset()` | no reduction |
+
+**`Limiter`**: a look-ahead limiter. Each sample's peak sets the gain it needs, and that gain is reached smoothly
+over the look-ahead before the peak gets there. No sample leaves above the ceiling, the gain moves without
+clicking, and below the ceiling the signal passes exactly. It recovers with the release. The signal comes out
+`latency()` samples late, so put it last, on the whole mix.
+
+| Member | Does |
+|---|---|
+| `init(lookahead_s, rate)` | in `init()`, since its buffers come from the heap. A look-ahead of 1-5 ms is usual (longer is smoother and later), from 16 to 4096 samples. It starts at a 0 dB ceiling and a 0.1 s release |
+| `set(ceiling_db, release_s)` | the ceiling (-0.3 dB leaves room for later conversion) and the release's time constant |
+| `process(left, right, n)` | limits a block |
+| `latency()` | the delay in samples: the look-ahead, less one |
+| `reduction_db()` | the most gain reduction in the last `process` call, 0 or more, for a meter |
+
+**`Bitcrusher`**: fewer bits and a lower sample rate, with no filtering, so it aliases; that is the sound.
+`set(bits, rate_hz, rate = 48000)` takes `bits` from 1 to 24 (2^bits levels across -1 to 1; fractions of a bit
+sweep smoothly; 24 is as good as untouched) and `rate_hz` up to the sample rate (each sample taken is held until
+the next). `process(left, right, n)` crushes a block.
+
+C: `enaga_compressor` (`enaga_compressor_init`, `enaga_compressor_set`, `enaga_compressor_process`),
+`enaga_limiter` (`enaga_limiter_memory`, `enaga_limiter_init`, `enaga_limiter_set`, `enaga_limiter_latency`,
+`enaga_limiter_process`) and `enaga_crusher` (`enaga_crusher_init`, `enaga_crusher_set`,
+`enaga_crusher_process`).
 
 ### Writing inner loops for cl6x
 

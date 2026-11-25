@@ -4,7 +4,7 @@
 // low-pass, band-pass and high-pass at once. Coefficients cost a reciprocal, so compute them at control rate
 // (SvfCoefficients) and run many samples with them: Svf::process, a block function (include/enaga/dsp.h).
 // Biquad covers the cookbook shapes (shelves, peaks, notches, all-passes) for EQ; Fir runs a kernel the app
-// supplies.
+// supplies. OnePole smooths; DcBlocker takes out offsets.
 #pragma once
 
 #include <enaga/dsp/math.hpp>
@@ -72,6 +72,23 @@ public:
     void reset(float y = 0.0f) { state_.y = y; }
 
     enaga_one_pole state_{};
+};
+
+// A DC blocker: a high-pass a few hertz up that takes out any offset (after a waveshaper, a resonant filter or a
+// recording), y = x - x1 + r y1.
+class DcBlocker {
+public:
+    explicit DcBlocker(float cutoff = 10.0f, float sample_rate = 48000.0f) { set(cutoff, sample_rate); }
+    void set(float cutoff, float sample_rate) { r_ = enaga_dc_blocker_coefficient(cutoff, sample_rate); }
+    float step(float x) { return enaga_dc_blocker_step(&state_, x, r_); }
+    // A block (out may be in): enaga_dc_blocker_process.
+    void process(const float *in, float *out, int n) { enaga_dc_blocker_process(&state_, r_, in, out, n); }
+    void reset() { state_ = {}; }
+
+    enaga_dc_blocker state_{};
+
+private:
+    float r_ = 0.0f;
 };
 
 struct BiquadCoefficients : enaga_biquad_coefficients {

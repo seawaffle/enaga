@@ -131,6 +131,20 @@ static inline float enaga_one_pole_coefficient(float cutoff, float rate) {
 static inline float enaga_one_pole_step(enaga_one_pole *p, float x, float a) { return p->y += a * (x - p->y); }
 void enaga_one_pole_process(enaga_one_pole *p, float a, const float *in, float *out, int n);   /* out may be in */
 
+/* ---- DC blocker: y = x - x1 + r y1, a high-pass a few Hz up that takes out any offset ---- */
+
+typedef struct { float x1, y1; } enaga_dc_blocker;
+/* r = exp(-2 pi cutoff / rate); 10 Hz is usual (-3 dB there, 0.1 dB down at 50 Hz). */
+static inline float enaga_dc_blocker_coefficient(float cutoff, float rate) {
+    return enaga_exp(-2.0f * ENAGA_PI * cutoff * enaga_reciprocal(rate));
+}
+static inline float enaga_dc_blocker_step(enaga_dc_blocker *d, float x, float r) {
+    float y = x - d->x1 + r * d->y1;
+    d->x1 = x;
+    return d->y1 = y;
+}
+void enaga_dc_blocker_process(enaga_dc_blocker *d, float r, const float *in, float *out, int n);   /* out may be in */
+
 /* ---- Biquads: direct form I, coefficients from the Audio EQ Cookbook (R. Bristow-Johnson) ---- */
 
 /* y = b0 x + b1 x1 + b2 x2 - a2 y2 - a1 y1, normalised so a0 = 1. */
@@ -272,6 +286,67 @@ void enaga_chorus_set(enaga_chorus *c, float sweep_hz, float depth);
 /* Adds mix x the chorused in_l / in_r to out_l / out_r. out may be in (in place). */
 void enaga_chorus_process(enaga_chorus *c, const float *in_l, const float *in_r, float *out_l, float *out_r, int n,
                           float mix);
+
+/* ---- Bitcrusher: fewer bits and a lower sample rate, with no filtering (the aliasing is the point) ---- */
+
+typedef struct {
+    float step, inv_step;           /* the quantiser's step, and 1 / step */
+    uint32_t increment, phase;      /* the held rate over the sample rate, and the way to the next sample taken:
+                                     * fractions of 2^31 */
+    float held_l, held_r;
+} enaga_crusher;
+
+void enaga_crusher_init(enaga_crusher *c);           /* 24 bits at 48 kHz: as good as untouched */
+/* bits 1-24, fractions allowed (2^bits levels across -1 to 1; 24 is as good as untouched); rate_hz the rate
+ * samples are taken at, up to sample_rate (each is held until the next). */
+void enaga_crusher_set(enaga_crusher *c, float bits, float rate_hz, float sample_rate);
+/* In place; right may be NULL (mono), or another buffer than left. */
+void enaga_crusher_process(enaga_crusher *c, float *left, float *right, int n);
+
+/* ---- Compressor: feed-forward, stereo linked, peak detection, a soft knee, attack and release in dB ---- */
+
+typedef struct {
+    float threshold, slope, half_knee, knee_scale;   /* dB; slope = 1 - 1 / ratio; knee_scale = slope / (2 knee) */
+    float attack, release;          /* one-pole coefficients for the gain reduction */
+    float makeup;                   /* dB */
+    float reduction;                /* the gain reduction now, dB (0 or more) */
+    float rate;
+} enaga_compressor;
+
+/* Starts at -12 dB, 4:1, 5 ms attack, 100 ms release, a 6 dB knee, no makeup. */
+void enaga_compressor_init(enaga_compressor *c, float rate);
+/* threshold_db (0 and below); ratio 1 or more (20 or more is limiting); attack_s and release_s time constants;
+ * knee_db the width of the soft knee around the threshold (0 hard); makeup_db added after. */
+void enaga_compressor_set(enaga_compressor *c, float threshold_db, float ratio, float attack_s, float release_s,
+                          float knee_db, float makeup_db);
+/* Compresses left and right (in place; right may be NULL for mono) by the level of key_l / key_r, the side
+ * chain, or of the signal itself where key_l is NULL (key_r NULL with key_l given: a mono key). */
+void enaga_compressor_process(enaga_compressor *c, float *left, float *right, int n, const float *key_l,
+                              const float *key_r);
+
+/* ---- Limiter: look-ahead, so no sample leaves above the ceiling ---- */
+
+/* The gain each sample needs is held over the look-ahead and faded in over it, ahead of the delayed signal, so it
+ * is down by the time the peak arrives; it recovers with the release. The signal comes out
+ * enaga_limiter_latency samples late. */
+typedef struct {
+    float *delay_l, *delay_r, *box, *blocks;  /* box: the gains - 1 of the last `length` samples */
+    uint32_t mask, length, write;   /* length: the look-ahead in samples, the fade's length */
+    int32_t block_count, block, in_block;
+    float partial, window, depth, sum, inv_length;   /* depth: the released reduction, 1 - gain */
+    float ceiling, release, rate;
+    float lowest;                   /* the lowest gain applied in the last process call */
+} enaga_limiter;
+
+/* The floats of memory enaga_limiter_init needs (zeroed) for a look-ahead of lookahead_s: 1-5 ms is usual; 16
+ * to 4096 samples. It starts at a 0 dB ceiling and a 0.1 s release. */
+uint32_t enaga_limiter_memory(float lookahead_s, float rate);
+void enaga_limiter_init(enaga_limiter *l, float *memory, float lookahead_s, float rate);
+/* ceiling_db: no sample leaves above it (-0.3 dB leaves room for conversion); release_s a time constant. */
+void enaga_limiter_set(enaga_limiter *l, float ceiling_db, float release_s);
+static inline uint32_t enaga_limiter_latency(const enaga_limiter *l) { return l->length - 1; }
+/* In place; right may be NULL (mono). */
+void enaga_limiter_process(enaga_limiter *l, float *left, float *right, int n);
 
 /* ---- ADSR envelope: one-pole segments ---- */
 

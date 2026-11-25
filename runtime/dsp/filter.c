@@ -74,6 +74,18 @@ void enaga_one_pole_process(enaga_one_pole *p, float a, const float *in, float *
     p->y = y;
 }
 
+void enaga_dc_blocker_process(enaga_dc_blocker *d, float r, const float *in, float *out, int n) {
+    float x1 = d->x1, y1 = d->y1;
+    int i;
+    for (i = 0; i < n; i++) {
+        const float x = in[i];
+        out[i] = y1 = x - x1 + r * y1;
+        x1 = x;
+    }
+    d->x1 = x1;
+    d->y1 = y1;
+}
+
 /* ---- Biquads ---- */
 
 void enaga_biquad_design(enaga_biquad_coefficients *c, int type, float frequency, float q, float gain_db,
