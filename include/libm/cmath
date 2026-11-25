@@ -1,0 +1,152 @@
+// Enaga: <cmath> for apps: std::sin and the rest on float, from <math.h> (include/libm/math.h, runtime/libm.c),
+// within 1 ulp. Only float: the double overloads are deleted, so std::sin(1.0) is a compile error rather than a
+// quietly slow double computation; write std::sin(1.0f), or float variables. An integer argument (std::sqrt(2)) is
+// ambiguous for the same reason. For inner loops, enaga::dsp's math (<enaga/dsp/math.hpp>) is several times faster.
+#pragma once
+
+#include <math.h>
+
+#undef isnan
+#undef isinf
+#undef isfinite
+#undef isnormal
+#undef signbit
+#undef fpclassify
+
+namespace std {
+
+using ::float_t;
+using ::double_t;
+using ::acosf;
+using ::asinf;
+using ::atan2f;
+using ::atanf;
+using ::cbrtf;
+using ::ceilf;
+using ::copysignf;
+using ::cosf;
+using ::coshf;
+using ::exp2f;
+using ::expf;
+using ::expm1f;
+using ::fabsf;
+using ::fdimf;
+using ::floorf;
+using ::fmaxf;
+using ::fminf;
+using ::fmodf;
+using ::frexpf;
+using ::hypotf;
+using ::ldexpf;
+using ::log10f;
+using ::log1pf;
+using ::log2f;
+using ::logf;
+using ::lrintf;
+using ::lroundf;
+using ::modff;
+using ::nearbyintf;
+using ::powf;
+using ::rintf;
+using ::roundf;
+using ::scalbnf;
+using ::sincosf;
+using ::sinf;
+using ::sinhf;
+using ::sqrtf;
+using ::tanf;
+using ::tanhf;
+using ::truncf;
+
+inline float sin(float x) { return ::sinf(x); }
+inline float cos(float x) { return ::cosf(x); }
+inline float tan(float x) { return ::tanf(x); }
+inline float asin(float x) { return ::asinf(x); }
+inline float acos(float x) { return ::acosf(x); }
+inline float atan(float x) { return ::atanf(x); }
+inline float sinh(float x) { return ::sinhf(x); }
+inline float cosh(float x) { return ::coshf(x); }
+inline float tanh(float x) { return ::tanhf(x); }
+inline float exp(float x) { return ::expf(x); }
+inline float exp2(float x) { return ::exp2f(x); }
+inline float expm1(float x) { return ::expm1f(x); }
+inline float log(float x) { return ::logf(x); }
+inline float log2(float x) { return ::log2f(x); }
+inline float log10(float x) { return ::log10f(x); }
+inline float log1p(float x) { return ::log1pf(x); }
+inline float sqrt(float x) { return ::sqrtf(x); }
+inline float cbrt(float x) { return ::cbrtf(x); }
+inline float fabs(float x) { return ::fabsf(x); }
+inline float trunc(float x) { return ::truncf(x); }
+inline float floor(float x) { return ::floorf(x); }
+inline float ceil(float x) { return ::ceilf(x); }
+inline float round(float x) { return ::roundf(x); }
+inline float rint(float x) { return ::rintf(x); }
+inline float nearbyint(float x) { return ::nearbyintf(x); }
+inline float abs(float x) { return ::fabsf(x); }
+inline float atan2(float y, float x) { return ::atan2f(y, x); }
+inline float pow(float x, float y) { return ::powf(x, y); }
+inline float hypot(float x, float y) { return ::hypotf(x, y); }
+inline float copysign(float x, float y) { return ::copysignf(x, y); }
+inline float fmin(float x, float y) { return ::fminf(x, y); }
+inline float fmax(float x, float y) { return ::fmaxf(x, y); }
+inline float fdim(float x, float y) { return ::fdimf(x, y); }
+inline float fmod(float x, float y) { return ::fmodf(x, y); }
+inline long lround(float x) { return ::lroundf(x); }
+inline long lrint(float x) { return ::lrintf(x); }
+inline float ldexp(float x, int n) { return ::ldexpf(x, n); }
+inline float scalbn(float x, int n) { return ::scalbnf(x, n); }
+inline float frexp(float x, int *e) { return ::frexpf(x, e); }
+inline float modf(float x, float *whole) { return ::modff(x, whole); }
+
+double sin(double) = delete;
+double cos(double) = delete;
+double tan(double) = delete;
+double asin(double) = delete;
+double acos(double) = delete;
+double atan(double) = delete;
+double sinh(double) = delete;
+double cosh(double) = delete;
+double tanh(double) = delete;
+double exp(double) = delete;
+double exp2(double) = delete;
+double expm1(double) = delete;
+double log(double) = delete;
+double log2(double) = delete;
+double log10(double) = delete;
+double log1p(double) = delete;
+double sqrt(double) = delete;
+double cbrt(double) = delete;
+double fabs(double) = delete;
+double trunc(double) = delete;
+double floor(double) = delete;
+double ceil(double) = delete;
+double round(double) = delete;
+double rint(double) = delete;
+double nearbyint(double) = delete;
+double abs(double) = delete;
+double atan2(double, double) = delete;
+double pow(double, double) = delete;
+double hypot(double, double) = delete;
+double copysign(double, double) = delete;
+double fmin(double, double) = delete;
+double fmax(double, double) = delete;
+double fdim(double, double) = delete;
+double fmod(double, double) = delete;
+long lround(double) = delete;
+long lrint(double) = delete;
+double ldexp(double, int) = delete;
+double scalbn(double, int) = delete;
+double frexp(double, int *) = delete;
+double modf(double, double *) = delete;
+
+template <class T> constexpr bool isnan(T x) { return __builtin_isnan(x); }
+template <class T> constexpr bool isinf(T x) { return __builtin_isinf(x); }
+template <class T> constexpr bool isfinite(T x) { return __builtin_isfinite(x); }
+template <class T> constexpr bool isnormal(T x) { return __builtin_isnormal(x); }
+template <class T> constexpr bool signbit(T x) { return __builtin_signbit(x); }
+template <class T> constexpr int fpclassify(T x) {
+    return __builtin_fpclassify(FP_NAN, FP_INFINITE, FP_NORMAL, FP_SUBNORMAL, FP_ZERO, x);
+}
+
+}  // namespace std

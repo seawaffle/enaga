@@ -7,7 +7,7 @@
 
 All *.cpp and *.c files in the directory are compiled with GCC tic6x-elf (C++20, -fno-exceptions -fno-rtti,
 freestanding libstdc++ headers), linked with the Enaga runtime (runtime/) and the DSP library's block functions
-(runtime/dsp, built once into build/dsplib) at ENAGA_APP_BASE with libgcc, and
+(runtime/dsp and runtime/libm.c, built once into build/dsplib) at ENAGA_APP_BASE with libgcc, and
 wrapped as enaga_package_header (include/enaga/abi.h) + payload (+ icon). No libc. The package format is provisional
 until 1.0.
 
@@ -45,7 +45,7 @@ ICON_SIZE = 16
 # (firmware/start.s, "Interrupt stack gap"): GCC can release a frame a few cycles before its last reads of it.
 COMMON = ["-march=c674x", "-mlittle-endian", "-O2", "-Werror=frame-larger-than=16384", "-Werror=vla", "-Werror=alloca", "-ffreestanding", "-nostdlib", "-fno-asynchronous-unwind-tables",
           "-fno-exceptions", "-msdata=none", "-funroll-loops", "-ffunction-sections", "-fdata-sections", "-Wall", "-Wextra", "-Werror",
-          f"-I{INCLUDE}"]
+          f"-I{INCLUDE}", f"-isystem{INCLUDE / 'libm'}"]   # <math.h> and <cmath>: runtime/libm.c
 CFLAGS = ["-std=c11", *COMMON]
 CXXFLAGS = ["-std=c++20", "-fno-rtti", *COMMON]
 # cl6x for *.ti.c: far data (Enaga apps have no data page pointer), a section per function for --gc-sections.
@@ -87,12 +87,13 @@ def compile_source(src, out):
 
 
 def dsp_library():
-    """The DSP library's block functions (runtime/dsp/*.c, include/enaga/dsp.h) as an archive: built by cl6x when it
-    is installed, by GCC otherwise, and again only when a source, a header or this script changes."""
+    """The DSP library's block functions (runtime/dsp/*.c, include/enaga/dsp.h) and libm (runtime/libm.c) as an
+    archive: built by cl6x when it is installed, by GCC otherwise, and again only when a source, a header or this
+    script changes."""
     ti = paths.ti_present()
     lib = paths.BUILD / "dsplib" / ("cl6x" if ti else "gcc")
     archive = lib / "libenaga_dsp.a"
-    sources = sorted((RUNTIME / "dsp").glob("*.c"))
+    sources = [*sorted((RUNTIME / "dsp").glob("*.c")), RUNTIME / "libm.c"]
     inputs = [*sources, INCLUDE / "enaga" / "dsp.h", *(INCLUDE / "enaga" / "dsp").glob("*.h"), Path(__file__)]
     if archive.exists() and archive.stat().st_mtime >= max(p.stat().st_mtime for p in inputs):
         return archive
