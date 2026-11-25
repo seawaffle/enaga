@@ -87,6 +87,10 @@ void usb_drive_share(int on);                 /* USB DRIVE: the SD card shown to
 int  usb_drive_ejected(void);                 /* the computer ejected it */
 extern u32 usb_drive_read_sectors, usb_drive_written_sectors, usb_drive_errors;
 extern volatile uint32_t enaga_musb_tx_busy;   /* dcd_musb.c: TX interrupts that found the FIFO still full */
+extern u32 usb_tx_lost;                        /* MIDI out bytes dropped: the queue was full */
+void usb_debug_byte(u8 byte);                  /* the debug port (usb_debug.c): a byte from the computer, cable 1 */
+void usb_debug_poll(void);                     /* main loop: what the debug port has to send */
+extern u32 usb_debug_requests, usb_debug_messages;
 #define IRQ_USB0 10                           /* CPU interrupt 10 <- event 19, USB0_INT */                       /* main loop: parse MIDI input; returns the bytes taken */
 int  midi_send(u32 ports, const u8 *data, u32 bytes);   /* an app's midi_send (enaga_host_t) */
 extern int midi_channel_setting, midi_thru;   /* MIDI CH 0-15, MIDI THRU */

@@ -585,6 +585,23 @@ Its card is staged by `tools/unit_card.py`.
     One packet a frame needs the SOF handled within a frame, which an app callback longer than 1 ms prevented
     (`test_a_heavy_callback_does_not_cost_packets`: a quarter of the packets empty, samples lost), so the USB
     interrupt now nests in the app's callback, as the watchdog, UARTs and SYNC IN already did.
+- **USB work (decided 2026-11-25), one branch each, in this order:**
+  1. A debug port: Enaga's log, state, screen and memory over a second USB MIDI cable (log, 2026-11-25). No
+     setting: it is silent until asked, and its share of the MIDI IN buffer is capped.
+  2. USB DRIVE speed (below): measure with the debug port first, then double-buffer the OUT endpoint or move the
+     packets in the interrupt. Target 700 KiB/s or more at full speed.
+  3. High speed: research spike. The core already came up at high speed on the unit (session 6). It needs
+     descriptors for both speeds (device qualifier, other-speed configuration), 512-byte bulk packets, and
+     isochronous bInterval in microframes. UAC1 at high speed is reported to need bInterval 4 on Windows'
+     usbaudio.sys (one report, not Microsoft's word); UAC2 is the standard route (in-box on Windows 10 1703+, macOS,
+     Linux; TinyUSB has it). Try both on the unit. FIFO budget: at high speed, eight audio channels (2 KiB
+     double-buffered), the drive (1 KiB) and MIDI (1 KiB, 512-byte bulk) exceed the core's 4 KiB; a likely answer
+     is the USB DRIVE page re-enumerating as a drive alone. The emulator's host has no high-speed rules yet: a
+     request for its agent.
+  4. More channels: 8 from the unit to the computer, 2 from the computer to the unit (the user, 2026-11-25), on
+     Windows, macOS and Linux. Eight channels of 16 bits fit at full speed (784 bytes a frame); eight of 24 bits
+     need high speed. After step 3, since the class and speed decide the layout. How apps fill the extra channels
+     is for the API review.
 - USB DRIVE speed: about 155 KiB/s writing on the unit (round 4). With the SD card's multi-block writes at about
   2,000 KiB/s, the time goes on USB: about 380 us a 64-byte packet, single-buffered (a NAK while the CPU empties
   the FIFO; how soon the computer retries is the computer's). To measure before changing anything: the read
@@ -2304,3 +2321,35 @@ The fifth and last of the library additions before the API review.
   waveform's pixels, 1 kHz from the pad, 2 kHz at +12, START past the tone silent, no audio overruns.
   `test_sdk.py`: the sampler builds from the SDK byte for byte, and the SDK's `host_test.py` runs its tests from
   a copy outside the SDK.
+
+### The USB debug port (2026-11-25)
+
+Step 1 of the USB work: Enaga's log, its state, the screen and memory over USB, so a session on a unit needs no
+photographs of STATUS.
+- **A second MIDI cable** on the existing bulk endpoints (`firmware/usb/usb_debug.c`), named "Enaga Debug" by its
+  jacks' string. A serial port (CDC) was not possible: USB0 has endpoints 1-4 each way, MIDI, audio and the drive
+  use six of the eight, and CDC needs three. Received bytes are read per cable (`tud_midi_n_demux_stream_read`);
+  cable 0 goes on to the MIDI parser as before. The debug port writes whole event packets on cable 1
+  (`tud_midi_packet_write`), so it never mixes with cable 0's byte stream.
+- **Protocol:** SysEx `F0 7D 45 <command> ... F7` (non-commercial ID). HELLO, LOG ON / OFF (the 32 lines kept,
+  then each new one, numbered, with a LOST message for lines overwritten before they went), STATUS (NAME VALUE
+  lines), SCREEN (the canvas, a row a message), PEEK (1-32 words of RAM, the USB0 wrapper or SYSCFG0; not the MUSB
+  core, whose interrupt registers clear on read). Requests wait for the message under way to end.
+- **Staying out of MIDI's way:** silent until the computer asks; sends only when cable 0's queue is empty; fills at
+  most 128 bytes of TinyUSB's 512-byte MIDI IN buffer (`tud_midi_n_write_available`, added to the vendored MIDI
+  driver), so a note waits behind at most two packets of debug data, even during a screen. A computer that stops
+  reading for 2 s stops the log and the answer (the message under way still ends whole). The user chose no on/off
+  setting: the port is inert unless used, and adding or removing it would change the descriptors, which Windows
+  caches per VID / PID.
+- **`tools/usb_debug.py`**: python-rtmidi on Windows, macOS and Linux; finds the port by asking each Enaga port
+  (debug-looking names first); `log` (with `--out`), `status`, `screen` (PNG, no other modules), `peek` (an address,
+  or a symbol from the firmware's ELF). Its protocol code is separate from the transport, so the emulator tests run
+  the same `Client`.
+- **Tests** (`test_usb_debug.py`, emulator): two cables in the descriptor, HELLO, the log kept and live in order and
+  stopped by LOG OFF, cable 0's note, 300-byte SysEx and clock intact while the log streams, a note waiting behind
+  at most 48 packets of a screen (129 with the cap removed: the test fails), STATUS, the screen equal to the
+  panel's frame, PEEK of `log_count` and a refused address, an unknown command, and a computer that stops reading
+  (MIDI carries on, the log stops, the port answers again). Bugs found on the way: the tool's `answer` spun
+  forever on a message it was not waiting for (it put it back and took it again without the clock moving); an
+  answer cut short by a stall glued itself to the next (the unit now ends the message, and the tool restarts on
+  F0).
