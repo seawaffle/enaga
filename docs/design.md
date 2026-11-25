@@ -505,8 +505,8 @@ Its card is staged by `tools/unit_card.py`.
 
 - Input gain ("1.0 addition: input gain"): one value or a left/right pair; build before or at the API review.
 - **Library additions before the API review (2026-11-24), one branch each:** (1) math: fast functions and libm
-  (log, 2026-11-24); (2) a sample player with `wav::load`, a main-to-audio message queue, voice allocation (the
-  synth's, made generic); (3) step-sequencing helpers (swing, note lengths with their note-offs, probability),
+  (log, 2026-11-24); (2) a sample player with a WAV loader, a main-to-audio message queue, voice allocation (the
+  synth's, made generic) (log, 2026-11-24); (3) step-sequencing helpers (swing, note lengths with their note-offs, probability),
   note names and scales, parameter smoothing; (4) a limiter and compressor, DC blocker, bitcrusher, and a waveform
   view widget; (5) host-side DSP testing for app developers, and a small sampler example.
 - **Unit session 6 (2026-11-22/23, E5 exit, in progress; Windows host): USB DRIVE and USB audio failed on the unit;
@@ -2175,4 +2175,41 @@ The first of the library additions before the API review. Apps had a dozen math 
   compile.
 - **Cost** (emulator, per call; its cycle counts are not exact for pipelined loops, so relative only): `std::sin`
   about 300 cycles against `enaga::dsp::sin`'s 80; `std::pow` 830 against 195; `std::tanh` 780 against 200.
+
+### Samples, their player and loader, the queue, voice allocation (2026-11-24)
+
+The second of the library additions before the API review: what a pad sampler needs, so one can be built almost
+entirely from library parts.
+- **`dsp::Sample`** (`<enaga/dsp/sample.hpp>`, C `enaga_sample`): float frames in memory, mono or stereo
+  interleaved, at a rate. `allocate` returns false when the heap has no room, through a new `new (std::nothrow)` in
+  the app runtime (with `std::nothrow` itself, which libsupc++ would define), so a sampler can refuse a sample
+  that is too large instead of stopping. Float, not int16: simpler players and the same code as the rest of the
+  library, at 192 KiB a second of stereo (about ten minutes of the heap); int16 storage could come later.
+- **`dsp::SamplePlayer`** (C `enaga_sample_player`, `runtime/dsp/sample.c`): a 32.32 position (no drift), 4-point
+  Catmull-Rom interpolation (exact at whole frames), start and end points, reverse, forward and ping-pong loops
+  entered when the playing reaches them, and a loop switched off at release to play out. `render` writes raw
+  frames for an app's own envelope and pan; `render_add` mixes with gains ramped across the block (click-free),
+  taken at once on the first block so attacks stay sharp.
+- **`wav::Loader`** (`<enaga/wav.hpp>`): a WAV into a Sample in the background, 16 KiB a step through `File`
+  reads, converted (`enaga_pcm_to_float`) and resampled to 48 kHz per channel with a shared table, frames split
+  across chunks carried over. Data starting past the first 16 KiB (long chunks before it) is found by reading up
+  to 1 MiB of header; a data size of 0 reads to the end of the file. Errors: the file service's, `not_wav`,
+  `no_memory`. `cancel()` waits for the file service's callback (it still comes, with `ENAGA_FILE_CANCELLED`)
+  before freeing its buffer; a Loader must outlive its load. Found by its test: a file that is not a WAV was loaded
+  with the previous file's format; the parse result is now checked.
+- **`enaga::Queue<T, N>`** (`<enaga/queue.hpp>`): the single-producer, single-consumer ring the docs recommended
+  but apps had to write; indices written by one side each, `std::atomic_signal_fence` between an item and its
+  index (a compiler fence, enough on one core).
+- **`VoiceAllocator<N>` and `NoteStack<N>`** (`<enaga/dsp/voices.hpp>`): the synth's allocation (a silent voice,
+  else the oldest released, else the oldest held; unison and legato) and its held-note stack for mono and legato,
+  made generic over the app's own voice array. The synth now uses both, and the Queue for its note events; its
+  tests pass unchanged. Small difference: a key pushed again on the stack moves to the top instead of appearing
+  twice.
+- **Tests:** host (`tests/dsp/host.cpp`): the queue wrapping its indices, allocation order, release by key, unison,
+  legato age, the stack; the player exact at rate 1, a ramp interpolated at a quarter rate, reverse, both loops,
+  play-out, stereo, `rate_for`, the gain ramps, a failed allocation. Emulator (`tests/test_sampler.py`,
+  `tests/apps/sampler`): 16-, 24-, 32-bit, 8-bit and float files, mono and stereo, at 22.05, 44.1, 48 and 96 kHz,
+  converted or kept, a 40 KB chunk before the data, a size field of 0 with a partial last frame; exact values where
+  nothing is converted, within 2e-3 of the sine where it is (0.015 for 8-bit); not a WAV, a missing file, a
+  cancelled load; the loaded sample played at 1 kHz.
 
