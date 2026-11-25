@@ -508,7 +508,8 @@ Its card is staged by `tools/unit_card.py`.
   (log, 2026-11-24); (2) a sample player with a WAV loader, a main-to-audio message queue, voice allocation (the
   synth's, made generic) (log, 2026-11-24); (3) step-sequencing helpers (swing, note lengths with their note-offs, probability),
   note names and scales, parameter smoothing (log, 2026-11-24); (4) a limiter and compressor, DC blocker, bitcrusher, and a waveform
-  view widget (log, 2026-11-25); (5) host-side DSP testing for app developers, and a small sampler example.
+  view widget (log, 2026-11-25); (5) host-side DSP testing for app developers, and a small sampler example (log,
+  2026-11-25; an app runner on the PC was weighed and left out, since the emulator is public).
 - **Unit session 6 (2026-11-22/23, E5 exit, in progress; Windows host): USB DRIVE and USB audio failed on the unit;
   both work since round 4 (below).**
   Build under test: `a24ba51d` (branch `usb-audio-requests`, c9df676), card a 4 GB Toshiba microSDHC in a PNY
@@ -2267,3 +2268,39 @@ The fourth of the library additions before the API review.
   size the same, mono = stereo's left); waveform pixels (steps, stereo, zoomed-in line, marks), zoom, scroll,
   frames and columns both ways, a growing recording, the scope. A scratch app with each piece builds for the
   target with cl6x.
+
+### Tests on a PC for app developers, and the sampler example (2026-11-25)
+
+The fifth and last of the library additions before the API review.
+- **`tools/host_test.py`**: each `tests/*.cpp` in an app's folder is a program, built with the PC's g++ / gcc
+  together with every `.cpp` and `.c` of the app, `runtime/dsp`, and `runtime/host/host.cpp`, then run in the
+  build folder. The spike first: the synth's whole folder compiled and linked on the PC against a stub host table
+  with no warnings, so the tool builds whole app folders, with no per-app setup. `--sanitize` adds ASan and UBSan;
+  a crash is reported with its signal (the test's output is line-buffered, so what it printed before is kept);
+  exit status 0 / 1 failed / 2 did not build.
+- **`runtime/host/host.cpp`**: the stand-in host table. Log printed and kept, MIDI kept, `ms` set by the test, a
+  clock at a set tempo (each tick placed by its own frame from the start, so nothing drifts: exactly 192 ticks a
+  second at 120 BPM, where adding a fraction per block gave 193), no card, `fatal` ending the test with status 3,
+  everything else inert.
+- **`<enaga/testing.hpp>`**: signals (sine, impulse, noise), `render` / `process` a block at a time as `audio()`
+  does, measurements (peak, RMS, mean, frequency, first frame above, gain at a frequency), `Checks`, WAV out
+  (float) and in (any format Enaga reads, through `wav::parse` and `enaga_pcm_to_float`), and the stand-in host's
+  controls. It refuses to compile for the C674x.
+- **Considered and left out: an app runner** (the app's sources on the PC driven by a script of pads and knobs).
+  It would be a fast, inaccurate second emulator: two contexts run one after the other, no load or memory limits,
+  64-bit pointers, and a second implementation of the firmware's services to keep in step. The emulator is public
+  (smpltrek-re) and runs the real thing, so the docs point there for whole apps.
+- **`examples/sampler`**: a WAV on each of the 15 pads (F1 browses /SAMPLES; `wav::Loader` loads in the
+  background), START / END / PITCH / LEVEL on the knobs (END before START plays backwards), the waveform with
+  START and END marked, VALUE zooming around START, eight one-shot voices (`VoiceAllocator`, `SamplePlayer`)
+  through a `Limiter`. The engine is apart from the app and talks to it only through a queue; loading a new
+  sample onto a pad first silences the pad's voices and waits for the audio context to say so (`silence()`,
+  `silenced()`), so no voice reads a sample being replaced.
+- **Tests**: the sampler's engine on the PC (pitch, level, length, trims, reverse, the limiter with all pads at
+  once, silencing, an empty pad); with the reverse and the silencing broken on purpose it fails, and with the
+  silencing broken, `--sanitize` names the null read in `sample.c`. `test_host_test.py`: passing, failing,
+  crashing and non-compiling tests, the helpers, the stand-in host's log, MIDI and clock, and the sampler's tests
+  plain and sanitised. `test_sampler_example.py` (emulator): load through the browser, 44.1 kHz made 48 kHz, the
+  waveform's pixels, 1 kHz from the pad, 2 kHz at +12, START past the tone silent, no audio overruns.
+  `test_sdk.py`: the sampler builds from the SDK byte for byte, and the SDK's `host_test.py` runs its tests from
+  a copy outside the SDK.
