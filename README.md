@@ -87,7 +87,9 @@ The points below are the overview; [docs/api.md](docs/api.md) is the full refere
   when the card is removed or inserted. Not from `audio()`, except streams: `files::Stream` plays a file into
   `audio()` or records one from it through a ring buffer Enaga keeps filled or drained in the main loop, and
   `<enaga/wav.hpp>` reads and writes WAV headers, and its `Loader` reads a whole file into a sample in the
-  background, converted to 48 kHz. `<enaga/queue.hpp>` passes events from one context to the other. `<enaga/settings.hpp>` keeps an app's own settings
+  background, converted to 48 kHz. `<enaga/queue.hpp>` passes events from one context to the other. `<enaga/sequencer.hpp>` turns the clock's ticks into steps (with swing),
+  ends notes after their length (no stuck notes) and has step probability and conditions; `<enaga/music.hpp>` has
+  note names, scales and tempo conversions. `<enaga/settings.hpp>` keeps an app's own settings
   (`settings.get("TEMPO", 120)`, `settings.set("TEMPO", tempo)`, `save()`) as text in its data folder.
 - `enaga::system::open_menu()` opens the Enaga menu as F1 + POWER does; `enaga::system::set_busy(true)` keeps the
   unit from switching itself off (the AUTO OFF setting) while the app works unattended, e.g. recording;
@@ -204,6 +206,7 @@ them), and a JSON report. Its other options (`--help`): `--card-mib` for a large
 | `include/enaga/app.hpp` | The C++ layer: `enaga::App`, `enaga::Canvas`, `ENAGA_APP(Type)`, `enaga::log`, `enaga::fatal`, `enaga::system` |
 | `include/enaga/dsp.hpp`, `dsp.h`, `dsp/` | The DSP library: C++ classes over a C interface |
 | `include/enaga/files.hpp`, `wav.hpp`, `settings.hpp`, `queue.hpp` | Files and streams, WAV headers and loading, an app's own settings, the queue between contexts |
+| `include/enaga/sequencer.hpp`, `music.hpp` | Step timing, note-offs, probability; note names, scales, tempo |
 | `include/enaga/midi.hpp`, `clock.hpp`, `ui.hpp`, `bytes.hpp` | MIDI out, the tempo clock and transport, the UI toolkit, packed data at any address |
 | `template/` | The app to start from (a one-voice synth on a parameter page), shipped in the SDK |
 | `runtime/dsp/` | The DSP library's block functions, built by cl6x or GCC into every app |

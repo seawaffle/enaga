@@ -310,6 +310,23 @@ static inline float enaga_envelope_step(enaga_envelope *e, const enaga_envelope_
 /* n steps into out: the same values as n calls of enaga_envelope_step. */
 void enaga_envelope_render(enaga_envelope *e, const enaga_envelope_shape *s, float *out, int n);
 
+/* ---- Parameter smoothing: a one-pole glide towards a target, so knob changes do not click ---- */
+
+typedef struct {
+    float value, target;
+    float a;                                 /* the per-step coefficient: enaga_smoother_coefficient */
+} enaga_smoother;
+
+/* The coefficient for gliding to within 1 % of a new target in `seconds`, stepped `rate` times a second. */
+static inline float enaga_smoother_coefficient(float seconds, float rate) {
+    float steps = seconds * rate;
+    return steps < 1.0f ? 1.0f : 1.0f - enaga_exp(-4.60517019f * enaga_reciprocal(steps));
+}
+/* One step; returns the new value. */
+static inline float enaga_smoother_step(enaga_smoother *s) { return s->value += s->a * (s->target - s->value); }
+/* n steps into out: the same values as n calls of enaga_smoother_step. */
+void enaga_smoother_render(enaga_smoother *s, float *out, int n);
+
 /* ---- Sample formats: WAV sample data to float or int16, and back ---- */
 
 /* The sample formats of WAV files (<enaga/wav.hpp>): the value is the bits per sample, 33 for 32-bit float. */

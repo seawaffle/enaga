@@ -3,7 +3,9 @@
 // per-sample steps give. Run by tests/test_dsp.py; prints one line per failed check and
 // exits non-zero if any failed.
 #include <enaga/dsp.hpp>
+#include <enaga/music.hpp>
 #include <enaga/queue.hpp>
+#include <enaga/sequencer.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -1192,7 +1194,125 @@ static void sample_player() {
     check(none.empty() && !none.allocate(0x7FFFFFFF, 2, 48000) && none.empty(), "allocate fails cleanly", 0, 0);
 }
 
+// Note names, scales, tempo; the step clock, note-offs, conditions; parameter smoothing.
+static void sequencing() {
+    using namespace enaga;
+    char name[5];
+    struct { int note; bool flats; int middle; const char *want; } names[] = {
+        {60, false, 4, "C4"}, {61, false, 4, "C#4"}, {61, true, 4, "Db4"}, {0, false, 4, "C-1"}, {127, false, 4, "G9"},
+        {69, false, 4, "A4"}, {60, false, 3, "C3"}, {70, true, 4, "Bb4"}, {1, true, 4, "Db-1"}};
+    for (auto &n : names) {
+        music::note_name(n.note, name, n.flats, n.middle);
+        check(std::strcmp(name, n.want) == 0, n.want, n.note, 0);
+    }
+    check(music::scale_size(music::major) == 7 && music::scale_size(music::minor_pentatonic) == 5 &&
+          music::scale_size(music::chromatic) == 12, "scale sizes", music::scale_size(music::major), 7);
+    for (const auto &sc : music::scales)
+        check(sc.mask & 1, "every scale has its root", sc.mask, 1);
+    check(music::in_scale(64, 60, music::major) && !music::in_scale(63, 60, music::major) &&
+          music::in_scale(51, 60, music::minor), "in_scale (any octave of the root)", 0, 1);
+    check(music::quantize(61, 60, music::major) == 60, "quantize: C# to C (a tie: the lower)", music::quantize(61, 60, music::major), 60);
+    check(music::quantize(66, 48, music::major) == 65, "quantize: F# to F", music::quantize(66, 48, music::major), 65);
+    check(music::quantize(63, 0, music::major_pentatonic) == 62, "quantize: Eb to D in the pentatonic (tie: lower)",
+          music::quantize(63, 0, music::major_pentatonic), 62);
+    check(music::quantize(70, 60, music::major) == 69, "quantize: Bb to A (tie)", music::quantize(70, 60, music::major), 69);
+    check(music::quantize(70, 60, 0) == 70, "quantize: an empty mask", 0, 70);
+    const int c_major[] = {48, 50, 52, 53, 55, 57, 59, 60, 62};
+    for (int i = 0; i < 9; i++) check(music::degree(48, music::major, i) == c_major[i], "degree up", music::degree(48, music::major, i), c_major[i]);
+    check(music::degree(48, music::major, -1) == 47 && music::degree(48, music::major, -7) == 36 &&
+          music::degree(48, music::major, -8) == 35, "degree down", music::degree(48, music::major, -8), 35);
+    near("note_hz(69)", music::note_hz(69), 440, 1e-3);
+    near("note_hz(60)", music::note_hz(60), 261.6256, 1e-3);
+    near("seconds(120, quarter)", music::seconds(120, music::quarter), 0.5, 1e-6);
+    near("milliseconds(90, dotted eighth)", music::milliseconds(90, music::dotted(music::eighth)), 500, 1e-3);
+    near("frames(120, sixteenth)", music::frames(120, music::sixteenth), 6000, 1e-2);
+    near("hz(120, quarter)", music::hz(120, music::quarter), 2, 1e-6);
+    near("triplet(eighth)", music::triplet(music::eighth), 1.0 / 3, 1e-7);
+
+    // The step clock: 16ths (24 ticks), 4 steps, straight, then swung.
+    seq::StepClock clock;
+    clock.set(24, 4, 0.5f);
+    std::vector<clock::Tick> ticks;
+    for (uint32_t t = 0; t < 200; t++) ticks.push_back({t, t % 64});
+    seq::Step steps[32];
+    uint32_t n = clock.steps(ticks.data(), uint32_t(ticks.size()), steps, 32);
+    bool ok = n == 9;
+    for (uint32_t i = 0; i < n && ok; i++)
+        ok = steps[i].tick == 24 * i && steps[i].count == i && steps[i].index == i % 4 && steps[i].pass == i / 4 &&
+             steps[i].frame == (24 * i) % 64;
+    check(ok, "straight 16ths: a step every 24 ticks", n, 9);
+    clock.set(24, 16, 0.66f);
+    n = clock.steps(ticks.data(), uint32_t(ticks.size()), steps, 32);
+    check(n == 9 && steps[1].tick == 32 && steps[2].tick == 48 && steps[3].tick == 80, "66 % swing: odd steps at 32 of 48",
+          steps[1].tick, 32);
+    check(clock.step_at(31) == 0 && clock.step_at(32) == 1 && clock.step_at(47) == 1 && clock.step_at(48) == 2,
+          "step_at with swing", clock.step_at(32), 1);
+    check(clock.tick_of(3) == 80 && clock.tick_of(4) == 96, "tick_of", clock.tick_of(3), 80);
+    clock::Tick late[] = {{1000, 0}, {1008, 3}, {1009, 5}};     // a locate, swung step at 1000 + 8? 1008 = 21*48
+    n = clock.steps(late, 3, steps, 32);
+    check(n == 1 && steps[0].tick == 1008 && steps[0].count == 42 && steps[0].index == 10 && steps[0].frame == 3,
+          "after a locate", n, 1);
+
+    // Note-offs.
+    seq::NoteOffs<3> offs;
+    std::vector<int> ended;
+    auto off = [&](int ch, int note) { ended.push_back(ch * 1000 + note); };
+    offs.add(0, 60, 100, 10, off);
+    offs.add(1, 64, 100, 20, off);
+    offs.due(109, off);
+    check(ended.empty(), "nothing due before its length", int(ended.size()), 0);
+    offs.due(110, off);
+    check(ended.size() == 1 && ended[0] == 60 && offs.waiting() == 1, "due at its length", ended.size(), 1);
+    offs.add(1, 64, 115, 20, off);
+    check(ended.size() == 2 && ended[1] == 1064 && offs.waiting() == 1, "the same note again ends the old first", ended.size(), 2);
+    offs.due(50, off);
+    check(ended.size() == 3 && offs.waiting() == 0, "a locate back ends it", ended.size(), 3);
+    offs.add(0, 1, 0, 30, off); offs.add(0, 2, 0, 10, off); offs.add(0, 3, 0, 20, off);
+    ended.clear();
+    offs.add(0, 4, 0, 40, off);
+    check(ended.size() == 1 && ended[0] == 2 && offs.waiting() == 3, "full: the soonest due ends", ended.size(), 1);
+    offs.all(off);
+    check(ended.size() == 4 && offs.waiting() == 0, "all ends every one", ended.size(), 4);
+    offs.add(0, 9, 0xFFFFFFF0u, 0x20, off);
+    ended.clear();
+    offs.due(0x0F, off);
+    check(ended.empty(), "tick numbers wrapping: not yet due", int(ended.size()), 0);
+    offs.due(0x10, off);
+    check(ended.size() == 1, "tick numbers wrapping: due", int(ended.size()), 1);
+
+    check(seq::every(1, 2, 0) && !seq::every(1, 2, 1) && seq::every(2, 2, 1) && seq::every(4, 4, 7) &&
+          !seq::every(4, 4, 4) && !seq::every(1, 0, 0), "every", 0, 1);
+    Random random(7);
+    int hits = 0;
+    for (int i = 0; i < 10000; i++) hits += seq::chance(0.3f, random);
+    check(hits > 2800 && hits < 3200 && !seq::chance(0, random), "chance(0.3)", hits, 3000);
+
+    // Smoothing.
+    Smoothed s;
+    s.init(0.01f, 48000.0f, 1.0f);
+    s.set(0.0f);
+    int i = 0;
+    while (s.value() > 0.01f) { s.next(); i++; }
+    check(std::abs(i - 480) <= 2, "smoothed: 1 % of the way left after the time set", i, 480);
+    Smoothed a, b;
+    a.init(0.005f, 48000.0f, 0.0f);
+    b.init(0.005f, 48000.0f, 0.0f);
+    a.set(1.0f);
+    b.set(1.0f);
+    std::vector<float> block(64);
+    a.render(block.data(), 64);
+    for (int k = 0; k < 64; k++) b.next();
+    check(block[63] == b.value() && a.value() == b.value(), "render = next steps", block[63], b.value());
+    Smoothed c;
+    c.init(0.005f, 48000.0f, 0.0f, 64);
+    c.set(1.0f);
+    near("advance = a block of steps", c.advance(), b.value(), 1e-5);
+    c.jump(0.25f);
+    check(c.value() == 0.25f && c.settled(), "jump", c.value(), 0.25);
+}
+
 int main() {
+    sequencing();
     sample_player();
     polyphony();
     libm();

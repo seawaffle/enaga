@@ -13,6 +13,7 @@ In the repository, `tests/test_api_docs.py` fails when a public name in `include
 | `<enaga/queue.hpp>` | `enaga::Queue`: events from one context to the other |
 | `<enaga/settings.hpp>` | `enaga::Settings`: an app's own key/value settings |
 | `<enaga/midi.hpp>`, `<enaga/clock.hpp>` | `enaga::midi`: sending MIDI; `enaga::clock`: tempo, transport, ticks |
+| `<enaga/sequencer.hpp>`, `<enaga/music.hpp>` | `enaga::seq`: steps with swing, self-sending note-offs, probability and conditions; `enaga::music`: note names, scales, tempo conversions |
 | `<enaga/ui.hpp>` | `enaga::ui`: list, grid, parameter page, dialog, text entry, pad map, file browser; text lines, the screen's frame, notices, bars and meters |
 | `<enaga/bytes.hpp>` | `enaga::bytes`: numbers in packed data at any address |
 | `<enaga/dsp.hpp>` | `enaga::dsp`: math, oscillators, filters, envelopes, LFOs, delays, chorus, reverb, samples and their player, rate conversion, voice allocation |
@@ -634,6 +635,72 @@ that counts and which way SYNC OUT pulses, with the original firmware's meaning 
 Both are sent from the audio interrupt: exact on average, and late by less than one block (1.33 ms). With CLOCK
 SRC MIDI, CLOCK OUT and MIDI THRU both on would send the clock twice.
 
+## Step sequencing
+
+In `<enaga/sequencer.hpp>`, namespace `enaga::seq`, for the audio context. They do the timing; the pattern itself
+is the app's.
+
+**`StepClock`** turns the clock's ticks (`clock::ticks`) into steps.
+
+| Member | Does |
+|---|---|
+| `set(ticks_per_step = clock::sixteenth, length = 16, swing = 0.5f)` | steps of that many ticks in a pattern of `length`; `swing` 0.5 (straight) to 0.75 is how far through its pair each odd step starts (the classic 66 % is 0.66) |
+| `steps(ticks, n, out, max)` | the steps starting at any of those ticks, into `out`; how many |
+| `step_at(tick)`, `tick_of(count)` | the step sounding at a tick (a playhead), and the tick a step starts on |
+| `ticks_per_step()`, `length()` | its settings |
+
+A `Step` has `index` (in the pattern), `count` (steps since tick 0), `pass` (times round the pattern), `tick` and
+`frame` (where in the block it falls, to start a voice on the right sample). The steps follow from the tick numbers,
+so locates and the clock's catch-ups come out right; swing moves a step to the nearest tick (96 to the quarter
+note).
+
+**`NoteOffs<N>`** holds up to N notes waiting for their note-off, so a note's length ends it, whatever the transport
+does:
+
+| Member | Does |
+|---|---|
+| `add(channel, note, now, length, off)` | note started at tick `now`, lasting `length` ticks. Call it *before* the note on: the same note still waiting is ended first, so the old note-off does not cut the new note. When all N wait, the one due soonest is ended |
+| `due(tick, off)` | ends the notes whose length has run at `tick`, and any that started after it (time went back: a locate) |
+| `all(off)` | ends every one: call it when the transport stops (`on_transport`) |
+| `waiting()` | how many wait |
+| `add_midi`, `due_midi`, `all_midi` | the same, sending MIDI note-offs (`midi::note_off`) |
+
+`off` is called as `off(channel, note)`: end your own voice there, or send what you like.
+
+**Probability and conditions:** `chance(probability, random)` is true with that probability (a `dsp::Random`);
+`every(a, b, pass)` is true on the a-th of every b passes (`every(1, 2, step.pass)`: every other time round).
+
+```cpp
+enaga::clock::Tick ticks[32];
+uint32_t n = enaga::clock::ticks(ticks, 32);
+for (uint32_t i = 0; i < n; i++) offs_.due_midi(ticks[i].tick);
+enaga::seq::Step due[32];
+for (uint32_t i = 0, k = steps_.steps(ticks, n, due, 32); i < k; i++) {
+    const MyStep &s = pattern_[due[i].index];
+    if (s.on && enaga::seq::chance(s.probability, random_)) {
+        offs_.add_midi(channel, s.note, due[i].tick, s.length);
+        enaga::midi::note_on(channel, s.note, s.velocity);
+    }
+}
+```
+
+## Music helpers
+
+In `<enaga/music.hpp>`, namespace `enaga::music`; plain functions for either context.
+
+| Name | Does |
+|---|---|
+| `note_name(note, out, flats = false, middle_c_octave = 4)` | MIDI note 0-127 as text into `out` (5 chars): "C4", "F#2", "Bb-1". 60 is C4 (3 for the Yamaha convention) |
+| `major`, `minor`, `harmonic_minor`, `melodic_minor`, `dorian`, `phrygian`, `lydian`, `mixolydian`, `locrian`, `major_pentatonic`, `minor_pentatonic`, `blues`, `whole_tone`, `chromatic` | scales as 12-bit masks: bit i set when the scale has the note i semitones above its root |
+| `scales[]`, `scale_count`; `Scale` | the same with names (`name`, `mask`), for a menu |
+| `scale_size(mask)` | notes in an octave |
+| `in_scale(note, root, mask)` | whether `note` is in the scale on `root` (any octave of it) |
+| `quantize(note, root, mask)` | the nearest note of the scale; between two equally near, the lower |
+| `degree(root, mask, index)` | the index-th note of the scale from `root` (a note number), negative going down: lays a scale across pads or steps |
+| `note_hz(note, a4 = 440)` | the frequency of a (fractional) MIDI note |
+| `whole`, `half`, `quarter`, `eighth`, `sixteenth`, `thirty_second`; `dotted(beats)`, `triplet(beats)` | note lengths in beats |
+| `seconds(bpm, beats)`, `milliseconds(...)`, `frames(bpm, beats, rate = 48000)`, `hz(bpm, beats)` | how long notes last at a tempo, and as a frequency (a synced LFO or delay: `hz(120, quarter)` is 2) |
+
 ## UI toolkit
 
 `<enaga/ui.hpp>`, as `enaga::ui::`: a list and a grid, a page of parameters on the knobs, a confirmation dialog,
@@ -1082,6 +1149,18 @@ The shape's constants `kAttackSpan` and `kSpan` are what `make` uses to turn tim
 **`Lfo`, `LfoShape`**: bipolar, -1 to 1. `step(shape, dt, random)` with `dt` = rate in Hz / step rate and a
 `Random` for sample-and-hold; `value(shape)` without stepping; `phase()`, `reset(phase = 0)`. Shapes:
 `LfoShape::sine`, `triangle`, `saw`, `square`, `sample_hold`.
+
+**`Smoothed`, `enaga_smoother`**: a parameter that glides to each new value, so knob moves do not click or zipper
+(one-pole, within 1 % of a new target in the time set).
+
+| Member | Does |
+|---|---|
+| `init(seconds, rate, value = 0, block = 64)` | the glide time at `rate` steps a second, starting at `value` |
+| `set(target)`, `jump(value)` | glide to a target; or go there at once (a new note, a preset) |
+| `next()`, `render(out, n)` | one step, or `n` steps into `out` (a block function) |
+| `advance()` | a whole block of `block` steps at once, for settings recomputed per block (a filter's coefficients) |
+| `value()`, `target()`, `settled(tolerance = 1e-5)` | where it is |
+| C: `enaga_smoother_coefficient(seconds, rate)`, `enaga_smoother_step`, `enaga_smoother_render` | the same |
 
 ### Delays and effects
 
