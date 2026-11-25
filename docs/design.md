@@ -585,6 +585,24 @@ Its card is staged by `tools/unit_card.py`.
     One packet a frame needs the SOF handled within a frame, which an app callback longer than 1 ms prevented
     (`test_a_heavy_callback_does_not_cost_packets`: a quarter of the packets empty, samples lost), so the USB
     interrupt now nests in the app's callback, as the watchdog, UARTs and SYNC IN already did.
+- **USB work (decided 2026-11-25), one branch each, in this order:**
+  1. A debug port: Enaga's log, state, screen and memory over a second USB MIDI cable (log, 2026-11-25). No
+     setting: it is silent until asked, and its share of the MIDI IN buffer is capped. It also takes keys, knobs
+     and pads from the computer, so sessions on a unit can be scripted.
+  2. USB DRIVE speed (below): measure with the debug port first, then double-buffer the OUT endpoint or move the
+     packets in the interrupt. Target 700 KiB/s or more at full speed.
+  3. High speed: research spike. The core already came up at high speed on the unit (session 6). It needs
+     descriptors for both speeds (device qualifier, other-speed configuration), 512-byte bulk packets, and
+     isochronous bInterval in microframes. UAC1 at high speed is reported to need bInterval 4 on Windows'
+     usbaudio.sys (one report, not Microsoft's word); UAC2 is the standard route (in-box on Windows 10 1703+, macOS,
+     Linux; TinyUSB has it). Try both on the unit. FIFO budget: at high speed, eight audio channels (2 KiB
+     double-buffered), the drive (1 KiB) and MIDI (1 KiB, 512-byte bulk) exceed the core's 4 KiB; a likely answer
+     is the USB DRIVE page re-enumerating as a drive alone. The emulator's host has no high-speed rules yet: a
+     request for its agent.
+  4. More channels: 8 from the unit to the computer, 2 from the computer to the unit (the user, 2026-11-25), on
+     Windows, macOS and Linux. Eight channels of 16 bits fit at full speed (784 bytes a frame); eight of 24 bits
+     need high speed. After step 3, since the class and speed decide the layout. How apps fill the extra channels
+     is for the API review.
 - USB DRIVE speed: about 155 KiB/s writing on the unit (round 4). With the SD card's multi-block writes at about
   2,000 KiB/s, the time goes on USB: about 380 us a 64-byte packet, single-buffered (a NAK while the CPU empties
   the FIFO; how soon the computer retries is the computer's). To measure before changing anything: the read
@@ -2304,3 +2322,96 @@ The fifth and last of the library additions before the API review.
   waveform's pixels, 1 kHz from the pad, 2 kHz at +12, START past the tone silent, no audio overruns.
   `test_sdk.py`: the sampler builds from the SDK byte for byte, and the SDK's `host_test.py` runs its tests from
   a copy outside the SDK.
+
+### The USB debug port (2026-11-25)
+
+Step 1 of the USB work: Enaga's log, its state, the screen and memory over USB, so a session on a unit needs no
+photographs of STATUS.
+- **A second MIDI cable** on the existing bulk endpoints (`firmware/usb/usb_debug.c`), named "Enaga Debug" by its
+  jacks' string. A serial port (CDC) was not possible: USB0 has endpoints 1-4 each way, MIDI, audio and the drive
+  use six of the eight, and CDC needs three. Received bytes are read per cable (`tud_midi_n_demux_stream_read`);
+  cable 0 goes on to the MIDI parser as before. The debug port writes whole event packets on cable 1
+  (`tud_midi_packet_write`), so it never mixes with cable 0's byte stream.
+- **Protocol:** SysEx `F0 7D 45 <command> ... F7` (non-commercial ID). HELLO, LOG ON / OFF (the 32 lines kept,
+  then each new one, numbered, with a LOST message for lines overwritten before they went), STATUS (NAME VALUE
+  lines), SCREEN (the canvas, a row a message), PEEK (1-32 words of RAM, the USB0 wrapper or SYSCFG0; not the MUSB
+  core, whose interrupt registers clear on read). Requests wait for the message under way to end.
+- **Staying out of MIDI's way:** silent until the computer asks; sends only when cable 0's queue is empty; fills at
+  most 128 bytes of TinyUSB's 512-byte MIDI IN buffer (`tud_midi_n_write_available`, added to the vendored MIDI
+  driver), so a note waits behind at most two packets of debug data, even during a screen. A computer that stops
+  reading for 2 s stops the log and the answer (the message under way still ends whole). The user chose no on/off
+  setting: the port is inert unless used, and adding or removing it would change the descriptors, which Windows
+  caches per VID / PID.
+- **`tools/usb_debug.py`**: python-rtmidi on Windows, macOS and Linux; finds the port by asking each Enaga port
+  (debug-looking names first); `log` (with `--out`), `status`, `screen` (PNG, no other modules), `peek` (an address,
+  or a symbol from the firmware's ELF). Its protocol code is separate from the transport, so the emulator tests run
+  the same `Client`.
+- **Tests** (`test_usb_debug.py`, emulator): two cables in the descriptor, HELLO, the log kept and live in order and
+  stopped by LOG OFF, cable 0's note, 300-byte SysEx and clock intact while the log streams, a note waiting behind
+  at most 48 packets of a screen (129 with the cap removed: the test fails), STATUS, the screen equal to the
+  panel's frame, PEEK of `log_count` and a refused address, an unknown command, and a computer that stops reading
+  (MIDI carries on, the log stops, the port answers again). Bugs found on the way: the tool's `answer` spun
+  forever on a message it was not waiting for (it put it back and took it again without the clock moving); an
+  answer cut short by a stall glued itself to the next (the unit now ends the message, and the tool restarts on
+  F0).
+- **On the unit (2026-11-25, Windows 11 25H2, build b9eb849a; `~/smpltrek-debug/usb-testing/FINDINGS-debug-port.md`
+  on the user's machine).** The port works. Windows MIDI Services names the pair "MIDIIN2 / MIDIOUT2 (Enaga
+  SmplTrek)", and the tool found it by itself every time. The log's backlog came at once, and live lines arrived
+  within a few ms. STATUS, the screen (matching the unit) and PEEK (`log_count`, and the refused core address)
+  worked. MIDI on cable 0 (notes, SysEx, clock) was unaffected with the log on, and after the tool was killed
+  without stopping the log, the port still answered and MIDI still worked. USB DRIVE and USB audio streamed as
+  before. The two gaps were the brief's: CHECK logs nothing for keys and pads, and its AUDIO page meters the input
+  without passing it on (the meters read 99-100 on USB input; nothing was heard or recorded, as expected).
+  - USB DRIVE baseline for step 2: a 20 MiB file written in 98.0 s (0.204 MiB/s) and read in 84.5 s
+    (0.237 MiB/s), identical after the round trip. Reads are as slow as writes, though the card reads at about
+    7,600 KiB/s, so the limit is on the USB side. `SD SLOW 320 MS` and `351 MS` were logged during the writes.
+  - USB_AUDIO_OUT counted 1,729 overruns while Windows played a short sound to the unit just after USB DRIVE (no
+    app was reading USB input then, so the ring stays full and every packet counts). The counter misleads, and
+    stale frames wait in the ring for the next reader. Fix with the USB work: drain the ring while nobody reads.
+  - Underruns rose by one now and then as Windows opened and closed short streams; none during the 30 s streams.
+  - `peek` at a refused address printed a traceback; the tool now prints one line.
+- **Remote input (protocol 2), added at the user's request** so that a unit can be driven by a script: the log,
+  STATUS and SCREEN to see, cable 0 for MIDI, USB audio both ways, USB DRIVE for files, and now KEY, TURN, PAD,
+  PRESSURE and RELEASE to act. What is left for a person: DIN MIDI, SYNC, the analog inputs and outputs, the
+  battery, power-up and flashing.
+  - **Where it enters** (`main.c` `remote_*`): keys are OR'd into the switch word, so their events, F1 + POWER and
+    the menu's release of held keys are the unit's own code path; knobs add detents to the next pass; pads are
+    delivered as press, pressure and release (raw readings are the MCU's, and a remote pad must not be released
+    by the physical pad's idle readings).
+  - **POWER** only while F1 is down: alone it would switch the unit off, which a computer must not do.
+  - **Waiting for the effect:** each input's answer comes once a frame has been drawn in a later loop pass than
+    the request (`kernel_drawn`), after the next poll_inputs, so a script's SCREEN shows the result without
+    guessing delays.
+  - **Who is in charge:** while remote input is in use a 3 x 3 square shows at the top right. It is drawn on the
+    canvas just before the frame is converted and the pixels put back after, so apps that draw only what changed
+    never keep it, and SCREEN shows the app's own frame. Any key, knob or pad on the unit releases everything the
+    computer held, as do RELEASE, a computer silent for 2 s while the port has something to send, USB going, and
+    5 s without any request (`REMOTE_HOLD_MS`, added after the unit session below).
+  - **Cost:** nothing while unused beyond a few comparisons per pass; no change for apps.
+  - **Tests** (`RemoteInput`, on `tests/apps/keys`, which now logs knobs too): keys with the mark on the display
+    and not in SCREEN, a chord's order, knobs either way, pads with pressure and RELEASE, POWER refused alone and
+    opening and closing the menu with F1 (held 1.5 s: no switch-off), the unit taking over, a computer gone quiet,
+    a hold kept by `Client.wait` for 7 s and let go 5 s after the last request; and STEP 1 from the computer
+    sending the MIDI app's note.
+  - **On the unit (2026-11-25, Windows 11 26200, build 169b7c1c; `~/smpltrek-debug/remote-input/
+    FINDINGS-remote-input.md` on the user's machine): all twelve checks passed.**
+    - CHECK's pages changed by holding F4 from the computer. Keys counted once a press, chords came in order, a held
+      key lit its LED, knobs moved the VOL and VALUE LEDs, pads gave velocity and pressure. POWER alone was refused
+      and the unit stayed on; F1 + POWER opened the menu, DOWN and UP moved in it, and F1 + POWER closed it.
+    - Taking over by hand worked for a key, a knob and a pad, and unplugging USB let go within a second or two.
+      MIDI notes and CC from remote presses reached a monitor on the MIDI port.
+    - A press (two inputs, each answered after a frame) took 100 ms, a screen 50 ms, and a whole command line,
+      Python start included, about 250 ms.
+    - With nobody at the unit, a script went MIDI → CARD, ran the card test and read its result from the log:
+      `CARD W 1676 R 7501`, `CARD S 2068 517/S`, in 9.4 s.
+    - **The gap:** a program killed while holding STEP 1 left it held. After 36 s it was still held, through another
+      program opening and closing the port, and it ended only when a key was pressed on the unit. Windows keeps
+      reading the endpoint after the program is gone, so the 2 s stall never comes. Fixed with `REMOTE_HOLD_MS`:
+      5 s without a request lets go, and `Client.wait` (used by `press --hold`, `pad --hold` and the helper)
+      asks HELLO each second.
+    - The tool's rough edges, also fixed: an unplugged port raised rtmidi's own error as a traceback (now a
+      ConnectionError, one line), and an unknown key's message was printed in a KeyError's quotes.
+    - Seen in passing, not remote input: `USB_AUDIO_OUT` counted an overrun for nearly every packet while no app
+      read USB input (the ring-drain fix planned with the USB work). The count stopped after a replug, since
+      Windows no longer streamed to the unit; `USB_AUDIO_IN UNDERRUNS` went 0 → 357 across the unplug. CHECK's
+      PAD MSG/S read 82 just after the menu closed (its one-second window spans the pause).

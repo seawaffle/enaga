@@ -91,6 +91,12 @@ bool tud_midi_n_mounted (uint8_t itf) {
   return tx_opened && rx_opened;
 }
 
+// Enaga: bytes free in the IN stream's buffer, so a second user of the endpoint (the debug cable) can leave room
+// for the first (firmware/usb/usb_debug.c).
+uint32_t tud_midi_n_write_available(uint8_t itf) {
+  return tu_edpt_stream_write_available(&_midid_itf[itf].ep_stream.tx);
+}
+
 //--------------------------------------------------------------------+
 // READ API
 //--------------------------------------------------------------------+

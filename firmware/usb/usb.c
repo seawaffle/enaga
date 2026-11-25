@@ -4,13 +4,15 @@
 #include "usb_audio.h"
 
 /* USB MIDI on the C6748's USB0 (docs/design.md "E4 plan", step 5), with TinyUSB (firmware/third_party/tinyusb; port
- * in musb_enaga.h). The unit is a class-compliant USB MIDI device with one cable, a full-speed bulk endpoint each
- * way. Built so mass storage and USB audio can join it as a composite device (E5).
+ * in musb_enaga.h). The unit is a class-compliant USB MIDI device with two cables on a full-speed bulk endpoint each
+ * way: cable 0 is MIDI (the app's, and Enaga's clock), cable 1 the debug port ("Enaga Debug", usb_debug.c). Built
+ * so mass storage and USB audio can join it as a composite device (E5).
  *
  *   - usb_init: TinyUSB's device stack, which starts the PHY and connects; CPU interrupt 10 <- event 19 (USB0_INT).
  *   - usb_isr: TinyUSB's interrupt handler, then the wrapper's end of interrupt.
- *   - usb_poll (main loop): TinyUSB's task; received MIDI bytes go to the parser as port ENAGA_MIDI_USB (midi.c);
- *     queued MIDI out goes to TinyUSB. The out queue (usb_midi_send) takes whole messages from the main loop, the
+ *   - usb_poll (main loop): TinyUSB's task; received MIDI bytes go to the parser as port ENAGA_MIDI_USB (midi.c),
+ *     the debug cable's to usb_debug.c; queued MIDI out goes to TinyUSB, then the debug port's, when MIDI has
+ *     nothing waiting. The out queue (usb_midi_send) takes whole messages from the main loop, the
  *     audio callback and the clock in the audio interrupt, with interrupts off while it is written, and is drained
  *     here, so USB MIDI out is late by up to one main-loop pass and one USB frame (1 ms). Nothing is queued while the
  *     unit is not configured by a host.
@@ -230,10 +232,15 @@ void usb_isr(void)
 
 int usb_poll(u32 ms)                           /* main loop: returns the MIDI bytes received */
 {
-    u8 buffer[64];
+    u8 buffer[64], cable;
     u32 n, i, got = 0;
     tud_task_ext(0, false);
-    while ((n = tud_midi_stream_read(buffer, sizeof buffer)) > 0) {
+    while ((n = tud_midi_n_demux_stream_read(0, &cable, buffer, sizeof buffer)) > 0) {
+        if (cable == 1) {
+            for (i = 0; i < n; i++) usb_debug_byte(buffer[i]);
+            continue;
+        }
+        if (cable != 0) continue;
         for (i = 0; i < n; i++) midi_usb_byte(buffer[i], ms);
         got += n;
     }
@@ -246,6 +253,7 @@ int usb_poll(u32 ms)                           /* main loop: returns the MIDI by
         if (sent < count) break;               /* TinyUSB's buffer is full: the rest next pass */
     }
     if (!tud_mounted()) tx_tail = tx_head;     /* the host went: drop what was waiting */
+    if (tx_tail == tx_head) usb_debug_poll();  /* MIDI first */
     return (int)got;
 }
 
@@ -283,7 +291,7 @@ enum { ITF_AUDIO_CONTROL, ITF_MIDI_STREAMING, ITF_AUDIO_OUT, ITF_AUDIO_IN, ITF_D
 #define EP_DRIVE_OUT 0x02
 #define EP_DRIVE_IN  0x82
 #define AC_LEN       (11 + 12 + 9 + 12 + 9)  /* header, then each direction's input and output terminal */
-#define MS_LEN       (TUD_MIDI_DESC_LEN - TUD_MIDI_DESC_HEAD_LEN + 9 + 7)
+#define MS_LEN       (9 + 7 + 2 * TUD_MIDI_DESC_JACK_LEN + 2 * TUD_MIDI_DESC_EP_LEN(2))
 #define AS_LEN       (9 + 9 + 7 + 11 + 9 + 7)
 #define CONFIG_LENGTH (TUD_CONFIG_DESC_LEN + 9 + AC_LEN + MS_LEN + 2 * AS_LEN + TUD_MSC_DESC_LEN)
 
@@ -310,10 +318,11 @@ static const uint8_t configuration_descriptor[] = {
     TERMINAL_OUT(4, 0x0101, 3),                /* -> USB streaming, to the computer */
     9, TUSB_DESC_INTERFACE, ITF_MIDI_STREAMING, 0, 2, TUSB_CLASS_AUDIO, AUDIO_SUBCLASS_MIDI_STREAMING, 0, 0,
     7, TUSB_DESC_CS_INTERFACE, MIDI_CS_INTERFACE_HEADER, U16_TO_U8S_LE(0x0100),
-    U16_TO_U8S_LE(7 + TUD_MIDI_DESC_JACK_LEN + 2 * TUD_MIDI_DESC_EP_LEN(1)),
-    TUD_MIDI_DESC_JACK_DESC(1, 0),
-    TUD_MIDI_DESC_EP(EP_MIDI_OUT, 64, 1), TUD_MIDI_JACKID_IN_EMB(1),
-    TUD_MIDI_DESC_EP(EP_MIDI_IN, 64, 1), TUD_MIDI_JACKID_OUT_EMB(1),
+    U16_TO_U8S_LE(7 + 2 * TUD_MIDI_DESC_JACK_LEN + 2 * TUD_MIDI_DESC_EP_LEN(2)),
+    TUD_MIDI_DESC_JACK_DESC(1, 0),             /* cable 0: MIDI */
+    TUD_MIDI_DESC_JACK_DESC(2, 3),             /* cable 1: the debug port, string 3 */
+    TUD_MIDI_DESC_EP(EP_MIDI_OUT, 64, 2), TUD_MIDI_JACKID_IN_EMB(1), TUD_MIDI_JACKID_IN_EMB(2),
+    TUD_MIDI_DESC_EP(EP_MIDI_IN, 64, 2), TUD_MIDI_JACKID_OUT_EMB(1), TUD_MIDI_JACKID_OUT_EMB(2),
     AUDIO_STREAMING(ITF_AUDIO_OUT, 1, USB_AUDIO_EP_OUT, TUSB_ISO_EP_ATT_ADAPTIVE),
     AUDIO_STREAMING(ITF_AUDIO_IN, 4, USB_AUDIO_EP_IN, TUSB_ISO_EP_ATT_ASYNCHRONOUS),
     TUD_MSC_DESCRIPTOR(ITF_DRIVE, 0, EP_DRIVE_OUT, EP_DRIVE_IN, 64),
@@ -326,7 +335,8 @@ const uint8_t *tud_descriptor_configuration_cb(uint8_t index)
     return configuration_descriptor;
 }
 
-/* Strings: 0 the language (English, US), 1 the maker, 2 the product with the device's name ("Enaga SmplTrek"). */
+/* Strings: 0 the language (English, US), 1 the maker, 2 the product with the device's name ("Enaga SmplTrek"),
+ * 3 the debug port's jacks. */
 static const char *product_name(void)
 {
     switch (device_id) {
@@ -347,6 +357,7 @@ const uint16_t *tud_descriptor_string_cb(uint8_t index, uint16_t langid)
     else {
         if (index == 1) s = "Enaga";
         else if (index == 2) s = product_name();
+        else if (index == 3) s = "Enaga Debug";
         else return 0;
         for (n = 0; s[n] && n < 31; n++) text[1 + n] = (u8)s[n];
     }

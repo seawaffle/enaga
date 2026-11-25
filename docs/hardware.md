@@ -431,6 +431,30 @@ full-speed USB MIDI, audio and mass storage device with TinyUSB (`firmware/third
   take its status from the port.
 - **FIFOs:** dynamic, in the core's 4 KiB. The core has no RX / TX_DOUBLE_PACKET_DISABLE registers (0x340 / 0x342,
   found on newer MUSB revisions); double buffering is the DPB bit of TXFIFOSZ / RXFIFOSZ.
+- **The debug port:** the MIDI interface has two cables. Cable 0 is MIDI; cable 1 ("Enaga Debug"; on Windows'
+  older MIDI stack "MIDIIN2 (...)" / "MIDIOUT2 (...)") carries Enaga's log, its state, the screen and memory words
+  as SysEx, for `tools/usb_debug.py` (`firmware/usb/usb_debug.c` has the protocol). It sends nothing until asked,
+  and fills at most 128 bytes of the MIDI IN buffer, so MIDI waits behind no more than two packets of it. During a
+  session on a unit:
+
+  ```
+  pip install python-rtmidi
+  python3 -B tools/usb_debug.py log --out session.log    # Enaga's log as it happens (Ctrl-C ends it)
+  python3 -B tools/usb_debug.py status                    # version, app, crash, audio, USB and SD counters
+  python3 -B tools/usb_debug.py screen shot.png           # the screen, in place of a photo
+  python3 -B tools/usb_debug.py peek usb_drive_errors --elf build/firmware/enaga.elf
+  python3 -B tools/usb_debug.py press F1 POWER            # keys from the computer (POWER only with F1: the menu)
+  python3 -B tools/usb_debug.py turn VALUE 3              # a knob, by detents
+  python3 -B tools/usb_debug.py pad 5 --velocity 90       # a pad
+  ```
+
+  Keys, knobs and pads from the computer are delivered as the unit's own (pads as press, pressure and release,
+  without raw readings), and each answers once a frame has been drawn after it, so a `screen` next shows its
+  effect. While they are in use a small square shows at the top right of the display (not in `screen`'s image);
+  pressing or turning anything on the unit lets go of everything the computer held, as do 5 s without any request
+  from the computer (a script holding longer uses `Client.wait`, which asks HELLO each second) and USB going. A
+  computer cannot switch the unit off. `peek` reads RAM, the USB0 wrapper's registers and SYSCFG0, not the MUSB core's (reading its interrupt
+  registers clears them). The port needs the firmware the tool came with: an older firmware has one cable.
 - **Endpoints and IDs:** the MIDI interface uses bulk endpoints 0x01 and 0x81 (64 bytes), audio isochronous
   0x03 and 0x83 (196 bytes), the mass storage interface (USB DRIVE, interface 4) 0x02 and 0x82. The USB IDs are
   TinyUSB's test values (0xCAFE / 0x4011) until a pid.codes product ID is granted.
