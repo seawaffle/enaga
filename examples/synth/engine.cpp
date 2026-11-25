@@ -19,15 +19,6 @@ void Engine::init(float sample_rate) {
     update_settings();
 }
 
-bool Engine::post(const NoteEvent &event) {
-    uint32_t w = queue_write_;
-    if (w - queue_read_ >= 64) return false;
-    queue_[w & 63] = event;
-    asm volatile("" ::: "memory");                // the event is in place before the index moves
-    queue_write_ = w + 1;
-    return true;
-}
-
 void Engine::update_settings() {
     int16_t v[param_count];
     bool changed = first_;
@@ -97,27 +88,18 @@ void Engine::update_settings() {
     reverb_mix_ = 0.5f * percent(v[reverb_mix]);
 }
 
-Engine::Voice &Engine::allocate() {
-    Voice *best = nullptr;
-    for (Voice &v : voices_)                      // a free voice
-        if (!v.amp.active()) return v;
-    for (Voice &v : voices_)                      // else the oldest released one
-        if (!v.gate && (!best || v.started < best->started)) best = &v;
-    if (best) return *best;
-    for (Voice &v : voices_)                      // else the oldest
-        if (!best || v.started < best->started) best = &v;
-    return *best;
+int Engine::allocate() {                          // silent, else the oldest released, else the oldest
+    return allocator_.allocate([this](int v) { return voices_[v].amp.active(); });
 }
 
-void Engine::start(Voice &voice, const NoteEvent &event, bool retrigger, float unison) {
+void Engine::start(int v, const NoteEvent &event, bool retrigger, float unison) {
+    Voice &voice = voices_[v];
+    allocator_.start(v, event.key, retrigger);
     voice.unison = unison;
-    voice.key = event.key;
     voice.note = event.note;
-    voice.gate = true;
     voice.target = float(event.note);
     voice.velocity = float(event.value) * (1.0f / 127.0f);
     if (!retrigger) return;                       // LEGATO: the same voice slides on
-    voice.started = ++clock_;
     voice.pressure = 0.0f;
     voice.random = random_.bipolar();
     bool glide = s_.glide < 1.0f && (s_.mode != mode_legato);
@@ -147,8 +129,9 @@ void Engine::start(Voice &voice, const NoteEvent &event, bool retrigger, float u
     voice.lfo2.reset(s_.lfo_key_sync[1] ? 0.0f : free_lfo_[1].phase());
 }
 
-void Engine::release(Voice &v) {
-    v.gate = false;
+void Engine::release(int i) {
+    Voice &v = voices_[i];
+    allocator_.release_voice(i);
     v.amp.gate_off();
     v.env2.gate_off();
     v.env3.gate_off();
@@ -160,51 +143,42 @@ void Engine::handle(const NoteEvent &e) {
         if (s_.mode == mode_poly) {
             for (int k = 0; k < s_.unison; k++) start(allocate(), e, true, unison_place(k));
         } else {
-            if (held_count_ == 16) {              // forget the oldest
-                for (int i = 1; i < 16; i++) held_[i - 1] = held_[i];
-                held_count_--;
-            }
-            held_[held_count_++] = {e.key, e.note, e.value};
-            bool legato = s_.mode == mode_legato && voices_[0].gate;
-            for (int k = 0; k < s_.unison; k++) start(voices_[k], e, !legato, unison_place(k));
+            held_.push(e.key, e.note, e.value);
+            bool legato = s_.mode == mode_legato && allocator_.held(0);
+            for (int k = 0; k < s_.unison; k++) start(k, e, !legato, unison_place(k));
             for (int k = s_.unison; k < kVoices; k++)         // left over from more unison voices
-                if (voices_[k].gate) release(voices_[k]);
+                if (allocator_.held(k)) release(k);
         }
         last_pitch_ = float(e.note);
         break;
     case NoteEvent::off:
         if (s_.mode == mode_poly) {
-            for (Voice &v : voices_)
-                if (v.gate && v.key == e.key) release(v);
+            allocator_.release(e.key, [this](int v) { release(v); });
         } else {
-            int i = 0;
-            while (i < held_count_ && held_[i].key != e.key) i++;
-            if (i == held_count_) break;
-            for (; i + 1 < held_count_; i++) held_[i] = held_[i + 1];
-            held_count_--;
-            if (voices_[0].key != e.key || !voices_[0].gate) break;
-            if (held_count_) {                    // back to the last key still held
-                const Held &h = held_[held_count_ - 1];
+            if (!held_.remove(e.key)) break;
+            if (allocator_.key(0) != e.key || !allocator_.held(0)) break;
+            if (!held_.empty()) {                 // back to the last key still held
+                const auto &h = held_.top();
                 const NoteEvent back = {NoteEvent::on, h.key, h.note, h.velocity};
-                for (int k = 0; k < s_.unison; k++) start(voices_[k], back, s_.mode == mode_mono, unison_place(k));
+                for (int k = 0; k < s_.unison; k++) start(k, back, s_.mode == mode_mono, unison_place(k));
             } else {
-                for (Voice &v : voices_)
-                    if (v.gate) release(v);
+                for (int v = 0; v < kVoices; v++)
+                    if (allocator_.held(v)) release(v);
             }
         }
         break;
     case NoteEvent::pressure:
-        for (Voice &v : voices_)
-            if (v.gate && v.key == e.key) v.pressure = float(e.value) * (1.0f / 127.0f);
+        allocator_.each_held(e.key, [&](int v) { voices_[v].pressure = float(e.value) * (1.0f / 127.0f); });
         break;
     case NoteEvent::all_off:
-        for (Voice &v : voices_) {
-            v.gate = false;
+        for (int i = 0; i < kVoices; i++) {
+            Voice &v = voices_[i];
+            allocator_.release_voice(i);
             v.amp.kill();
             v.env2.kill();
             v.env3.kill();
         }
-        held_count_ = 0;
+        held_.clear();
         break;
     }
 }
@@ -334,10 +308,8 @@ void Engine::render_voice(Voice &v, const Control &c, float *left, float *right)
 
 void Engine::render(float *out, uint32_t frames) {
     update_settings();
-    while (queue_read_ != queue_write_) {
-        handle(queue_[queue_read_ & 63]);
-        queue_read_ = queue_read_ + 1;
-    }
+    NoteEvent event;
+    while (events_.pop(event)) handle(event);
 
     float left[ENAGA_BLOCK_FRAMES], right[ENAGA_BLOCK_FRAMES];
     if (frames > ENAGA_BLOCK_FRAMES) frames = ENAGA_BLOCK_FRAMES;

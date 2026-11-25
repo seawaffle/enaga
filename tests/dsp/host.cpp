@@ -3,6 +3,7 @@
 // per-sample steps give. Run by tests/test_dsp.py; prints one line per failed check and
 // exits non-zero if any failed.
 #include <enaga/dsp.hpp>
+#include <enaga/queue.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -1069,7 +1070,59 @@ static void libm() {
     }
 }
 
+// The queue, voice allocation and the note stack.
+static void polyphony() {
+    enaga::Queue<int, 4> q;
+    int x = 0;
+    check(q.empty() && !q.pop(x), "queue starts empty", q.size(), 0);
+    for (int i = 0; i < 4; i++) check(q.push(i * 10), "queue push", i, 1);
+    check(!q.push(99) && q.size() == 4, "queue full", q.size(), 4);
+    for (int round = 0; round < 10; round++) {          // wraps its indices many times over
+        check(q.pop(x) && x == round * 10, "queue order", x, round * 10);
+        check(q.push((round + 4) * 10), "queue push after pop", round, 1);
+    }
+    while (q.pop(x)) {}
+    check(q.empty(), "queue drained", q.size(), 0);
+
+    VoiceAllocator<3> a;
+    bool sounding[3] = {};
+    auto pick = [&] { return a.allocate([&](int v) { return sounding[v]; }); };
+    int v0 = pick(); a.start(v0, 10); sounding[v0] = true;
+    int v1 = pick(); a.start(v1, 11); sounding[v1] = true;
+    int v2 = pick(); a.start(v2, 12); sounding[v2] = true;
+    check(v0 == 0 && v1 == 1 && v2 == 2, "silent voices first", v2, 2);
+    check(pick() == 0, "all held: the oldest is stolen", pick(), 0);
+    int released = 0;
+    a.release(11, [&](int v) { released += v + 1; });
+    check(released == 2 && !a.held(1) && a.held(0), "release by key", released, 2);
+    check(pick() == 1, "the released voice before held ones", pick(), 1);
+    a.release(10, [](int) {});
+    check(pick() == 0, "the oldest released", pick(), 0);
+    sounding[2] = false;
+    check(pick() == 2, "a silent voice before released ones", pick(), 2);
+    a.start(1, 20);
+    a.start(2, 20);
+    int count = 0;
+    a.each_held(20, [&](int) { count++; });
+    check(count == 2 && a.key(1) == 20, "one key holding two voices (unison)", count, 2);
+    uint32_t age = a.age(1);
+    a.start(1, 21, false);
+    check(a.age(1) == age && a.key(1) == 21, "legato keeps the age", a.age(1), age);
+    check(a.release_all([](int) {}) == 2, "release_all", 0, 2);
+
+    NoteStack<3> s;
+    s.push(1, 60, 100); s.push(2, 62, 100); s.push(3, 64, 100);
+    check(s.top().note == 64 && s.size() == 3, "stack top", s.top().note, 64);
+    s.push(4, 65, 100);
+    check(s.size() == 3 && s[0].key == 2, "full: the oldest goes", s[0].key, 2);
+    check(s.remove(4) && s.top().note == 64, "release the top: back to the one below", s.top().note, 64);
+    check(!s.remove(9), "a key not held", 0, 0);
+    s.push(2, 62, 90);
+    check(s.size() == 2 && s.top().key == 2 && s[0].key == 3, "a key played again moves to the top", s[0].key, 3);
+}
+
 int main() {
+    polyphony();
     libm();
     samples();
     math();
