@@ -172,3 +172,114 @@ done:
     *used = taken;
     return made;
 }
+
+/* ---- The sample player ---- */
+
+#define FRAME ((int64_t)1 << 32)
+
+void enaga_sample_player_start(enaga_sample_player *p, const enaga_sample *s, uint32_t start, uint32_t end, int reverse) {
+    if (end == 0 || end > s->frames) end = s->frames;
+    if (start > end) start = end;
+    p->sample = s;
+    p->start = start;
+    p->end = end;
+    p->loop_start = start;
+    p->loop_end = end;
+    p->loop = ENAGA_LOOP_OFF;
+    p->direction = reverse ? -1 : 1;
+    p->position = (int64_t)(reverse ? (end > start ? end - 1 : start) : start) << 32;
+    p->active = end > start;
+    p->fresh = 1;
+    p->gain_l = p->gain_r = 0.0f;
+}
+
+/* Catmull-Rom through x0 and x1 at t in [0, 1). */
+static float cubic(float xm1, float x0, float x1, float x2, float t) {
+    float c1 = 0.5f * (x1 - xm1);
+    float c2 = xm1 - 2.5f * x0 + 2.0f * x1 - 0.5f * x2;
+    float c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
+    return ((c3 * t + c2) * t + c1) * t + x0;
+}
+
+/* Moves on by step, through the loop if there is one, and stops at the start or end. */
+static void player_advance(enaga_sample_player *p, int64_t step) {
+    int64_t before = p->position, at = p->direction > 0 ? before + step : before - step;
+    int64_t ls = (int64_t)p->loop_start << 32, le = (int64_t)p->loop_end << 32;
+    if (p->loop != ENAGA_LOOP_OFF && p->loop_end > p->loop_start) {
+        int64_t last = le - FRAME, length = le - ls;
+        if (p->loop == ENAGA_LOOP_FORWARD) {
+            if (p->direction > 0 && before < le) while (at >= le) at -= length;
+            if (p->direction < 0 && before >= ls) while (at < ls) at += length;
+        } else if (p->direction > 0 && before <= last && at > last) {
+            at = 2 * last - at;
+            if (at < ls) at = ls;
+            p->direction = -1;
+        } else if (p->direction < 0 && before >= ls && at < ls) {
+            at = 2 * ls - at;
+            if (at > last) at = last;
+            p->direction = 1;
+        }
+    }
+    p->position = at;
+    if (p->direction > 0 ? at >= (int64_t)p->end << 32 : at < (int64_t)p->start << 32) p->active = 0;
+}
+
+int enaga_sample_player_render(enaga_sample_player *p, float *left, float *right, int n, float rate) {
+    const enaga_sample *s = p->sample;
+    const float *d = s->data;
+    int last = (int)s->frames - 1, stereo = s->channels == 2, i, made = 0;
+    int64_t step;
+    uint32_t whole;
+    rate = enaga_clamp(rate, 0.0f, 1048576.0f);
+    whole = (uint32_t)rate;
+    step = (int64_t)whole << 32 | (uint32_t)((rate - (float)whole) * 2147483648.0f) << 1;
+    for (i = 0; i < n && p->active; i++) {
+        int x = (int)(p->position >> 32);
+        int a = x - 1 < 0 ? 0 : x - 1 > last ? last : x - 1, b = x < 0 ? 0 : x > last ? last : x;
+        int c = x + 1 > last ? last : x + 1 < 0 ? 0 : x + 1, e = x + 2 > last ? last : x + 2 < 0 ? 0 : x + 2;
+        float t = (float)((uint32_t)p->position >> 8) * (1.0f / 16777216.0f);
+        if (stereo) {
+            left[i] = cubic(d[2 * a], d[2 * b], d[2 * c], d[2 * e], t);
+            right[i] = cubic(d[2 * a + 1], d[2 * b + 1], d[2 * c + 1], d[2 * e + 1], t);
+        } else {
+            left[i] = cubic(d[a], d[b], d[c], d[e], t);
+        }
+        player_advance(p, step);
+        made++;
+    }
+    for (; i < n; i++) {
+        left[i] = 0.0f;
+        if (stereo) right[i] = 0.0f;
+    }
+    return made;
+}
+
+int enaga_sample_player_render_add(enaga_sample_player *p, float *left, float *right, int n, float rate, float gain_l,
+                                   float gain_r) {
+    float block_l[64], block_r[64], gl, gr, step_l, step_r, scale;
+    int done = 0, made = 0, stereo = p->sample->channels == 2;
+    if (p->fresh) {
+        p->gain_l = gain_l;
+        p->gain_r = gain_r;
+        p->fresh = 0;
+    }
+    gl = p->gain_l;
+    gr = p->gain_r;
+    scale = n > 0 ? enaga_reciprocal((float)n) : 0.0f;
+    step_l = (gain_l - gl) * scale;
+    step_r = (gain_r - gr) * scale;
+    while (done < n && p->active) {
+        int count = n - done > 64 ? 64 : n - done, i;
+        made += enaga_sample_player_render(p, block_l, block_r, count, rate);
+        for (i = 0; i < count; i++) {
+            gl += step_l;
+            gr += step_r;
+            left[done + i] += gl * block_l[i];
+            right[done + i] += gr * (stereo ? block_r[i] : block_l[i]);
+        }
+        done += count;
+    }
+    p->gain_l = gain_l;
+    p->gain_r = gain_r;
+    return made;
+}

@@ -368,6 +368,44 @@ void enaga_resampler_init(enaga_resampler *r, const float *table, uint32_t in_ra
  * a sound feed that many zeros to get the last outputs. Mono: one resampler per channel. */
 int enaga_resample(enaga_resampler *r, const float *in, int n_in, float *out, int max_out, int *used);
 
+/* ---- Samples in memory and their player ---- */
+
+/* A sample: `frames` frames of float at `rate` Hz, one channel, or two interleaved (L R L R). */
+typedef struct {
+    float *data;
+    uint32_t frames;
+    uint32_t channels;                       /* 1 or 2 */
+    uint32_t rate;
+} enaga_sample;
+
+enum { ENAGA_LOOP_OFF = 0, ENAGA_LOOP_FORWARD = 1, ENAGA_LOOP_PING_PONG = 2 };
+
+/* Plays a sample from `start` to `end` (frames, end excluded), forwards or in reverse, looping between
+ * `loop_start` and `loop_end` once it gets there if `loop` says so. The position is 32.32 fixed point in frames,
+ * read by 4-point cubic (Catmull-Rom) interpolation; frames outside the sample read as its first or last. The
+ * fields may be changed between calls: `loop` set to ENAGA_LOOP_OFF lets a looping note play out to its end. */
+typedef struct {
+    const enaga_sample *sample;              /* must outlive the playing */
+    int64_t position;                        /* frames << 32 */
+    uint32_t start, end, loop_start, loop_end;
+    int32_t loop;                            /* ENAGA_LOOP_OFF, _FORWARD, _PING_PONG */
+    int32_t direction;                       /* +1, or -1 in reverse (and on a ping-pong's way back) */
+    int32_t active;
+    int32_t fresh;                           /* render_add takes its first gains at once, then ramps */
+    float gain_l, gain_r;                    /* render_add's gains at the end of the last block */
+} enaga_sample_player;
+
+/* Starts at `start` (or at end - 1 in reverse), with no loop; the whole sample if end is 0 or past its end. */
+void enaga_sample_player_start(enaga_sample_player *p, const enaga_sample *s, uint32_t start, uint32_t end, int reverse);
+/* Writes up to n frames, advancing `rate` source frames per output frame (any rate >= 0: the pitch ratio times
+ * the sample's rate over the output's): a mono sample into left only (right may be NULL), a stereo one into both.
+ * After the end, the rest of the block is zeros. Returns the frames played. */
+int enaga_sample_player_render(enaga_sample_player *p, float *left, float *right, int n, float rate);
+/* Adds up to n frames into left and right, a mono sample into both, with gains moving in a straight line from
+ * the last call's to these across the block (the first block after start takes them at once). The frames played. */
+int enaga_sample_player_render_add(enaga_sample_player *p, float *left, float *right, int n, float rate, float gain_l,
+                                   float gain_r);
+
 #ifdef __cplusplus
 }
 #endif
