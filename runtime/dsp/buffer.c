@@ -67,6 +67,16 @@ void enaga_tan_pi_buffer(float *restrict buf, int n) {
     for (i = 0; i < n; i++) buf[i] = enaga_tan_pi(buf[i]);
 }
 
+void enaga_sqrt_buffer(float *restrict buf, int n) {
+    int i;
+    for (i = 0; i < n; i++) buf[i] = enaga_sqrt(buf[i]);
+}
+
+void enaga_tanh_buffer(float *restrict buf, int n, float drive) {
+    int i;
+    for (i = 0; i < n; i++) buf[i] = enaga_tanh(drive * buf[i]);
+}
+
 void enaga_mix_product(float *restrict out, const float *restrict a, const float *restrict b, int n, float gain) {
     int i;
     for (i = 0; i < n; i++) out[i] += gain * a[i] * b[i];

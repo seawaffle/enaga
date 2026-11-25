@@ -43,6 +43,73 @@ static void math() {
     for (float x = 1e-3f; x < 1e4f; x *= 1.0137f) worst = std::fmax(worst, std::fabs(log2(x) - std::log2(double(x))));
     near("log2 absolute error", worst, 0, 1e-5);
     worst = 0;
+    for (float x = 1e-30f; x < 1e30f; x *= 1.00071f) {
+        double want = std::log2(double(x));
+        worst = std::fmax(worst, std::fabs(log2(x) - want) / std::fmax(1.0, std::fabs(want)));
+    }
+    near("log2 error, scaled by |log2 x| beyond 1", worst, 0, 2e-7);
+    worst = 0;
+    for (float x = 0.5f; x <= 2; x += 0.00013f) worst = std::fmax(worst, std::fabs(log2(x) - std::log2(double(x))));
+    near("log2 absolute error, 0.5 to 2", worst, 0, 2e-7);
+    near("log(e)", log(float(M_E)), 1, 3e-7);
+    near("log10(1000)", log10(1000.0f), 3, 1e-6);
+    worst = 0;
+    for (float x = 1e-3f; x < 1e3f; x *= 1.0137f)
+        for (float y = -4; y <= 4; y += 0.37f)
+            worst = std::fmax(worst, std::fabs(pow(x, y) / std::pow(double(x), double(y)) - 1));
+    near("pow relative error (x 1e-3 to 1e3, y -4 to 4)", worst, 0, 6e-6);
+    check(pow(0.0f, 2.0f) == 0 && pow(-2.0f, 2.0f) == 0, "pow of x <= 0 is 0", pow(-2.0f, 2.0f), 0);
+    near("db_to_gain(-6.0206)", db_to_gain(-6.0206f), 0.5, 1e-6);
+    near("gain_to_db(10)", gain_to_db(10.0f), 20, 1e-5);
+    near("gain_to_db(0)", gain_to_db(0.0f), -600, 1e-3);
+    check(abs(-2.5f) == 2.5f && copysign(3.0f, -0.0f) == -3 && copysign(-3.0f, 1.0f) == 3, "abs, copysign", copysign(3.0f, -0.0f), -3);
+    check(wrap(2.25f) == 0.25f && wrap(-0.25f) == 0.75f && wrap(-1e-9f) == 0, "wrap", wrap(-1e-9f), 0);
+    worst = 0;
+    for (float x = 1e-30f; x < 1e30f; x *= 1.00071f) {
+        worst = std::fmax(worst, std::fabs(sqrt(x) / std::sqrt(double(x)) - 1));
+        worst = std::fmax(worst, std::fabs(rsqrt(x) * std::sqrt(double(x)) - 1));
+    }
+    near("sqrt and rsqrt relative error", worst, 0, 3e-7);
+    check(sqrt(0.0f) == 0 && sqrt(-1.0f) == 0, "sqrt of 0 and below", sqrt(-1.0f), 0);
+    worst = 0;
+    for (float x = -100; x <= 100; x += 0.0071f) {
+        double e = 4e-6 + 1e-7 * std::fabs(x);
+        worst = std::fmax(worst, std::fabs(sin(x) - std::sin(double(x))) / e);
+        worst = std::fmax(worst, std::fabs(cos(x) - std::cos(double(x))) / e);
+    }
+    near("sin and cos absolute error, in 4e-6 + 1e-7 |x|", worst, 0, 1);
+    worst = 0;
+    for (float x = -1.5f; x <= 1.5f; x += 0.00071f) worst = std::fmax(worst, std::fabs(tan(x) / std::tan(double(x)) - 1) * (x != 0));
+    near("tan relative error, |x| <= 1.5", worst, 0, 2e-5);
+    worst = 0;
+    for (float x = -1000; x <= 1000; x += x > -2 && x < 2 ? 0.0001f : 0.13f)
+        worst = std::fmax(worst, std::fabs(atan(x) - std::atan(double(x))));
+    near("atan absolute error", worst, 0, 5e-7);
+    worst = 0;
+    for (float a = -3.14159f; a <= 3.14159f; a += 0.00113f)
+        for (float r : {1e-3f, 1.0f, 1e4f}) {
+            float x = float(r * std::cos(double(a))), y = float(r * std::sin(double(a)));
+            worst = std::fmax(worst, std::fabs(atan2(y, x) - std::atan2(double(y), double(x))));
+        }
+    near("atan2 absolute error", worst, 0, 5e-7);
+    check(atan2(0.0f, 0.0f) == 0 && std::fabs(atan2(0.0f, -1.0f) - M_PI) < 1e-6 && atan2(-1.0f, 0.0f) < 0, "atan2 axes",
+          atan2(0.0f, -1.0f), M_PI);
+    worst = 0;
+    double edge = 0;
+    for (float x = -1; x <= 1; x += 0.00013f) {
+        double e = std::fmax(std::fabs(asin(x) - std::asin(double(x))), std::fabs(acos(x) - std::acos(double(x))));
+        if (std::fabs(x) < 1 - 1e-6f) worst = std::fmax(worst, e); else edge = std::fmax(edge, e);
+    }
+    for (float x : {1.0f, -1.0f, 0.9999999f, -0.9999999f})
+        edge = std::fmax(edge, std::fmax(std::fabs(asin(x) - std::asin(double(x))), std::fabs(acos(x) - std::acos(double(x)))));
+    near("asin and acos absolute error", worst, 0, 1e-6);
+    near("asin and acos absolute error near +-1", edge, 0, 4e-4);
+    worst = 0;
+    for (float x = -12; x <= 12; x += x > -1 && x < 1 ? 0.00007f : 0.0013f)
+        worst = std::fmax(worst, std::fabs(tanh(x) / std::tanh(double(x)) - 1) * (x != 0));
+    near("tanh relative error", worst, 0, 6e-7);
+    check(tanh(0.0f) == 0 && tanh(100.0f) == 1 && tanh(-100.0f) == -1, "tanh limits", tanh(100.0f), 1);
+    worst = 0;
     for (float t = -3; t <= 3; t += 0.00071f) worst = std::fmax(worst, std::fabs(sin_turns(t) - std::sin(2 * M_PI * t)));
     near("sin_turns absolute error", worst, 0, 4e-6);
     worst = 0;
@@ -441,6 +508,16 @@ static void blocks() {
         same("exp2_buffer = exp2", e, e2);
         same("reciprocal_buffer = reciprocal", r, r2);
         same("tan_pi_buffer = tan_pi", t, t2);
+        std::vector<float> q = x, q2, h = x, h2;
+        for (float &v : q) v = std::fabs(v) * 1000.0f;
+        q2 = q;
+        h2 = h;
+        enaga_sqrt_buffer(q.data(), 77);
+        enaga_tanh_buffer(h.data(), 77, 3.5f);
+        for (float &v : q2) v = sqrt(v);
+        for (float &v : h2) v = tanh(3.5f * v);
+        same("sqrt_buffer = sqrt", q, q2);
+        same("tanh_buffer = tanh(drive x)", h, h2);
         for (int i = 0; i < 77; i++) { ge[i] = t[i]; k[i] = 2.0f - 1.98f * noise.unipolar(); }
         std::vector<SvfCoefficients> c(77);
         enaga_svf_coefficients_buffer(ge.data(), k.data(), c.data(), 77);

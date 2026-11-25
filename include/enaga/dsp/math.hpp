@@ -1,6 +1,8 @@
-// Enaga DSP: fast float math without libm. Provisional until 1.0.
+// Enaga DSP: fast float math. Provisional until 1.0.
 //
-// The C++ names for math.h (enaga_exp2 is enaga::dsp::exp2, and so on), where the accuracy of each is stated.
+// The C++ names for math.h (enaga_exp2 is enaga::dsp::exp2, and so on), where the accuracy of each is stated. These
+// are faster and less exact than the standard functions (<cmath>'s std::sin and the rest), which are full float
+// accuracy.
 // Block functions on buffers (enaga_mix, enaga_scale, ...) are in <enaga/dsp.h>, callable as they are.
 // Nothing here divides (the C674x has no hardware divide); reciprocal is 1 / x without a division. Block forms of
 // exp2, reciprocal and tan_pi, for control values gathered into an array (one per voice, say), are in dsp.h.
@@ -26,6 +28,24 @@ inline float sin_turns(float t) { return enaga_sin_turns(t); }
 inline float cos_turns(float t) { return enaga_cos_turns(t); }
 inline float tan_pi(float x) { return enaga_tan_pi(x); }
 inline float soft_clip(float x) { return enaga_soft_clip(x); }
+inline float log(float x) { return enaga_log(x); }
+inline float log10(float x) { return enaga_log10(x); }
+inline float pow(float x, float y) { return enaga_pow(x, y); }
+inline float db_to_gain(float db) { return enaga_db_to_gain(db); }
+inline float gain_to_db(float gain) { return enaga_gain_to_db(gain); }
+inline float abs(float x) { return enaga_abs(x); }
+inline float copysign(float x, float s) { return enaga_copysign(x, s); }
+inline float wrap(float x) { return enaga_wrap(x); }
+inline float sqrt(float x) { return enaga_sqrt(x); }
+inline float rsqrt(float x) { return enaga_rsqrt(x); }
+inline float sin(float x) { return enaga_sin(x); }
+inline float cos(float x) { return enaga_cos(x); }
+inline float tan(float x) { return enaga_tan(x); }
+inline float atan(float x) { return enaga_atan(x); }
+inline float atan2(float y, float x) { return enaga_atan2(y, x); }
+inline float asin(float x) { return enaga_asin(x); }
+inline float acos(float x) { return enaga_acos(x); }
+inline float tanh(float x) { return enaga_tanh(x); }
 
 // A fast uniform random source (xorshift32).
 class Random {

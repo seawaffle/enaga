@@ -1,4 +1,5 @@
-/* Enaga DSP: fast float math without libm, for C and C++ (math.hpp wraps it as enaga::dsp). Provisional until 1.0.
+/* Enaga DSP: fast float math, for C and C++ (math.hpp wraps it as enaga::dsp). Provisional until 1.0. Faster and
+ * less exact than the standard functions (<math.h>, runtime/libm.c), which are full float accuracy.
  *
  * Accuracy is what audio needs, stated per function and checked by tests/test_dsp.py. Nothing here divides
  * (the C674x has no hardware divide: a float division is a run of code, and under cl6x a call, which stops a loop
@@ -53,12 +54,53 @@ static inline float enaga_exp(float x) { return enaga_exp2(x * 1.44269504f); }
 /* The frequency ratio of a pitch offset in semitones. */
 static inline float enaga_semitones(float s) { return enaga_exp2(s * (1.0f / 12.0f)); }
 
-/* log2 x for x > 0, absolute error under 1e-4. */
+/* log2 x for x > 0: absolute error under 2e-7 for 0.5 <= x <= 2, and within 2e-7 x |log2 x| elsewhere (the
+ * float rounding of the result). The mantissa is taken to [sqrt(1/2), sqrt(2)), then a degree-8 polynomial. */
 static inline float enaga_log2(float x) {
     uint32_t bits = enaga_float_bits(x);
-    float e = (float)((int)((bits >> 23) & 0xFF) - 127);
-    float m = enaga_bits_float((bits & 0x007FFFFFu) | 0x3F800000u) - 1.0f;   /* [0, 1) */
-    return e + m * (1.44254843f + m * (-0.71814525f + m * (0.45754091f + m * (-0.27790386f + m * (0.12179571f + m * -0.02584144f)))));
+    uint32_t high = (bits & 0x007FFFFFu) > 0x003504F3u;                /* mantissa above sqrt(2): halve it */
+    float e = (float)((int)((bits >> 23) & 0xFF) - 127 + (int)high);
+    float u = enaga_bits_float((bits & 0x007FFFFFu) | (0x3F800000u - (high << 23))) - 1.0f;
+    return e + u * (1.44269478f + u * (-0.72135717f + u * (0.48093945f + u * (-0.36008719f + u * (0.28670755f +
+           u * (-0.25006929f + u * (0.23688978f + u * -0.14574295f)))))));
+}
+
+static inline float enaga_log(float x) { return enaga_log2(x) * 0.693147181f; }       /* natural log, x > 0 */
+static inline float enaga_log10(float x) { return enaga_log2(x) * 0.301029996f; }     /* x > 0 */
+
+/* x^y for x > 0 (0 for x <= 0): exp2(y log2 x), relative error about 3e-7 + 1.4e-7 |y log2 x|. */
+static inline float enaga_pow(float x, float y) {
+    return x > 0.0f ? enaga_exp2(y * enaga_log2(x)) : 0.0f;
+}
+
+/* Decibels to an amplitude ratio (0 dB is 1, -6.02 dB is 0.5), and back: gain_to_db floors at -600 dB, which is
+ * what 0 and anything below 1e-30 give. Accuracy as exp2 and log2. */
+static inline float enaga_db_to_gain(float db) { return enaga_exp2(db * 0.166096405f); }
+static inline float enaga_gain_to_db(float gain) {
+    return 6.02059991f * enaga_log2(gain > 1e-30f ? gain : 1e-30f);
+}
+
+/* |x|, x with the sign of s, and x's fraction x - floor(x) in [0, 1) (|x| < 2^31): wrapping a phase. */
+static inline float enaga_abs(float x) { return enaga_bits_float(enaga_float_bits(x) & 0x7FFFFFFFu); }
+static inline float enaga_copysign(float x, float s) {
+    return enaga_bits_float((enaga_float_bits(x) & 0x7FFFFFFFu) | (enaga_float_bits(s) & 0x80000000u));
+}
+static inline float enaga_wrap(float x) {
+    float r = x - (float)enaga_floor_int(x);
+    return r < 1.0f ? r : 0.0f;                                     /* a tiny negative x rounds up to 1 */
+}
+
+/* 1 / sqrt(x) for 1e-37 < x < 1e37, and sqrt(x) for 0 <= x < 1e37 (0 for x < 0): relative error under 3e-7,
+ * three Newton steps from a guess made of the bits. */
+static inline float enaga_rsqrt(float x) {
+    float r = enaga_bits_float(0x5F375A86u - (enaga_float_bits(x) >> 1)), h = 0.5f * x;
+    r = r * (1.5f - h * r * r);
+    r = r * (1.5f - h * r * r);
+    return r * (1.5f - h * r * r);
+}
+static inline float enaga_sqrt(float x) {
+    x = x > 0.0f ? x : 0.0f;
+    return x * enaga_rsqrt(x);
 }
 
 /* sin(2 pi t) for any t (in turns), absolute error under 4e-6. */
@@ -76,6 +118,56 @@ static inline float enaga_cos_turns(float t) { return enaga_sin_turns(t + 0.25f)
 static inline float enaga_tan_pi(float x) {
     x = enaga_clamp(x, 0.0f, 0.49f);
     return enaga_sin_turns(0.5f * x) * enaga_reciprocal(enaga_cos_turns(0.5f * x));
+}
+
+/* sin, cos and tan of x in radians, through the turn functions: absolute error under 4e-6 + 1e-7 |x| (sin, cos);
+ * tan is sin / cos, relative error about 1e-5 away from its poles. */
+static inline float enaga_sin(float x) { return enaga_sin_turns(x * 0.159154943f); }
+static inline float enaga_cos(float x) { return enaga_cos_turns(x * 0.159154943f); }
+static inline float enaga_tan(float x) {
+    float t = x * 0.159154943f;
+    return enaga_sin_turns(t) * enaga_reciprocal(enaga_cos_turns(t));
+}
+
+/* atan on [0, 1]: a degree-15 odd polynomial, absolute error under 2e-7. */
+static inline float enaga_atan_unit(float t) {
+    float t2 = t * t;
+    return t * (0.99999994f + t2 * (-0.33332095f + t2 * (0.19971372f + t2 * (-0.14029400f + t2 * (0.09942708f +
+           t2 * (-0.05990401f + t2 * (0.02455663f + t2 * -0.00478032f)))))));
+}
+
+/* atan(x), and atan2(y, x), the angle of the point (x, y) in (-pi, pi] (0 for the origin): absolute error under
+ * 5e-7. asin and acos of x in [-1, 1] (clamped): absolute error under 1e-6, and 4e-4 within 1e-6 of +-1. */
+static inline float enaga_atan(float x) {
+    float a = enaga_abs(x), big = a > 1.0f ? 1.0f : 0.0f;
+    float t = big != 0.0f ? enaga_reciprocal(a > 1.0f ? a : 1.0f) : a;
+    float r = enaga_atan_unit(t);
+    return enaga_copysign(big != 0.0f ? 1.57079633f - r : r, x);
+}
+static inline float enaga_atan2(float y, float x) {
+    float ax = enaga_abs(x), ay = enaga_abs(y);
+    float hi = ax > ay ? ax : ay, lo = ax > ay ? ay : ax;
+    float r = enaga_atan_unit(lo * enaga_reciprocal(hi > 1e-37f ? hi : 1e-37f));
+    r = ay > ax ? 1.57079633f - r : r;
+    r = x < 0.0f ? 3.14159265f - r : r;
+    return enaga_copysign(r, y);
+}
+static inline float enaga_asin(float x) {
+    x = enaga_clamp(x, -1.0f, 1.0f);
+    return enaga_atan2(x, enaga_sqrt((1.0f - x) * (1.0f + x)));
+}
+static inline float enaga_acos(float x) {
+    x = enaga_clamp(x, -1.0f, 1.0f);
+    return enaga_atan2(enaga_sqrt((1.0f - x) * (1.0f + x)), x);
+}
+
+/* tanh(x), the smooth saturation curve: relative error under 6e-7. An odd polynomial for |x| < 0.55, else
+ * 1 - 2 / (e^2|x| + 1); exactly +-1 from |x| = 9.1. */
+static inline float enaga_tanh(float x) {
+    float a = enaga_clamp(enaga_abs(x), 0.0f, 10.0f), a2 = a * a;
+    float small = a * (0.99999994f + a2 * (-0.33332810f + a2 * (0.13319130f + a2 * (-0.05260273f + a2 * 0.01633759f))));
+    float large = 1.0f - 2.0f * enaga_reciprocal(enaga_exp2(a * 2.88539008f) + 1.0f);
+    return enaga_copysign(a < 0.55f ? small : large, x);
 }
 
 /* A soft clip: x for small x, smoothly to +-1 at |x| >= 1.5, cubic in between. */
