@@ -4,6 +4,7 @@
 // Order on entry: keep the host table, set up the heap, run static constructors (they may log or allocate),
 // then ask the app for its callback table. This GCC emits .ctors; .init_array is honoured too in case a
 // later toolchain build switches. Destructors are never run: Enaga discards an unloaded app's memory.
+#include <new>
 #include <enaga/app.hpp>
 
 #include <stddef.h>
@@ -198,6 +199,12 @@ const enaga_host_t &host() { return *g_host; }
 
 void *operator new(size_t bytes) { return checked_alloc(bytes); }
 void *operator new[](size_t bytes) { return checked_alloc(bytes); }
+namespace std {
+const nothrow_t nothrow{};                      // libsupc++'s, which apps do not link
+}
+
+void *operator new(size_t bytes, const std::nothrow_t &) noexcept { return heap_alloc(bytes); }      // nullptr when out
+void *operator new[](size_t bytes, const std::nothrow_t &) noexcept { return heap_alloc(bytes); }
 void operator delete(void *pointer) noexcept { heap_free(pointer); }
 void operator delete[](void *pointer) noexcept { heap_free(pointer); }
 void operator delete(void *pointer, size_t) noexcept { heap_free(pointer); }

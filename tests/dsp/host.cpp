@@ -3,6 +3,7 @@
 // per-sample steps give. Run by tests/test_dsp.py; prints one line per failed check and
 // exits non-zero if any failed.
 #include <enaga/dsp.hpp>
+#include <enaga/queue.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -1069,7 +1070,131 @@ static void libm() {
     }
 }
 
+// The queue, voice allocation and the note stack.
+static void polyphony() {
+    enaga::Queue<int, 4> q;
+    int x = 0;
+    check(q.empty() && !q.pop(x), "queue starts empty", q.size(), 0);
+    for (int i = 0; i < 4; i++) check(q.push(i * 10), "queue push", i, 1);
+    check(!q.push(99) && q.size() == 4, "queue full", q.size(), 4);
+    for (int round = 0; round < 10; round++) {          // wraps its indices many times over
+        check(q.pop(x) && x == round * 10, "queue order", x, round * 10);
+        check(q.push((round + 4) * 10), "queue push after pop", round, 1);
+    }
+    while (q.pop(x)) {}
+    check(q.empty(), "queue drained", q.size(), 0);
+
+    VoiceAllocator<3> a;
+    bool sounding[3] = {};
+    auto pick = [&] { return a.allocate([&](int v) { return sounding[v]; }); };
+    int v0 = pick(); a.start(v0, 10); sounding[v0] = true;
+    int v1 = pick(); a.start(v1, 11); sounding[v1] = true;
+    int v2 = pick(); a.start(v2, 12); sounding[v2] = true;
+    check(v0 == 0 && v1 == 1 && v2 == 2, "silent voices first", v2, 2);
+    check(pick() == 0, "all held: the oldest is stolen", pick(), 0);
+    int released = 0;
+    a.release(11, [&](int v) { released += v + 1; });
+    check(released == 2 && !a.held(1) && a.held(0), "release by key", released, 2);
+    check(pick() == 1, "the released voice before held ones", pick(), 1);
+    a.release(10, [](int) {});
+    check(pick() == 0, "the oldest released", pick(), 0);
+    sounding[2] = false;
+    check(pick() == 2, "a silent voice before released ones", pick(), 2);
+    a.start(1, 20);
+    a.start(2, 20);
+    int count = 0;
+    a.each_held(20, [&](int) { count++; });
+    check(count == 2 && a.key(1) == 20, "one key holding two voices (unison)", count, 2);
+    uint32_t age = a.age(1);
+    a.start(1, 21, false);
+    check(a.age(1) == age && a.key(1) == 21, "legato keeps the age", a.age(1), age);
+    check(a.release_all([](int) {}) == 2, "release_all", 0, 2);
+
+    NoteStack<3> s;
+    s.push(1, 60, 100); s.push(2, 62, 100); s.push(3, 64, 100);
+    check(s.top().note == 64 && s.size() == 3, "stack top", s.top().note, 64);
+    s.push(4, 65, 100);
+    check(s.size() == 3 && s[0].key == 2, "full: the oldest goes", s[0].key, 2);
+    check(s.remove(4) && s.top().note == 64, "release the top: back to the one below", s.top().note, 64);
+    check(!s.remove(9), "a key not held", 0, 0);
+    s.push(2, 62, 90);
+    check(s.size() == 2 && s.top().key == 2 && s[0].key == 3, "a key played again moves to the top", s[0].key, 3);
+}
+
+// The sample player against what it should play.
+static void sample_player() {
+    Sample mono;
+    check(mono.allocate(100, 1, 48000), "sample allocate", 0, 1);
+    for (uint32_t i = 0; i < 100; i++) mono.data()[i] = float(i);   // a ramp: each frame's value is its index
+    SamplePlayer p;
+    std::vector<float> l(256), r(256);
+    p.start(mono);
+    int made = p.render(l.data(), nullptr, 256, 1.0f);
+    bool exact = made == 100 && !p.active();
+    for (int i = 0; i < 100; i++) exact = exact && l[i] == float(i);
+    for (int i = 100; i < 256; i++) exact = exact && l[i] == 0;
+    check(exact, "rate 1 plays every frame exactly, then zeros", made, 100);
+
+    p.start(mono);
+    made = p.render(l.data(), nullptr, 256, 0.25f);
+    double worst = 0;
+    for (int i = 4; i < 380 / 4 * 4 && i < 256; i++) worst = std::fmax(worst, std::fabs(l[i] - 0.25 * i));
+    near("a ramp interpolated at a quarter rate", worst, 0, 1e-5);
+    check(made == 256 && p.active(), "a quarter rate is still playing", made, 256);
+
+    p.start(mono, 10, 20, true);
+    made = p.render(l.data(), nullptr, 16, 1.0f);
+    exact = made == 10;
+    for (int i = 0; i < 10; i++) exact = exact && l[i] == float(19 - i);
+    check(exact, "reverse from frame 19 down to 10", made, 10);
+
+    p.start(mono);
+    p.set_loop(SamplePlayer::forward, 40, 50);
+    made = p.render(l.data(), nullptr, 256, 1.0f);
+    exact = made == 256 && p.active();
+    for (int i = 0; i < 256; i++) exact = exact && l[i] == float(i < 50 ? i : 40 + (i - 50) % 10);
+    check(exact, "a forward loop", l[60], 40);
+    p.set_loop(SamplePlayer::off);
+    made = p.render(l.data(), nullptr, 256, 1.0f);
+    check(made < 100 && !p.active() && l[made - 1] == 99, "loop off at release: plays out to the end", made, 0);
+
+    p.start(mono, 30, 0);
+    p.set_loop(SamplePlayer::ping_pong, 40, 45);
+    p.render(l.data(), nullptr, 40, 1.0f);
+    const float bounce[] = {30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 43, 42, 41, 40, 41, 42, 43, 44, 43};
+    exact = true;
+    for (int i = 0; i < 24; i++) exact = exact && l[i] == bounce[i];
+    check(exact, "ping-pong between 40 and 44", l[16], 42);
+
+    Sample stereo;
+    stereo.allocate(8, 2, 44100);
+    for (int i = 0; i < 8; i++) { stereo.data()[2 * i] = float(i); stereo.data()[2 * i + 1] = float(-i); }
+    p.start(stereo);
+    made = p.render(l.data(), r.data(), 8, 1.0f);
+    check(made == 8 && l[5] == 5 && r[5] == -5, "stereo frames", r[5], -5);
+    near("rate_for: 44.1 kHz an octave up at 48 kHz", stereo.rate_for(12), 2 * 44100.0 / 48000.0, 1e-5);
+
+    std::vector<float> out_l(64, 0.0f), out_r(64, 0.0f);
+    Sample ones;
+    ones.allocate(1000, 1, 48000);
+    for (uint32_t i = 0; i < 1000; i++) ones.data()[i] = 1.0f;
+    p.start(ones);
+    p.render_add(out_l.data(), out_r.data(), 64, 1.0f, 0.5f, 0.25f);
+    check(out_l[0] == 0.5f && out_r[63] == 0.25f, "render_add: the first block's gains at once", out_l[0], 0.5);
+    std::fill(out_l.begin(), out_l.end(), 0.0f);
+    std::fill(out_r.begin(), out_r.end(), 0.0f);
+    p.render_add(out_l.data(), out_r.data(), 64, 1.0f, 1.0f, 0.25f);
+    near("render_add ramps: the first sample moved one step", out_l[0], 0.5 + 0.5 / 64, 1e-6);
+    near("render_add ramps: the last sample at the new gain", out_l[63], 1.0, 1e-5);
+    near("render_add: an unchanged gain stays", out_r[30], 0.25, 1e-7);
+
+    Sample none;
+    check(none.empty() && !none.allocate(0x7FFFFFFF, 2, 48000) && none.empty(), "allocate fails cleanly", 0, 0);
+}
+
 int main() {
+    sample_player();
+    polyphony();
     libm();
     samples();
     math();

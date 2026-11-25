@@ -7,6 +7,7 @@
 
 #include <enaga/abi.h>
 #include <enaga/dsp.hpp>
+#include <enaga/queue.hpp>
 
 #include "params.hpp"
 
@@ -29,7 +30,7 @@ public:
 
     // Main context.
     volatile int16_t values[param_count] = {};
-    bool post(const NoteEvent &event);            // false if the queue is full
+    bool post(const NoteEvent &event) { return events_.push(event); }   // false if the queue is full
 
     // Audio context: `frames` interleaved stereo frames, a multiple of kControl.
     void render(float *out, uint32_t frames);
@@ -40,10 +41,8 @@ public:
     volatile uint32_t scope_write = 0;
 
 private:
-    struct Voice {
-        uint8_t key = 0xFF, note = 0;
-        bool gate = false;
-        uint32_t started = 0;
+    struct Voice {                                // which key holds it, and since when: allocator_
+        uint8_t note = 0;
         float velocity = 0, pressure = 0, random = 0, pitch = 60, target = 60;
         float lfo_rate[2] = {1, 1};
         float lfo_fade[2] = {1, 1};               // 0 to 1 from the note's start, when the LFOs fade in
@@ -85,10 +84,10 @@ private:
 
     void update_settings();
     void handle(const NoteEvent &event);
-    void start(Voice &voice, const NoteEvent &event, bool retrigger, float unison);
-    void release(Voice &voice);
+    void start(int voice, const NoteEvent &event, bool retrigger, float unison);
+    void release(int voice);
     float unison_place(int k) const { return s_.unison > 1 ? 2.0f * float(k) / float(s_.unison - 1) - 1.0f : 0.0f; }
-    Voice &allocate();
+    int allocate();
     void control_step();
     void render_voice(Voice &voice, const Control &control, float *left, float *right);
 
@@ -97,18 +96,14 @@ private:
     int16_t applied_[param_count] = {};
     bool first_ = true;
     Voice voices_[kVoices];
+    enaga::dsp::VoiceAllocator<kVoices> allocator_;
     Control control_[kVoices];
-    uint32_t clock_ = 0;
     float last_pitch_ = 60;
     enaga::dsp::Random random_;
     enaga::dsp::Lfo free_lfo_[2];                  // the phase FREE voices take at note-on
 
-    struct Held { uint8_t key, note, velocity; };  // MONO and LEGATO: the keys held, last on top
-    Held held_[16];
-    int held_count_ = 0;
-
-    NoteEvent queue_[64];
-    volatile uint32_t queue_write_ = 0, queue_read_ = 0;
+    enaga::dsp::NoteStack<16> held_;              // MONO and LEGATO: the keys held, last on top
+    enaga::Queue<NoteEvent, 64> events_;
 
     enaga::dsp::Chorus chorus_;
     float chorus_mix_ = 0;

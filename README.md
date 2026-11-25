@@ -65,7 +65,8 @@ The points below are the overview; [docs/api.md](docs/api.md) is the full refere
   a state-variable filter (and a two-stage cascade), cookbook biquads (low- and high-pass, band-pass, notch,
   all-pass, peak, shelves), FIR filters on the app's taps, a one-pole, ADSR envelopes, LFOs, delay lines (with
   modulated, interpolated block reads), a chorus, a stereo delay and a reverb; hard sync between oscillators
-  (`Oscillator::sync_add`, band-limited). Its classes wrap a C interface, `<enaga/dsp.h>`:
+  (`Oscillator::sync_add`, band-limited); samples in memory and a sample player (cubic interpolation, loops,
+  reverse), sample format and rate conversion, and voice allocation (`VoiceAllocator`, `NoteStack`). Its classes wrap a C interface, `<enaga/dsp.h>`:
   plain state structs, per-sample steps, and block functions that process a buffer per call (`Svf::process`,
   `Envelope::render`, `Oscillator::render_add`, `StereoDelay::process`, `Reverb::process`, delay-line block reads
   and writes, buffer arithmetic such as `enaga_mix`, `enaga_multiply`, `enaga_ramp_stereo_add`, and `exp2`, `tan_pi` and
@@ -85,7 +86,8 @@ The points below are the overview; [docs/api.md](docs/api.md) is the full refere
   folder (`files::data_folder()`, `/ENAGA/DATA/<package name>`), `/SAMPLES` and `/RECORD`. `on_card(bool)` says
   when the card is removed or inserted. Not from `audio()`, except streams: `files::Stream` plays a file into
   `audio()` or records one from it through a ring buffer Enaga keeps filled or drained in the main loop, and
-  `<enaga/wav.hpp>` reads and writes WAV headers. `<enaga/settings.hpp>` keeps an app's own settings
+  `<enaga/wav.hpp>` reads and writes WAV headers, and its `Loader` reads a whole file into a sample in the
+  background, converted to 48 kHz. `<enaga/queue.hpp>` passes events from one context to the other. `<enaga/settings.hpp>` keeps an app's own settings
   (`settings.get("TEMPO", 120)`, `settings.set("TEMPO", tempo)`, `save()`) as text in its data folder.
 - `enaga::system::open_menu()` opens the Enaga menu as F1 + POWER does; `enaga::system::set_busy(true)` keeps the
   unit from switching itself off (the AUTO OFF setting) while the app works unattended, e.g. recording;
@@ -201,7 +203,7 @@ them), and a JSON report. Its other options (`--help`): `--card-mib` for a large
 | `include/enaga/abi.h` | The C boundary between Enaga and an app: package header, host table, app table, events, key names |
 | `include/enaga/app.hpp` | The C++ layer: `enaga::App`, `enaga::Canvas`, `ENAGA_APP(Type)`, `enaga::log`, `enaga::fatal`, `enaga::system` |
 | `include/enaga/dsp.hpp`, `dsp.h`, `dsp/` | The DSP library: C++ classes over a C interface |
-| `include/enaga/files.hpp`, `wav.hpp`, `settings.hpp` | Files and streams, WAV headers, an app's own settings |
+| `include/enaga/files.hpp`, `wav.hpp`, `settings.hpp`, `queue.hpp` | Files and streams, WAV headers and loading, an app's own settings, the queue between contexts |
 | `include/enaga/midi.hpp`, `clock.hpp`, `ui.hpp`, `bytes.hpp` | MIDI out, the tempo clock and transport, the UI toolkit, packed data at any address |
 | `template/` | The app to start from (a one-voice synth on a parameter page), shipped in the SDK |
 | `runtime/dsp/` | The DSP library's block functions, built by cl6x or GCC into every app |
@@ -209,7 +211,7 @@ them), and a JSON report. Its other options (`--help`): `--card-mib` for a large
 | `loader/` | The package loader (freestanding C, used by the firmware and the tests) |
 | `firmware/` | Enaga itself: `hal/` drivers, `kernel/` (interrupts, audio engine, app host, menu, settings, device detection, exceptions, watchdog, main loop), `start.s`, `link.ld`, `build.py` |
 | `examples/` | `synth` (the virtual analogue synthesizer); `widgets` (the UI toolkit); `tone` (STEP 1-8 play 750 Hz x step); `cxxcheck` (exercises the C++ runtime) |
-| `tests/` | `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board; `test_check.py` and `unit/check`: the CHECK app for sessions on a unit; `test_synth.py`: the synth example; `test_files.py` and `apps/files`: the file service; `test_streams.py` and `apps/streams`: streams and WAV; `test_menu.py` and `apps/menu`: the Enaga menu, boot policy, app switching and settings; `test_dsp.py` and `dsp/`: the DSP library on the host; `test_ui.py` and `ui/`: the UI toolkit on the host, `test_widgets.py`: on the firmware; `test_midi.py`, `test_clock.py`, `test_usb.py`, `test_usb_drive.py`, `test_usb_audio.py`, `test_input.py`: MIDI, the clock and SYNC, USB MIDI, USB DRIVE, USB audio, input selection; `test_battery.py`: the battery; `test_sysimage.py`: the update files for each device; `test_card_files.py`: extra files, long names included, on the emulator tools' cards; `test_sdk.py`: the SDK and the packaged toolchain, built from outside the repository; `test_bytes.py`: the byte helpers; `test_api_docs.py`: every public name is in docs/api.md |
+| `tests/` | `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board; `test_check.py` and `unit/check`: the CHECK app for sessions on a unit; `test_synth.py`: the synth example; `test_files.py` and `apps/files`: the file service; `test_streams.py` and `apps/streams`: streams and WAV; `test_menu.py` and `apps/menu`: the Enaga menu, boot policy, app switching and settings; `test_dsp.py` and `dsp/`: the DSP library on the host; `test_ui.py` and `ui/`: the UI toolkit on the host, `test_widgets.py`: on the firmware; `test_midi.py`, `test_clock.py`, `test_usb.py`, `test_usb_drive.py`, `test_usb_audio.py`, `test_input.py`: MIDI, the clock and SYNC, USB MIDI, USB DRIVE, USB audio, input selection; `test_battery.py`: the battery; `test_sysimage.py`: the update files for each device; `test_card_files.py`: extra files, long names included, on the emulator tools' cards; `test_sdk.py`: the SDK and the packaged toolchain, built from outside the repository; `test_bytes.py`: the byte helpers; `test_math.py` and `apps/math`: libm and the fast math on the emulated C674x; `test_sampler.py` and `apps/sampler`: loading WAV files into samples and playing them; `test_api_docs.py`: every public name is in docs/api.md |
 | `tools/` | `build_app.py`, `emulate.py`, `panel.py` (apps live in the emulator's web panel), `card.py` (FAT and exFAT card images through Enaga's own FatFs), `unit_card.py` and `unit_dry_run.py` (files for a session on a unit, and the session walked on the emulator), `sysimage.py` (the update-file format), `register_capture.py` (Enaga's peripheral register accesses phase by phase, to diff against the original firmware's), `paths.py`, toolchain build scripts; `make_sdk.py` and `package_toolchain.py` (release archives) |
 | `docs/` | `getting-started.md` (an app from the SDK), `api.md` (the app interface reference), `design.md` (decisions, architecture, plan, log), `hardware.md` (the hardware notes) |
 

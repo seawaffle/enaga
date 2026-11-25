@@ -9,12 +9,13 @@ In the repository, `tests/test_api_docs.py` fails when a public name in `include
 |---|---|
 | `<enaga/app.hpp>` | `enaga::App`, `ENAGA_APP`, `enaga::Canvas`, LEDs, `enaga::system`, `log`, `ms`, `fatal` |
 | `<enaga/files.hpp>` | `enaga::files`: whole files, background reads and writes, folders, `File`, `Stream` |
-| `<enaga/wav.hpp>` | `enaga::wav`: WAV headers |
+| `<enaga/wav.hpp>` | `enaga::wav`: WAV headers, and `Loader`, a whole file into a `dsp::Sample` in the background |
+| `<enaga/queue.hpp>` | `enaga::Queue`: events from one context to the other |
 | `<enaga/settings.hpp>` | `enaga::Settings`: an app's own key/value settings |
 | `<enaga/midi.hpp>`, `<enaga/clock.hpp>` | `enaga::midi`: sending MIDI; `enaga::clock`: tempo, transport, ticks |
 | `<enaga/ui.hpp>` | `enaga::ui`: list, grid, parameter page, dialog, text entry, pad map, file browser; text lines, the screen's frame, notices, bars and meters |
 | `<enaga/bytes.hpp>` | `enaga::bytes`: numbers in packed data at any address |
-| `<enaga/dsp.hpp>` | `enaga::dsp`: math, oscillators, filters, envelopes, LFOs, delays, chorus, reverb |
+| `<enaga/dsp.hpp>` | `enaga::dsp`: math, oscillators, filters, envelopes, LFOs, delays, chorus, reverb, samples and their player, rate conversion, voice allocation |
 | `<enaga/abi.h>` | The C boundary under all of it: constants, events, the host and app tables, the package header |
 | `<enaga/dsp.h>`, `<enaga/dsp/math.h>` | The DSP library's C interface, for C and `*.ti.c` files |
 
@@ -146,8 +147,31 @@ start is not restarted automatically at the next power-on.
 | audio | `audio`, in the audio interrupt, every 1.33 ms | compute, read and write streams | allocate, use files (they return `ENAGA_FILE_WRONG_CONTEXT`), draw, set LEDs (ignored), wait |
 
 The audio interrupt can arrive at any point in main-context code. Share state between the two with single words
-written by one side only (`volatile`, or `std::atomic` with lock-free types), or a single-producer
-single-consumer ring. Allocate everything `audio` needs in `init()`.
+written by one side only (`volatile`, or `std::atomic` with lock-free types), or an `enaga::Queue`. Allocate
+everything `audio` needs in `init()`.
+
+**`enaga::Queue<T, N>`** (`<enaga/queue.hpp>`) carries items from one context to the other: one side only pushes,
+the other only pops, and neither waits or allocates. `N` is a power of two.
+
+| Member | Does |
+|---|---|
+| `push(item)` | copies `item` in; `false` (nothing changed) when full |
+| `pop(out)` | the oldest item into `out`; `false` when empty |
+| `size()`, `empty()`, `capacity()` | the items waiting (the other side may change it at any moment), and `N` |
+
+```cpp
+struct Event { uint8_t note, velocity; };
+enaga::Queue<Event, 64> events_;
+void on_pad_press(int pad, int velocity) override { events_.push({uint8_t(36 + pad), uint8_t(velocity)}); }
+void audio(const float *in, float *out, uint32_t frames) override {
+    Event e;
+    while (events_.pop(e)) start_note(e);
+    ...
+}
+```
+
+It is safe because the C674x has one core: each index is written by one side only, and a compiler fence keeps an
+item's copy ahead of the index that publishes it. Not for two producers or two consumers.
 
 ## Audio
 
@@ -444,6 +468,31 @@ rounds misaligned word accesses down).
 
 Recording a WAV: `create(path, 44, ...)`, write samples, then `wav::header(head, format, status().position)` and
 `close(head, 44)`.
+
+**`wav::Loader`** reads a whole WAV file into a `dsp::Sample` ("Samples and their player") in the background, a
+16 KiB chunk at a time between the app's callbacks, so the screen and controls stay live. It takes any format
+`parse` knows, gives float, mono or stereo (a file with more channels gives its first two), and converts to
+`ENAGA_SAMPLE_RATE` on the way with the library's resampler, unless asked to keep the file's rate. Main context.
+
+| Member | Does |
+|---|---|
+| `load<&T::done>(path, sample, object, to_output_rate = true)`, `load(path, sample, done, user, ...)` | starts loading; `sample`'s old frames are released at once. Returns `ENAGA_FILE_OK`, or an error at once with no callback (`ENAGA_FILE_BUSY` while a load is under way, `ENAGA_FILE_NOT_FOUND`, ...). `done(int32_t result)` runs later: the frames loaded, or a negative error, the sample then empty |
+| `cancel()` | stops a load, with no callback; `busy()` until the file service hands back the buffer (a main-loop pass or so) |
+| `busy()`, `progress()` | whether a load is under way; how far, 0 to 1 |
+| `not_wav` (-64), `no_memory` (-65) (enum `LoadError`) | its errors besides `ENAGA_FILE_*`: not a WAV it can read, or no room on the heap for the sample (the app goes on) |
+| `chunk_bytes` | 16,384, read and converted per step |
+
+```cpp
+enaga::wav::Loader loader_;
+enaga::dsp::Sample kick_;
+bool init() override { loader_.load<&Drums::loaded>("/SAMPLES/Kick.wav", kick_, this); return true; }
+void loaded(int32_t result) { if (result > 0) ready_ = true; }   // kick_ holds `result` frames
+```
+
+The sample data may start up to 1 MiB into the file (past long chunks of other kinds). A header that still says
+0 bytes of data (a recording cut short) is read to the end of the file. The Loader must outlive its load, as a
+member of the app does: requests pending when `stop()` returns are dropped without their callbacks. Memory: float
+takes 192 KiB a second of 48 kHz stereo, so the heap holds about ten minutes.
 
 ## App settings
 
@@ -896,6 +945,73 @@ Output 0 is input 0's instant, with no delay. Each output needs `ENAGA_RESAMPLE_
 at the end of a sound feed that many zeros to get the last outputs. Rates are whole Hz, 1 to 1,000,000; the
 ratio is exact (32.32 fixed point), so a long sound does not drift.
 
+### Samples and their player: `Sample`, `SamplePlayer`
+
+In `<enaga/dsp/sample.hpp>` (C: `enaga_sample`, `enaga_sample_player` in `<enaga/dsp.h>`).
+
+**`Sample`** is a sound in memory: `frames` frames of float at `rate` Hz, one channel or two interleaved (L R L R).
+It owns its frames and is not copyable. `wav::Loader` fills one from a file; an app can also fill its own.
+
+| Member | Does |
+|---|---|
+| `allocate(frames, channels, rate)` | room for that many frames (channels 1 or 2), zeroed; `false`, leaving it empty, when the heap has no room (unlike `new`, which stops the app). Main context |
+| `release()` | frees the frames |
+| `data()`, `frames()`, `channels()`, `rate()`, `empty()` | frame i is `data()[i]`, or `[2 i]` and `[2 i + 1]` |
+| `set_frames(frames)` | shortens it (the memory stays) |
+| `rate_for(semitones, out_rate = 48000)` | the player's `rate` for that pitch offset: 0 plays it as recorded, whatever its rate |
+| `state_` | the C struct, for C code |
+
+**`SamplePlayer`** plays one voice from a `Sample`, which must outlive the playing. The position is in 32.32 fixed
+point, so the pitch does not drift, and is read by 4-point cubic (Catmull-Rom) interpolation. At rate 1 a sample
+at the output rate plays exactly as stored. Frames outside the sample read as its first or last.
+
+| Member | Does |
+|---|---|
+| `start(sample, reverse = false)`, `start(sample, start, end, reverse = false)` | from the start of the sample (or of frames `start` to `end`, end excluded; 0 or past the end means the end), or from the end backwards; no loop |
+| `set_loop(mode, loop_start, loop_end)`, `set_loop(mode)` | `SamplePlayer::off`, `forward` or `ping_pong` between those frames, once the playing reaches them. `set_loop(off)` at a note's release lets it play out to its end |
+| `render(left, right, n, rate)` | writes up to `n` raw frames, `rate` source frames per output frame (`rate_for`): a mono sample into `left` only (`right` may be `nullptr`), stereo into both; zeros after the end. Returns the frames played. For an app's own envelope and pan (`enaga_multiply`, `enaga_ramp_stereo_add`) |
+| `render_add(left, right, n, rate, gain_l, gain_r)` | adds into `left` and `right` (a mono sample into both), with the gains moving in a straight line from the last block's to these, so changes do not click; the first block after `start` takes them at once |
+| `active()`, `stop()`, `position()` | whether it is playing; stop; where, in frames |
+| C: `enaga_sample_player_start`, `enaga_sample_player_render`, `enaga_sample_player_render_add`; `ENAGA_LOOP_OFF`, `ENAGA_LOOP_FORWARD`, `ENAGA_LOOP_PING_PONG` | the same |
+
+```cpp
+// A pad sampler voice: played at the pad's pitch, panned, looping while held.
+voice.player.start(sample_);
+voice.player.set_loop(enaga::dsp::SamplePlayer::forward, loop_start, loop_end);
+// in audio():
+voice.player.render_add(left, right, frames, sample_.rate_for(semitones), gain * pan_l, gain * pan_r);
+```
+
+### Voices: `VoiceAllocator`, `NoteStack`
+
+In `<enaga/dsp/voices.hpp>`: which of an app's voices plays each note. Plain C++ (no C state); the voices
+themselves stay in the app's own array. Audio context.
+
+**`VoiceAllocator<N>`** for N voices. A *key* (0-254) is whoever plays a note (a pad, a MIDI note number), so the
+note off finds the voices it started.
+
+| Member | Does |
+|---|---|
+| `allocate(sounding)` | the voice for a new note, where `sounding(v)` says whether voice v still makes sound (its envelope is active): a silent voice, else the oldest released, else the oldest held (stolen). Marks nothing |
+| `start(v, key, retrigger = true)` | voice v is held by key, and the newest; `retrigger` false (legato) keeps its age |
+| `release(key, f)`, `release_all(f)`, `release_voice(v)` | releases the voices key holds (or all), calling `f(v)` for each to start its release; the count |
+| `each_held(key, f)` | `f(v)` for each voice key holds (pressure on that note) |
+| `held(v)`, `key(v)`, `age(v)`, `reset()` | voice v's state; `size` is N, `no_key` 0xFF |
+
+```cpp
+int v = voices_.allocate([&](int i) { return voice_[i].amp.active(); });
+voices_.start(v, key);
+voice_[v].start(note, velocity);
+...
+voices_.release(key, [&](int i) { voice_[i].amp.gate_off(); });
+```
+
+One key may hold several voices (unison: allocate and start one per voice). **`NoteStack<N>`** keeps the keys held
+for monophonic playing, newest on top: `push(key, note, velocity)` (a key played again moves to the top; when full
+the oldest goes), `remove(key)` (`true` if it was there), `top()`, `empty()`, `size()`, `[i]` (0 the oldest),
+`clear()`; a `Note` has `key`, `note`, `velocity`. On a release, `top()` is the note to go back to (last-note
+priority). `examples/synth` uses both, and `enaga::Queue` for its note events.
+
 ### Oscillators: `Oscillator`, `Wave`
 
 Saw and pulse are PolyBLEP band-limited; triangle and sine are plain. `dt` is the frequency in cycles per sample
@@ -1094,7 +1210,8 @@ The `_memory` functions give the floats of zeroed memory the `_init` functions n
   (`__atomic_fetch_add_1`, `__atomic_compare_exchange_1`, ...), as there is no libatomic. Loads and stores work at
   any size.
 - **Memory:** `new`, `delete`, `malloc` and `free` work on the app's heap (everything above the image, about
-  124 MiB). Running out calls `fatal("out of memory")`.
+  124 MiB). Running out in `new` calls `fatal("out of memory")`; `new (std::nothrow)` (from `<new>`) and `malloc`
+  return `nullptr` instead.
 - **Strings:** there is no C library and no `<string.h>`. `<enaga/string.h>` declares what the runtime provides:
   `memcpy`, `memmove`, `memset`, `memcmp`, `strlen`, `strcmp`, `strncmp`, `strchr` and `strrchr`. The rest of
   libc is not there (a call to it fails at link time as an undefined reference). `enaga::ui::Line` formats numbers
