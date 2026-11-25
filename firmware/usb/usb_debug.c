@@ -167,6 +167,16 @@ static int status_line(u32 step)
     case 10: add_text("USB_DRIVE READ "); add_dec(usb_drive_read_sectors); add_text(" WRITTEN ");
              add_dec(usb_drive_written_sectors); add_text(" ERRORS "); add_dec(usb_drive_errors); break;
     case 11: add_text("USB_MIDI_LOST "); add_dec(usb_tx_lost); break;
+    /* Where USB DRIVE's time went since the page opened (usb.c): per direction the callbacks, the ms in the SD
+     * driver, and the ms between callbacks; then the drive's packets and the ms the host took to take or send
+     * them (musb_enaga.h). */
+    case 16: add_text("USB_DRIVE_TIME R "); add_dec(usb_drive_calls[0]); add_text(" SD_MS ");
+             add_dec(usb_drive_sd_us[0] / 1000u); add_text(" GAP_MS "); add_dec(usb_drive_gap_us[0] / 1000u);
+             add_text(" W "); add_dec(usb_drive_calls[1]); add_text(" SD_MS "); add_dec(usb_drive_sd_us[1] / 1000u);
+             add_text(" GAP_MS "); add_dec(usb_drive_gap_us[1] / 1000u); break;
+    case 17: add_text("USB_DRIVE_PACKETS IN "); add_dec(enaga_musb_in_packets[2]); add_text(" WAIT_MS ");
+             add_dec(enaga_musb_in_wait_us[2] / 1000u); add_text(" OUT "); add_dec(enaga_musb_out_packets[2]);
+             add_text(" GAP_MS "); add_dec(enaga_musb_out_gap_us[2] / 1000u); break;
     case 12: add_text("MIDI IN "); add_dec(midi_messages_in); add_text(" OUT "); add_dec(midi_messages_out);
              add_text(" DROPPED "); add_dec(midi_dropped_out); break;
     case 13: add_text("SD READ "); add_dec(sd_reads); add_text(" WRITTEN "); add_dec(sd_writes); add_text(" ERROR ");
@@ -174,7 +184,7 @@ static int status_line(u32 step)
              add_hex(sd_io_status); break;
     case 14: add_text("BATTERY "); add_signed(battery_level()); break;
     case 15: add_text("LOG_COUNT "); add_dec(log_count); break;
-    case 16: break;                            /* the end: the command alone */
+    case 18: break;                            /* the end: the command alone */
     default: return 0;
     }
     finish();

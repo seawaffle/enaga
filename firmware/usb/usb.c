@@ -93,14 +93,44 @@ int usb_midi_send(const u8 *data, u32 bytes)   /* all or nothing; 0 when not con
     return result;
 }
 
+#define EP_MIDI_OUT  0x01                      /* the endpoints (descriptors below) */
+#define EP_MIDI_IN   0x81
+#define EP_DRIVE_OUT 0x02
+#define EP_DRIVE_IN  0x82
+
 /* ---- mass storage ---- */
 
 #define DRIVE_SECTORS_MAX (CFG_TUD_MSC_EP_BUFSIZE / 512u)
 static volatile int drive_shared, drive_attention, drive_ejected;
 u32 usb_drive_read_sectors, usb_drive_written_sectors, usb_drive_errors;
+/* Where a copy's time goes, from the page's opening (STATUS USB_DRIVE_TIME, USB_DRIVE_PACKETS): reads and writes
+ * (the callbacks, each up to DRIVE_SECTORS_MAX sectors), the time in the SD driver, and the time from one callback's
+ * end to the next one's start (the USB data, the status and next command, and the computer's pauses) when under
+ * DRIVE_GAP_MS. Microseconds, summed; [0] reads, [1] writes. */
+#define DRIVE_GAP_MS 100u
+u32 usb_drive_calls[2], usb_drive_sd_us[2], usb_drive_gap_us[2];
+static u32 drive_call_end;
+
+static void drive_call(int write, u32 start)
+{
+    u32 end = tsc_read();
+    if (drive_call_end && start - drive_call_end < DRIVE_GAP_MS * TICKS_PER_MS)
+        usb_drive_gap_us[write] += (start - drive_call_end) / 372u;
+    usb_drive_sd_us[write] += (end - start) / 372u;
+    usb_drive_calls[write]++;
+    drive_call_end = end | 1;
+}
 
 void usb_drive_share(int on)
 {
+    if (on) {                                  /* the counters start with the page */
+        u32 i;
+        for (i = 0; i < 2; i++) usb_drive_calls[i] = usb_drive_sd_us[i] = usb_drive_gap_us[i] = 0;
+        drive_call_end = 0;
+        i = tu_edpt_number(EP_DRIVE_IN);
+        enaga_musb_in_packets[i] = enaga_musb_in_wait_us[i] = 0;
+        enaga_musb_out_packets[i] = enaga_musb_out_gap_us[i] = 0;
+    }
     drive_shared = on;
     drive_attention = on;                      /* the computer is told the medium changed */
     drive_ejected = 0;
@@ -183,9 +213,12 @@ static void drive_failed(char what, int sd_code)
 int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void *buffer, uint32_t bufsize)
 {
     int r;
+    u32 start = tsc_read();
     (void)lun;
     if (!drive_range(lba, offset, bufsize) || ((u32)buffer & 3)) { drive_failed('R', 0); return TUD_MSC_RET_ERROR; }
-    if ((r = sd_read(buffer, lba, bufsize / 512u)) != 0) {
+    r = sd_read(buffer, lba, bufsize / 512u);
+    drive_call(0, start);
+    if (r != 0) {
         drive_failed('R', r);
         return TUD_MSC_RET_ERROR;
     }
@@ -196,9 +229,12 @@ int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void *buff
 int32_t tud_msc_write10_cb(uint8_t lun, uint32_t lba, uint32_t offset, uint8_t *buffer, uint32_t bufsize)
 {
     int r;
+    u32 start = tsc_read();
     (void)lun;
     if (!drive_range(lba, offset, bufsize) || ((u32)buffer & 3)) { drive_failed('W', 0); return TUD_MSC_RET_ERROR; }
-    if ((r = sd_write(buffer, lba, bufsize / 512u)) != 0) {
+    r = sd_write(buffer, lba, bufsize / 512u);
+    drive_call(1, start);
+    if (r != 0) {
         drive_failed('W', r);
         return TUD_MSC_RET_ERROR;
     }
@@ -286,10 +322,6 @@ const uint8_t *tud_descriptor_device_cb(void) { return (const uint8_t *)&device_
  * interfaces (TinyUSB's MIDI driver takes the AudioControl interface with the MIDI streaming one right after it;
  * usb_audio.c takes 2 and 3). Then mass storage. */
 enum { ITF_AUDIO_CONTROL, ITF_MIDI_STREAMING, ITF_AUDIO_OUT, ITF_AUDIO_IN, ITF_DRIVE, ITF_COUNT };
-#define EP_MIDI_OUT  0x01
-#define EP_MIDI_IN   0x81
-#define EP_DRIVE_OUT 0x02
-#define EP_DRIVE_IN  0x82
 #define AC_LEN       (11 + 12 + 9 + 12 + 9)  /* header, then each direction's input and output terminal */
 #define MS_LEN       (9 + 7 + 2 * TUD_MIDI_DESC_JACK_LEN + 2 * TUD_MIDI_DESC_EP_LEN(2))
 #define AS_LEN       (9 + 9 + 7 + 11 + 9 + 7)

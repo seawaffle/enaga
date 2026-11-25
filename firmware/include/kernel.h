@@ -86,6 +86,9 @@ extern float usb_audio_out_ratio;
 void usb_drive_share(int on);                 /* USB DRIVE: the SD card shown to the computer, or not */
 int  usb_drive_ejected(void);                 /* the computer ejected it */
 extern u32 usb_drive_read_sectors, usb_drive_written_sectors, usb_drive_errors;
+extern u32 usb_drive_calls[2], usb_drive_sd_us[2], usb_drive_gap_us[2];   /* where a copy's time goes (usb.c) */
+extern volatile uint32_t enaga_musb_in_packets[5], enaga_musb_in_wait_us[5];   /* per endpoint (musb_enaga.h) */
+extern volatile uint32_t enaga_musb_out_packets[5], enaga_musb_out_gap_us[5];
 extern volatile uint32_t enaga_musb_tx_busy;   /* dcd_musb.c: TX interrupts that found the FIFO still full */
 extern u32 usb_tx_lost;                        /* MIDI out bytes dropped: the queue was full */
 void usb_debug_byte(u8 byte);                  /* the debug port (usb_debug.c): a byte from the computer, cable 1 */

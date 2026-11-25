@@ -291,6 +291,11 @@ TU_ATTR_ALWAYS_INLINE static inline void hwfifo_flush(musb_regs_t* musb, unsigne
   }
 }
 
+/* Enaga: bulk packet timing (musb_enaga.h). */
+volatile uint32_t enaga_musb_in_packets[5], enaga_musb_in_wait_us[5];
+volatile uint32_t enaga_musb_out_packets[5], enaga_musb_out_gap_us[5];
+static uint32_t enaga_in_loaded[5], enaga_out_last[5];
+
 // write to txfifo using pipe_state_t info
 static void pipe_write(musb_regs_t* musb_regs, pipe_state_t* pipe, uint8_t epnum) {
   musb_ep_csr_t* ep_csr = &musb_regs->indexed_csr;
@@ -307,6 +312,7 @@ static void pipe_write(musb_regs_t* musb_regs, pipe_state_t* pipe, uint8_t epnum
     pipe->remaining -= xact_len;
   }
   ep_csr->tx_csrl = MUSB_TXCSRL1_TXRDY;
+  enaga_in_loaded[epnum] = tsc_read() | 1;   /* Enaga: for the packet timing (musb_enaga.h); 0 means none */
 }
 
 volatile uint32_t enaga_musb_tx_busy;   /* Enaga: TX interrupts that found the FIFO still full (process_epin_isr) */
@@ -319,6 +325,11 @@ static void process_epin_isr(uint8_t rhport, musb_regs_t *musb_regs, uint8_t epn
   if (csrl & MUSB_TXCSRL1_STALLED) {
     ep_csr->tx_csrl &= ~(MUSB_TXCSRL1_STALLED | MUSB_TXCSRL1_UNDRN);
     return; // sent STALL, do nothing
+  }
+  if (!(csrl & MUSB_TXCSRL1_TXRDY) && enaga_in_loaded[epnum]) {   /* Enaga: the packet went (musb_enaga.h) */
+    enaga_musb_in_wait_us[epnum] += (tsc_read() - enaga_in_loaded[epnum]) / 372u;
+    enaga_musb_in_packets[epnum]++;
+    enaga_in_loaded[epnum] = 0;
   }
 
   pipe_state_t* pipe = pipe_get(epnum, TUSB_DIR_IN);
@@ -379,6 +390,12 @@ static void process_epout_isr(uint8_t rhport, musb_regs_t *musb_regs, uint8_t ep
   // Fail gracefully. Spurious interrupt.
   if (!(ep_csr->rx_csrl & MUSB_RXCSRL1_RXRDY)) {
     return;
+  }
+  { /* Enaga: packet timing (musb_enaga.h) */
+    uint32_t now = tsc_read();
+    if (now - enaga_out_last[epnum] < 2u * 372000u) enaga_musb_out_gap_us[epnum] += (now - enaga_out_last[epnum]) / 372u;
+    enaga_out_last[epnum] = now;
+    enaga_musb_out_packets[epnum]++;
   }
 
   pipe_state_t *pipe = pipe_get(epnum, TUSB_DIR_OUT);

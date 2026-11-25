@@ -36,6 +36,13 @@
 static const uintptr_t MUSB_BASES[] = { ENAGA_USB0 + 0x400 };
 
 int enaga_usb_phy_start(void);                /* usb.c: PSC, CFGCHIP2, reset, PHY clock; 0 or -1 */
+uint32_t tsc_read(void);                      /* hal: CPU cycles, 372 a microsecond */
+
+/* Bulk packet timing per endpoint (dcd_musb.c; usb.c reports the drive's): for IN, the time from a packet's load
+ * to its TX interrupt, which is the host taking it; for OUT, the time between packets arriving less than 2 ms
+ * apart. Microseconds, summed. */
+extern volatile uint32_t enaga_musb_in_packets[5], enaga_musb_in_wait_us[5];
+extern volatile uint32_t enaga_musb_out_packets[5], enaga_musb_out_gap_us[5];
 extern int usb_phy_status;                    /* usb.c: 0 once started */
 
 static inline void musb_dcd_phy_init(uint8_t rhport)

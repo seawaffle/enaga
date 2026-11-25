@@ -180,6 +180,27 @@ class UsbDrive(unittest.TestCase):
             self.assertEqual(data, image[lba * SECTOR:(lba + 128) * SECTOR], lba)
         self.assertEqual(self.emu.word("usb_drive_errors"), 0)
 
+    def words(self, name, count):
+        data = self.emu.cpu.read(self.emu.names[name], 4 * count)
+        return list(struct.unpack(f"<{count}I", data))
+
+    def test_where_the_time_goes(self):
+        """The counters STATUS reports for a copy's breakdown, from the page's opening: reads and writes (8 KiB
+        callbacks), the time in the SD driver and between callbacks, and the drive's packets with the host's time."""
+        self.open_drive()
+        self.assertIs(self.ready() == (6, 0x28) and self.ready(), True)
+        for lba in (0, 128):
+            self.read(lba, 128)                                  # 2 x 8 callbacks, 2 x 1,024 data packets
+        self.write(100, bytes(range(256)) * 64)                  # 32 sectors: 2 callbacks, 256 data packets
+        calls, sd_us, gap_us = (self.words(n, 2) for n in ("usb_drive_calls", "usb_drive_sd_us", "usb_drive_gap_us"))
+        self.assertEqual(calls, [16, 2])
+        self.assertTrue(all(sd_us) and gap_us[0], (sd_us, gap_us))
+        in_packets, in_wait = self.words("enaga_musb_in_packets", 3)[2], self.words("enaga_musb_in_wait_us", 3)[2]
+        out_packets = self.words("enaga_musb_out_packets", 3)[2]
+        self.assertGreaterEqual(in_packets, 2048)                # and each command's status
+        self.assertGreaterEqual(out_packets, 256)
+        self.assertGreater(in_wait, 0)
+
     def test_ok_ends_it(self):
         self.open_drive()
         self.assertEqual(self.emu.word("menu_drive"), 1)
