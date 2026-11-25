@@ -2353,3 +2353,19 @@ photographs of STATUS.
   forever on a message it was not waiting for (it put it back and took it again without the clock moving); an
   answer cut short by a stall glued itself to the next (the unit now ends the message, and the tool restarts on
   F0).
+- **On the unit (2026-11-25, Windows 11 25H2, build b9eb849a; `~/smpltrek-debug/usb-testing/FINDINGS-debug-port.md`
+  on the user's machine).** The port works. Windows MIDI Services names the pair "MIDIIN2 / MIDIOUT2 (Enaga
+  SmplTrek)", and the tool found it by itself every time. The log's backlog came at once, and live lines arrived
+  within a few ms. STATUS, the screen (matching the unit) and PEEK (`log_count`, and the refused core address)
+  worked. MIDI on cable 0 (notes, SysEx, clock) was unaffected with the log on, and after the tool was killed
+  without stopping the log, the port still answered and MIDI still worked. USB DRIVE and USB audio streamed as
+  before. The two gaps were the brief's: CHECK logs nothing for keys and pads, and its AUDIO page meters the input
+  without passing it on (the meters read 99-100 on USB input; nothing was heard or recorded, as expected).
+  - USB DRIVE baseline for step 2: a 20 MiB file written in 98.0 s (0.204 MiB/s) and read in 84.5 s
+    (0.237 MiB/s), identical after the round trip. Reads are as slow as writes, though the card reads at about
+    7,600 KiB/s, so the limit is on the USB side. `SD SLOW 320 MS` and `351 MS` were logged during the writes.
+  - USB_AUDIO_OUT counted 1,729 overruns while Windows played a short sound to the unit just after USB DRIVE (no
+    app was reading USB input then, so the ring stays full and every packet counts). The counter misleads, and
+    stale frames wait in the ring for the next reader. Fix with the USB work: drain the ring while nobody reads.
+  - Underruns rose by one now and then as Windows opened and closed short streams; none during the 30 s streams.
+  - `peek` at a refused address printed a traceback; the tool now prints one line.

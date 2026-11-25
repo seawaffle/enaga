@@ -312,6 +312,14 @@ def main(argv=None):
         list_ports()
         return 0
     client = open_port(args.port)
+    try:
+        return run(client, args)
+    except (RuntimeError, TimeoutError, KeyError) as e:   # refused, no answer, an unknown symbol: one line
+        print(f"usb_debug: {e}", file=sys.stderr)
+        return 1
+
+
+def run(client, args):
     if args.command == "log":
         out = args.out.open("a") if args.out else None
         try:
@@ -325,6 +333,8 @@ def main(argv=None):
         args.png.write_bytes(png(client.screen()))
         print(f"wrote {args.png}")
     elif args.command == "peek":
+        if not args.address[:1].isdigit() and not args.elf:
+            raise KeyError(f"{args.address}: a symbol needs --elf (the firmware's enaga.elf)")
         address = int(args.address, 0) if args.address[:1].isdigit() else elf_symbol(args.elf, args.address)
         for i, word in enumerate(client.peek(address, args.words)):
             print(f"{address + 4 * i:08X}  {word:08X}  {word}")
