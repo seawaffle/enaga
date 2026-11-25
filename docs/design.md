@@ -2415,3 +2415,17 @@ photographs of STATUS.
       read USB input (the ring-drain fix planned with the USB work). The count stopped after a replug, since
       Windows no longer streamed to the unit; `USB_AUDIO_IN UNDERRUNS` went 0 → 357 across the unplug. CHECK's
       PAD MSG/S read 82 just after the menu closed (its one-second window spans the pause).
+
+### The test suite side by side (2026-11-25)
+
+The serial suite had grown to about 16 minutes (162 tests on the drive branch). Two changes:
+- **Builds once per process.** Every emulator test started an emulation, and each one compiled the whole firmware
+  (3.4 s) and its app again: about half the suite's time. `firmware/build.py` now builds once per process for each
+  output folder, and `tools/emulate.py` keeps each app's package, rebuilding only when the DSP library's compiler
+  changes or another build has since gone into the same folder (the synth tests read symbols from the app's ELF
+  there, and its cl6x/GCC comparison builds the same app both ways).
+- **`tests/run.py`** runs each test file as its own process, as many at once as there are cores, with its own
+  `ENAGA_BUILD` under build/test-runs/ so that no two write the same firmware, app or card files (the approach of
+  the emulator's own verify.py). Logs go beside them; files start longest first from the last run's times. On the
+  16-core host: 83 s for all 27 files, against about 950 s, the longest file (test_sdk) setting the time.
+  `discover` still runs everything in one process.

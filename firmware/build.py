@@ -52,8 +52,20 @@ def symbols(elf):
     return out
 
 
+_built = {}
+
+
 def build(out=OUT):
-    """Compile and link; returns {"elf", "image", "symbols", "code_size", ...}."""
+    """Compile and link; returns {"elf", "image", "symbols", "code_size", ...}. Once per process for each output
+    folder: the sources do not change while it runs, and the emulator tests start an emulation per test (3.4 s a
+    build, about half of the suite's time before this)."""
+    key = Path(out).resolve()
+    if key not in _built:
+        _built[key] = _build(Path(out))
+    return dict(_built[key])
+
+
+def _build(out):
     out.mkdir(parents=True, exist_ok=True)
     objs = [out / "start.o"]
     run([AS, "-mlittle-endian", "-march=c674x", "-o", objs[0], HERE / "start.s"], out)
