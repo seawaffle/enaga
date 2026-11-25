@@ -508,7 +508,7 @@ Its card is staged by `tools/unit_card.py`.
   (log, 2026-11-24); (2) a sample player with a WAV loader, a main-to-audio message queue, voice allocation (the
   synth's, made generic) (log, 2026-11-24); (3) step-sequencing helpers (swing, note lengths with their note-offs, probability),
   note names and scales, parameter smoothing (log, 2026-11-24); (4) a limiter and compressor, DC blocker, bitcrusher, and a waveform
-  view widget; (5) host-side DSP testing for app developers, and a small sampler example.
+  view widget (log, 2026-11-25); (5) host-side DSP testing for app developers, and a small sampler example.
 - **Unit session 6 (2026-11-22/23, E5 exit, in progress; Windows host): USB DRIVE and USB audio failed on the unit;
   both work since round 4 (below).**
   Build under test: `a24ba51d` (branch `usb-audio-requests`, c9df676), card a 4 GB Toshiba microSDHC in a PNY
@@ -2236,3 +2236,33 @@ The third of the library additions before the API review.
   due, retriggered, after a locate back, when full, all at once, across the tick counter's wrap; `every` and
   `chance`; smoothing's time, `render` equal to steps, `advance` equal to a block of steps.
 
+### Dynamics, a DC blocker, a bitcrusher, the waveform view (2026-11-25)
+
+The fourth of the library additions before the API review.
+- **`<enaga/dsp/dynamics.hpp>`** (C in `runtime/dsp/dynamics.c`):
+  - `Compressor`: feed-forward, stereo linked, peak detection, a soft knee (quadratic across its width), and the
+    gain reduction smoothed in dB with attack and release time constants. It takes a side chain (`key_l` /
+    `key_r`) for ducking, and reports `reduction_db()` for a meter.
+  - `Limiter`: look-ahead. Each sample's needed gain is held for at least the look-ahead L (the minimum over the
+    current 16-sample block and the last ceil(L / 16) blocks, a little longer than L, so it errs safe), released
+    one-pole where it rises, and averaged over L (a box filter); the signal is delayed L - 1. When a peak leaves,
+    the box holds L values all at or below its need, so the gain is down to it, reached in a straight line. A
+    clamp at the ceiling catches rounding. The box keeps gain - 1, so with nothing to limit the gain is exactly 1
+    and the signal passes untouched. The box sum is rebuilt each block, so the running sum does not drift. L is at
+    least 16 samples, so each block reads its delay lines and box apart from its writes, and cl6x pipelines the
+    loops (ii 14 to 2-3 for the delay loops).
+  - `Bitcrusher`: bits 1-24 (fractions too), held rate up to the sample rate, no filtering. The phase is a Q31
+    integer and every sample is quantised, the ones taken kept: no branch, ii 7 in stereo (it was not pipelined).
+- **`DcBlocker`** (`enaga_dc_blocker`, in `filter.hpp` / `filter.c`): y = x - x1 + r y1, r = exp(-2π fc / rate).
+- **`ui::Waveform`**: min / max per column of a sample (both channels together), read when the view changes and
+  kept, so draws cost nothing; zoomed in past a frame a column, a line through the frames. `show`, `zoom` (keeping
+  a frame in place), `scroll`, `mark`, `column` / `frame_at`, `refresh(frames)` for a growing recording.
+  `ui::scope` draws a short buffer the same way, without keeping anything.
+- **Tests** (host): DC blocker (an offset gone, 1 kHz passes, -3 dB at 10 Hz, block = steps); bitcrusher (on the
+  grid within half a step, held at 12 kHz, mono = stereo's left); compressor (static curve, knee, makeup, attack
+  and release time constants, side chain, chunking changes nothing); limiter (no sample over the ceiling on noise
+  bursts 12 dB over, spikes 20 dB over at look-aheads from the least to the most, smooth gain, the input exactly
+  and `latency()` late below the ceiling, a sine at the ceiling and back to unity after the release, blocks of any
+  size the same, mono = stereo's left); waveform pixels (steps, stereo, zoomed-in line, marks), zoom, scroll,
+  frames and columns both ways, a growing recording, the scope. A scratch app with each piece builds for the
+  target with cl6x.

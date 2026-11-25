@@ -63,8 +63,9 @@ The points below are the overview; [docs/api.md](docs/api.md) is the full refere
 - `<enaga/dsp.hpp>` is the DSP library: fast math (`exp2`, `semitones`, `sin`, `tanh`, `sqrt`, `pow`, `atan2`,
   `tan_pi`, decibels and more), band-limited oscillators, wavetable oscillators on the app's tables (with a morph between two),
   a state-variable filter (and a two-stage cascade), cookbook biquads (low- and high-pass, band-pass, notch,
-  all-pass, peak, shelves), FIR filters on the app's taps, a one-pole, ADSR envelopes, LFOs, delay lines (with
-  modulated, interpolated block reads), a chorus, a stereo delay and a reverb; hard sync between oscillators
+  all-pass, peak, shelves), FIR filters on the app's taps, a one-pole, a DC blocker, ADSR envelopes, LFOs, delay
+  lines (with modulated, interpolated block reads), a chorus, a stereo delay and a reverb; a compressor (with a side
+  chain), a look-ahead limiter and a bitcrusher; hard sync between oscillators
   (`Oscillator::sync_add`, band-limited); samples in memory and a sample player (cubic interpolation, loops,
   reverse), sample format and rate conversion, and voice allocation (`VoiceAllocator`, `NoteStack`). Its classes wrap a C interface, `<enaga/dsp.h>`:
   plain state structs, per-sample steps, and block functions that process a buffer per call (`Svf::process`,
@@ -116,7 +117,8 @@ a modulation matrix, unison, chorus, delay and reverb, played from the pads and 
 page, with sixteen user patch slots and the last sound kept on the card. `examples/widgets` shows the UI toolkit
 (`<enaga/ui.hpp>`): a list and a grid, a page of parameters on the knobs in rows or columns, text entry, a
 confirmation dialog, a map of the pads and a file browser, with a status line, key hints, notices and input
-meters.
+meters. The toolkit also draws waveforms: a sample's, zoomed and marked (`Waveform`), or a short buffer's
+(`scope`).
 
 ## Building
 

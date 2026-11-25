@@ -15,7 +15,8 @@
 // initial value; lists move with UP / DOWN or VALUE, OK chooses and CLR goes back. F1 stays the app's.
 //
 // Around the widgets: Line builds text without printf, status_line and hint_line frame the screen (the widgets go
-// between body_top and body_bottom), Notice shows a message for a moment, and bar and meter draw levels.
+// between body_top and body_bottom), Notice shows a message for a moment, bar and meter draw levels, and Waveform
+// and scope draw audio.
 //
 // Widgets keep no pointers to the app beyond what it hands them (item names, parameters, values), which must
 // outlive the widget. Main context only. Text is upper case: the font has A-Z (lower case draws as upper case), 0-9,
@@ -266,6 +267,199 @@ inline float meter_db(float amplitude, float floor_db = -48.0f) {
     float db = 6.0206f * enaga_log2(amplitude);
     return db <= floor_db ? 0.0f : db >= 0.0f ? 1.0f : 1.0f - db / floor_db;
 }
+
+// ---- Waveforms --------------------------------------------------------------------------------------------------
+
+namespace detail {
+// The lowest and highest of frames first..last (inclusive) of `channels` interleaved.
+inline void span(const float *data, int channels, uint32_t first, uint32_t last, float &lo, float &hi) {
+    lo = hi = data[first * channels];
+    for (uint32_t i = first * channels, end = (last + 1) * channels; i < end; i++) {
+        const float v = data[i];
+        lo = v < lo ? v : lo;
+        hi = v > hi ? v : hi;
+    }
+}
+// A column from lo to hi (-1 to 1, bottom to top) in a box h high at y: at least one pixel.
+inline void wave_column(Canvas &canvas, int x, int y, int h, float lo, float hi, uint8_t grey) {
+    auto row = [&](float v) {
+        int r = int((1.0f - v) * 0.5f * float(h - 1) + 0.5f);
+        return r < 0 ? 0 : r > h - 1 ? h - 1 : r;
+    };
+    int top = row(hi), bottom = row(lo);
+    canvas.rect(x, y + top, 1, bottom - top + 1, grey);
+}
+}  // namespace detail
+
+// A trace of n samples across w pixels and h high, -1 at the bottom and 1 at the top: an oscilloscope of the last
+// block, an LFO's cycle, a wavetable. Each column shows the lowest and highest of its samples and reaches to the
+// next column's first, so the trace is joined. Reads every sample each time: for short buffers (Waveform keeps
+// what it read, for a sample).
+inline void scope(Canvas &canvas, int x, int y, int w, int h, const float *samples, int n, uint8_t grey = 9) {
+    canvas.rect(x, y + h / 2, w, 1, 2);
+    if (n <= 0 || w <= 0) return;
+    for (int c = 0; c < w; c++) {
+        uint32_t first = uint32_t(c * n / w), next = uint32_t((c + 1) * n / w);
+        uint32_t last = next > first ? next : first + 1;
+        if (last > uint32_t(n - 1)) last = uint32_t(n - 1);
+        float lo, hi;
+        detail::span(samples, 1, first, last, lo, hi);
+        detail::wave_column(canvas, x + c, y, h, lo, hi, grey);
+    }
+}
+
+// A sample's waveform in a box, for trimming, looping and slicing. Each column shows the lowest and highest value
+// of the frames it covers (a stereo sample's two channels together), so a long sample shows its shape and a short
+// stretch its every frame. The view is all of it or part (show, zoom, scroll); marks go on top (a start, an end,
+// loop points, the playhead), and column() and frame_at() turn frames into x and back.
+//
+//     enaga::ui::Waveform wave_;
+//     wave_.set(sample_);                                   // a dsp::Sample, or (data, frames, channels)
+//     wave_.zoom(1, start_);                                // twice as close, start_ staying where it is
+//     // in draw():
+//     wave_.draw(canvas, 0, enaga::ui::body_top, 128, 64);
+//     wave_.mark(canvas, start_, 15);
+//     wave_.mark(canvas, end_, 15);
+//
+// The frames are read when the view changes, or after refresh(), and kept, not read at every draw: all of a
+// minute in stereo is a few tens of milliseconds, once. The data must stay where it is while shown (set it again
+// if it moves).
+class Waveform {
+public:
+    static constexpr int max_width = screen_width;
+    static constexpr uint32_t min_count = 4;    // zoom in no closer than this many frames across
+
+    void set(const float *data, uint32_t frames, int channels = 1) {
+        data_ = data;
+        frames_ = data ? frames : 0;
+        channels_ = channels == 2 ? 2 : 1;
+        first_ = 0;
+        count_ = frames_;
+        dirty_ = true;
+    }
+    template <class S> void set(const S &sample) { set(sample.data(), sample.frames(), int(sample.channels())); }
+    // The frames changed (edited, recorded into): read again at the next draw.
+    void refresh() { dirty_ = true; }
+    // The same, with `frames` frames now (a recording growing): a view of all of it stays all of it.
+    void refresh(uint32_t frames) {
+        bool all = first_ == 0 && count_ == frames_;
+        frames_ = data_ ? frames : 0;
+        show(all ? 0 : first_, all ? frames_ : count_);
+    }
+
+    // Shows `count` frames from `first`, kept inside the sample.
+    void show(uint32_t first, uint32_t count) {
+        count = count < min_count ? min_count : count;
+        count_ = count > frames_ ? frames_ : count;
+        first_ = first > frames_ - count_ ? frames_ - count_ : first;
+        dirty_ = true;
+    }
+    void show_all() { show(0, frames_); }
+    // Closer by `steps` (each halving the frames shown) or, with steps below 0, further out (each doubling),
+    // keeping frame `around` at the same place on screen when it is in view.
+    void zoom(int steps, uint32_t around) {
+        for (; steps != 0; steps += steps > 0 ? -1 : 1) {
+            uint32_t count = steps > 0 ? count_ / 2 : (count_ > frames_ / 2 ? frames_ : count_ * 2);
+            count = count < min_count ? min_count : count > frames_ ? frames_ : count;
+            if (count == count_) break;
+            uint32_t at = around < first_ ? first_ : around >= first_ + count_ ? first_ + count_ - 1 : around;
+            uint32_t offset = uint32_t(float(at - first_) * float(count) * enaga_reciprocal(float(count_)));
+            show(at > offset ? at - offset : 0, count);
+        }
+    }
+    // Moves the view by `columns` of the last draw's columns (back if negative), stopping at the ends.
+    void scroll(int columns) {
+        uint32_t per = count_ / uint32_t(width_) ? count_ / uint32_t(width_) : 1;
+        uint32_t by = per * uint32_t(columns < 0 ? -columns : columns);
+        show(columns < 0 ? (first_ > by ? first_ - by : 0) : first_ + (by < frames_ ? by : frames_), count_);
+    }
+
+    uint32_t first() const { return first_; }
+    uint32_t count() const { return count_; }
+    uint32_t frames() const { return frames_; }
+
+    // The waveform in w (up to max_width) by h pixels at x, y, around a dim centre line.
+    void draw(Canvas &canvas, int x, int y, int w, int h, uint8_t grey = 9) const {
+        w = w > max_width ? max_width : w < 1 ? 1 : w;
+        x_ = x;
+        y_ = y;
+        h_ = h;
+        if (w != width_) dirty_ = true;
+        width_ = w;
+        canvas.rect(x, y + h / 2, w, 1, 2);
+        if (!frames_) return;
+        if (dirty_) read();
+        for (int c = 0; c < w; c++) detail::wave_column(canvas, x + c, y, h, lo_[c], hi_[c], grey);
+    }
+    // After draw: a line the box's height at `frame`'s column, if it is in view.
+    void mark(Canvas &canvas, uint32_t frame, uint8_t grey = 15) const {
+        int c = column(frame);
+        if (c >= 0) canvas.rect(x_ + c, y_, 1, h_, grey);
+    }
+    // The column (0 to the width drawn, less 1) `frame` is in (its first, zoomed in past a frame a column), or
+    // -1 out of view; and the frame at a column.
+    int column(uint32_t frame) const {
+        if (frame < first_ || frame >= first_ + count_) return -1;
+        bool sparse = count_ < uint32_t(width_);
+        int c = 0;
+        for (int step = 64; step; step >>= 1)   // dense: the last column starting at or before frame; sparse:
+            if (c + step < width_ && (sparse ? start(c + step - 1) < frame : start(c + step) <= frame)) c += step;
+        return c;                                // the first column at it (the columns before start before it)
+    }
+    uint32_t frame_at(int column) const {
+        return start(column < 0 ? 0 : column >= width_ ? width_ - 1 : column);
+    }
+
+private:
+    // Column c covers frames start(c) to start(c + 1) - 1: count / width each, the remainder spread.
+    uint32_t start(int c) const {
+        uint32_t w = uint32_t(width_), q = count_ / w, r = count_ % w;
+        return first_ + uint32_t(c) * q + uint32_t(c) * r / w;
+    }
+    void read() const {
+        if (count_ < uint32_t(width_)) {   // fewer frames than columns: a line through them
+            float scale = float(count_) * enaga_reciprocal(float(width_)), a_lo, a_hi, b_lo, b_hi;
+            value(scale * 0.0f, a_lo, a_hi);
+            for (int c = 0; c < width_; c++) {
+                value(scale * float(c + 1), b_lo, b_hi);
+                lo_[c] = a_lo < b_lo ? a_lo : b_lo;
+                hi_[c] = a_hi > b_hi ? a_hi : b_hi;
+                a_lo = b_lo;
+                a_hi = b_hi;
+            }
+            dirty_ = false;
+            return;
+        }
+        for (int c = 0; c < width_; c++) {
+            uint32_t first = start(c), next = start(c + 1);
+            uint32_t last = next > first ? next : first + 1;   // and the next column's first: a joined trace
+            if (last > frames_ - 1) last = frames_ - 1;
+            detail::span(data_, channels_, first, last, lo_[c], hi_[c]);
+        }
+        dirty_ = false;
+    }
+
+    // The channels' lowest and highest at `at` frames into the view, between frames in a straight line.
+    void value(float at, float &lo, float &hi) const {
+        uint32_t i = first_ + uint32_t(at);
+        i = i < frames_ ? i : frames_ - 1;
+        uint32_t j = i + 1 < frames_ ? i + 1 : i;
+        float f = at - float(uint32_t(at));
+        lo = hi = data_[i * channels_] + f * (data_[j * channels_] - data_[i * channels_]);
+        if (channels_ == 2) {
+            float v = data_[i * 2 + 1] + f * (data_[j * 2 + 1] - data_[i * 2 + 1]);
+            lo = v < lo ? v : lo;
+            hi = v > hi ? v : hi;
+        }
+    }
+
+    const float *data_ = nullptr;
+    uint32_t frames_ = 0, first_ = 0, count_ = 0;
+    int channels_ = 1;
+    mutable int width_ = max_width, x_ = 0, y_ = 0, h_ = 0;
+    mutable bool dirty_ = true;
+    mutable float lo_[max_width] = {}, hi_[max_width] = {};
+};
 
 // ---- List -------------------------------------------------------------------------------------------------------
 

@@ -1311,7 +1311,213 @@ static void sequencing() {
     check(c.value() == 0.25f && c.settled(), "jump", c.value(), 0.25);
 }
 
+static void dynamics() {
+    // DC blocker: an offset dies away, the audio band passes, -3 dB at its cutoff; blocks = steps.
+    {
+        DcBlocker dc(10.0f, kRate);
+        float y = 0;
+        for (int i = 0; i < 48000; i++) y = dc.step(0.5f);
+        near("dc blocker: an offset is gone after 1 s", y, 0, 1e-4);
+        DcBlocker a(10.0f, kRate), b(10.0f, kRate), c(10.0f, kRate);
+        near("dc blocker: 1 kHz passes (gain)", sine_gain(1000, [&](float x) { return a.step(x); }), 1, 2e-3);
+        near("dc blocker: 10 Hz is down 3 dB (gain)", sine_gain(10, [&](float x) { return b.step(x); }), 0.7071,
+             0.01);
+        std::vector<float> in(1000), block(1000), steps(1000);
+        Random random;
+        for (float &x : in) x = random.bipolar() + 0.3f;
+        c.process(in.data(), block.data(), 1000);
+        DcBlocker d(10.0f, kRate);
+        for (int i = 0; i < 1000; i++) steps[i] = d.step(in[i]);
+        same("dc blocker: block = steps", block, steps);
+    }
+
+    // Bitcrusher: on the grid of 2^bits levels, within half a step; held at the lower rate; 24 bits untouched.
+    {
+        Bitcrusher crusher;
+        crusher.set(4, kRate, kRate);
+        std::vector<float> in(4800), l(4800), r(4800), mono(4800);
+        Random random;
+        for (float &x : in) x = 0.9f * random.bipolar();
+        l = in; r = in; mono = in;
+        crusher.process(l.data(), r.data(), 4800);
+        double worst = 0, off_grid = 0;
+        for (int i = 0; i < 4800; i++) {
+            worst = std::max(worst, double(std::fabs(l[i] - in[i])));
+            off_grid += l[i] * 8 != std::floor(l[i] * 8) || l[i] != r[i];
+        }
+        near("crusher 4 bits: within half a step", worst, 0, 0.0625 + 1e-6);
+        near("crusher 4 bits: every value on the 1/8 grid", off_grid, 0, 0);
+        Bitcrusher m;
+        m.set(4, kRate, kRate);
+        m.process(mono.data(), nullptr, 4800);
+        same("crusher: mono = stereo's left", mono, l);
+
+        Bitcrusher held;
+        held.set(24, 12000, kRate);
+        l = in;
+        held.process(l.data(), nullptr, 4800);
+        int changes = 0, wrong = 0;
+        for (int i = 0; i < 4800; i++) {
+            if (i && l[i] != l[i - 1]) changes++;
+            if ((i + 1) % 4 == 0 && std::fabs(l[i] - in[i]) > 1e-6f) wrong++;   // taken every fourth sample
+        }
+        near("crusher at 12 kHz: 1200 samples taken", changes, 1199, 1);
+        near("crusher at 12 kHz: each the input then", wrong, 0, 0);
+    }
+
+    // Compressor, on a steady level (a constant: peak detection sees it whole).
+    {
+        auto settle = [](Compressor &c, float level, int n = 48000) {
+            std::vector<float> l(n, level), r(n, level);
+            for (int i = 0; i < n; i += 64) c.process(&l[i], &r[i], std::min(64, n - i));
+            return l.back();
+        };
+        Compressor c(kRate);
+        c.set(-20, 4, 0.001f, 0.05f, 0);
+        const double over = 20 + 20 * std::log10(0.5);                        // 0.5 is 13.98 dB over
+        near("compressor: at 4:1, a quarter as far over (dB)", enaga_gain_to_db(settle(c, 0.5f)), -20 + over / 4,
+             0.01);
+        near("compressor: its reduction (dB)", c.reduction_db(), over * 0.75, 0.01);
+        Compressor below(kRate);
+        below.set(-20, 4, 0.001f, 0.05f, 0);
+        check(settle(below, 0.05f) == 0.05f, "compressor: below the threshold untouched", settle(below, 0.05f), 0.05);
+        Compressor knee(kRate);
+        knee.set(-20, 4, 0.001f, 0.05f, 6);
+        near("compressor: at the threshold, half way into a 6 dB knee (reduction dB)",
+             (settle(knee, 0.1f), knee.reduction_db()), 0.75 * 9 / 12, 0.01);
+        Compressor makeup(kRate);
+        makeup.set(-20, 4, 0.001f, 0.05f, 0, 6);
+        near("compressor: makeup", enaga_gain_to_db(settle(makeup, 0.05f)), enaga_gain_to_db(0.05f) + 6, 0.01);
+
+        // Attack and release: the reduction goes 63 % of the way to its target in the time constant.
+        Compressor timed(kRate);
+        timed.set(-20, 4, 0.01f, 0.2f, 0);
+        settle(timed, 0.01f);
+        int i = 0;
+        for (; timed.reduction_db() < 0.632f * over * 0.75 && i < 48000; i++) {
+            float l = 0.5f, r = 0.5f;
+            timed.process(&l, &r, 1);
+        }
+        near("compressor: attack time constant (s)", i / kRate, 0.01, 0.0003);
+        settle(timed, 0.5f);
+        for (i = 0; timed.reduction_db() > 0.368f * over * 0.75 && i < 48000; i++) {
+            float l = 0.01f, r = 0.01f;
+            timed.process(&l, &r, 1);
+        }
+        near("compressor: release time constant (s)", i / kRate, 0.2, 0.002);
+
+        // A side chain: a quiet pad ducks under a loud key, and is left alone when the key is silent.
+        Compressor duck(kRate);
+        duck.set(-30, 10, 0.001f, 0.05f, 0);
+        std::vector<float> pad(4800, 0.01f), key(4800, 0.5f), quiet(4800, 0.0f);
+        for (int k = 0; k < 4800; k += 64) duck.process(&pad[k], nullptr, 64, &key[k]);
+        check(pad.back() < 0.01f * 0.2f, "compressor: the side chain ducks", pad.back(), 0.002);
+        std::fill(pad.begin(), pad.end(), 0.01f);
+        Compressor open(kRate);
+        open.set(-30, 10, 0.001f, 0.05f, 0);
+        for (int k = 0; k < 4800; k += 64) open.process(&pad[k], nullptr, 64, quiet.data() + k);
+        check(pad.back() == 0.01f, "compressor: a silent key leaves it alone", pad.back(), 0.01);
+
+        // Chunking does not change a sample.
+        std::vector<float> in(5000), a(5000), b(5000), ar(5000), br(5000);
+        Random random;
+        for (int k = 0; k < 5000; k++) in[k] = random.bipolar() * (k % 1000 < 500 ? 1.0f : 0.05f);
+        a = in; b = in; ar = in; br = in;
+        Compressor ca(kRate), cb(kRate);
+        ca.set(-20, 4, 0.002f, 0.05f);
+        cb.set(-20, 4, 0.002f, 0.05f);
+        for (int k = 0; k < 5000; k += 7) ca.process(&a[k], &ar[k], std::min(7, 5000 - k));
+        for (int k = 0; k < 5000; k += 100) cb.process(&b[k], &br[k], 100);
+        same("compressor: blocks of 7 = blocks of 100", a, b);
+    }
+
+    // Limiter: nothing above the ceiling; below it, the signal exactly, latency() late; smooth gain.
+    {
+        Limiter limiter;
+        limiter.init(0.002f, kRate);
+        limiter.set(-0.3f, 0.05f);
+        near("limiter: latency (samples)", limiter.latency(), 95, 0);
+        const float ceiling = enaga_db_to_gain(-0.3f);
+        std::vector<float> l(48000), r(48000), inl(48000), inr(48000);
+        Random random;
+        for (int i = 0; i < 48000; i++) {   // noise with bursts and single spikes, up to 12 dB over
+            float burst = (i / 2400) % 2 ? 4.0f : 0.3f;
+            inl[i] = burst * random.bipolar() * (i % 997 == 0 ? 3.0f : 1.0f);
+            inr[i] = burst * random.bipolar();
+        }
+        l = inl; r = inr;
+        for (int i = 0; i < 48000; i += 64) limiter.process(&l[i], &r[i], 64);
+        double peak = 0;
+        for (int i = 0; i < 48000; i++) peak = std::max({peak, double(std::fabs(l[i])), double(std::fabs(r[i]))});
+        check(peak <= ceiling, "limiter: no sample above the ceiling", peak, ceiling);
+        check(peak > 0.99 * ceiling, "limiter: the loud parts reach it", peak, ceiling);
+        // The gain each sample got: the output over the input that left then (where the input is not tiny).
+        double jump = 0;
+        float previous = 1;
+        for (int i = 96; i < 48000; i++) {
+            const float x = inl[i - 95];
+            if (std::fabs(x) < 0.05f) continue;
+            const float gain = l[i] / x;
+            jump = std::max(jump, double(std::fabs(gain - previous)));
+            previous = gain;
+        }
+        check(jump < 0.05, "limiter: the gain moves smoothly", jump, 0.05);
+
+        Limiter quiet;
+        quiet.init(0.002f, kRate);
+        quiet.set(-0.3f, 0.05f);
+        std::vector<float> q(4800), in(4800);
+        for (float &x : in) x = 0.5f * random.bipolar();
+        q = in;
+        for (int i = 0; i < 4800; i += 64) quiet.process(&q[i], nullptr, 64);
+        int differ = 0;
+        for (int i = 95; i < 4800; i++) differ += q[i] != in[i - 95];
+        check(differ == 0 && quiet.reduction_db() == 0, "limiter: below the ceiling, the input exactly, delayed",
+              differ, 0);
+
+        // A sine 6 dB over: limited to the ceiling, and recovering after it within the release.
+        Limiter sine;
+        sine.init(0.002f, kRate);
+        sine.set(0.0f, 0.02f);
+        std::vector<float> s(48000);
+        for (int i = 0; i < 48000; i++) s[i] = (i < 24000 ? 2.0f : 0.5f) * std::sin(2 * M_PI * 100 * i / kRate);
+        std::vector<float> in_s = s;
+        for (int i = 0; i < 48000; i += 64) sine.process(&s[i], nullptr, 64);
+        double held = 0, after = 0;
+        for (int i = 12000; i < 24000; i++) held = std::max(held, double(std::fabs(s[i])));
+        for (int i = 36000; i < 48000; i++) after = std::max(after, double(std::fabs(s[i])));
+        near("limiter: a sine 6 dB over comes out at the ceiling", held, 1.0, 0.01);
+        near("limiter: back to unity after the release", after, 0.5, 0.005);
+
+        // A lone spike 20 dB over after silence, at look-aheads down to the least: at the ceiling, never over.
+        for (float lookahead : {0.0f, 0.0005f, 0.004f, 0.1f}) {
+            Limiter spike;
+            spike.init(lookahead, kRate);
+            spike.set(-1.0f, 0.1f);
+            std::vector<float> x(6144);
+            x[1000] = 10.0f;
+            x[1001] = -3.0f;
+            for (int i = 0; i < 6144; i += 64) spike.process(&x[i], nullptr, 64);
+            const float c = enaga_db_to_gain(-1.0f), out = x[1000 + spike.latency()];
+            check(out <= c && out > 0.999f * c, "limiter: a spike leaves at the ceiling", out, c);
+        }
+
+        // Blocks of any size give the same samples; mono = stereo's left when the right is silent.
+        Limiter la, lb, lm;
+        la.init(0.0015f, kRate);
+        lb.init(0.0015f, kRate);
+        lm.init(0.0015f, kRate);
+        std::vector<float> a = inl, b = inl, m = inl, zero_a(48000), zero_b(48000);
+        for (int i = 0; i < 48000; i += 5) la.process(&a[i], &zero_a[i], std::min(5, 48000 - i));
+        for (int i = 0; i < 48000; i += 128) lb.process(&b[i], &zero_b[i], 128);
+        for (int i = 0; i < 48000; i += 64) lm.process(&m[i], nullptr, 64);
+        same("limiter: blocks of 5 = blocks of 128", a, b);
+        same("limiter: mono = stereo's left", m, b);
+    }
+}
+
 int main() {
+    dynamics();
     sequencing();
     sample_player();
     polyphony();

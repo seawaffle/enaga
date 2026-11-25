@@ -499,7 +499,91 @@ static void test_param_steps_and_speed() {
     check(second[4] == 6 && first[4] == 0, "set_values: turns change the new array");
 }
 
+// The rows of column x lit (not the background 0 or the centre line's 2) between y0 and y1, as "first-last", or
+// "" if none.
+static std::string lit_rows(int x, int y0, int y1) {
+    int first = -1, last = -1;
+    for (int y = y0; y <= y1; y++)
+        if (g_pixels[y * ENAGA_SCREEN_W + x] > 2) { if (first < 0) first = y; last = y; }
+    return first < 0 ? "" : std::to_string(first) + "-" + std::to_string(last);
+}
+
+static void test_waveform() {
+    enaga::Canvas canvas(g_pixels);
+    // 1280 frames: 0.5 for the first half, -0.5 for the second. In 128 x 65, 0.5 is row 16 and -0.5 row 48.
+    static float steps[1280];
+    for (int i = 0; i < 1280; i++) steps[i] = i < 640 ? 0.5f : -0.5f;
+    Waveform wave;
+    wave.set(steps, 1280);
+    canvas.clear();
+    wave.draw(canvas, 0, 0, 128, 65);
+    check(lit_rows(10, 0, 64) == "16-16", "waveform: a column of 0.5");
+    check(lit_rows(63, 0, 64) == "16-48", "waveform: the column with the step spans it");
+    check(lit_rows(100, 0, 64) == "48-48", "waveform: a column of -0.5");
+    check(g_pixels[32 * ENAGA_SCREEN_W + 10] == 2, "waveform: the centre line");
+    check(wave.column(0) == 0 && wave.column(639) == 63 && wave.column(640) == 64 && wave.column(1279) == 127,
+          "waveform: frames to columns");
+    check(wave.column(1280) == -1 && wave.frame_at(64) == 640 && wave.frame_at(500) == 1270,
+          "waveform: out of view; columns to frames");
+    wave.mark(canvas, 640, 15);
+    check(lit_rows(64, 0, 64) == "0-64" && g_pixels[64] == 15, "waveform: a mark the box's height");
+
+    // Zooming keeps the frame in place; it stops at all of it and at min_count frames.
+    wave.zoom(1, 640);
+    check(wave.first() == 320 && wave.count() == 640 && wave.column(640) == 64, "waveform: zoom in around a frame");
+    wave.zoom(-3, 640);
+    check(wave.first() == 0 && wave.count() == 1280, "waveform: zoom out to all");
+    wave.zoom(20, 0);
+    check(wave.first() == 0 && wave.count() == Waveform::min_count, "waveform: zoom in to min_count");
+    wave.show(0, 640);
+    wave.scroll(10);
+    check(wave.first() == 50, "waveform: scroll by columns");
+    wave.scroll(-100);
+    check(wave.first() == 0, "waveform: scroll stops at the start");
+    wave.scroll(1000);
+    check(wave.first() == 640, "waveform: scroll stops at the end");
+
+    // Fewer frames than columns: a line through them, and marks on a frame's first column.
+    static float ramp[8] = {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f, 1.0f, 1.0f, 1.0f};
+    Waveform line;
+    line.set(ramp, 8);
+    line.show(0, 4);
+    canvas.clear();
+    line.draw(canvas, 0, 0, 128, 65);
+    check(line.column(0) == 0 && line.column(1) == 32 && line.column(3) == 96 && line.frame_at(33) == 1,
+          "waveform zoomed in: frames and columns");
+    check(lit_rows(0, 0, 64) == "64-64" && lit_rows(32, 0, 64) == "48-48" && lit_rows(127, 0, 64) == "0-1",
+          "waveform zoomed in: a line between the frames");
+    check(lit_rows(16, 0, 64) == "56-56", "waveform zoomed in: half way between two frames");
+
+    // Stereo: both channels in each column.
+    static float stereo[256];
+    for (int i = 0; i < 128; i++) { stereo[2 * i] = 0.5f; stereo[2 * i + 1] = -0.5f; }
+    Waveform both;
+    both.set(stereo, 128, 2);
+    canvas.clear();
+    both.draw(canvas, 0, 0, 128, 65);
+    check(lit_rows(40, 0, 64) == "16-48", "waveform: stereo spans both channels");
+
+    // A recording growing: a view of all of it follows it; a zoomed view stays.
+    Waveform grow;
+    grow.set(steps, 100);
+    grow.refresh(1000);
+    check(grow.first() == 0 && grow.count() == 1000, "waveform: all of a growing recording");
+    grow.show(10, 50);
+    grow.refresh(1200);
+    check(grow.first() == 10 && grow.count() == 50, "waveform: a zoomed view stays as the recording grows");
+
+    // The scope: a trace of a buffer.
+    float full[64];
+    for (float &v : full) v = 1.0f;
+    canvas.clear();
+    scope(canvas, 0, 0, 128, 65, full, 64);
+    check(lit_rows(5, 0, 64) == "0-0" && lit_rows(127, 0, 64) == "0-0", "scope: full scale at the top");
+}
+
 int main() {
+    test_waveform();
     test_line();
     test_param_steps_and_speed();
     test_grid();
