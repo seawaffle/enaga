@@ -36,10 +36,13 @@ In the repository, `tests/test_api_docs.py` fails when a public name in `include
 12. [App settings](#app-settings)
 13. [MIDI](#midi)
 14. [Clock and transport](#clock-and-transport)
-15. [UI toolkit](#ui-toolkit)
-16. [DSP library](#dsp-library)
-17. [The C interface](#the-c-interface)
-18. [Language and runtime](#language-and-runtime)
+15. [Step sequencing](#step-sequencing)
+16. [Music helpers](#music-helpers)
+17. [UI toolkit](#ui-toolkit)
+18. [DSP library](#dsp-library)
+19. [Testing on a PC](#testing-on-a-pc)
+20. [The C interface](#the-c-interface)
+21. [Language and runtime](#language-and-runtime)
 
 ## Building and installing an app
 
@@ -1280,6 +1283,104 @@ Files named `*.ti.c` in an app's folder are built by TI's cl6x when it is instal
 compile them). They are C and export plain C functions, since C++ objects don't mix between the compilers; they
 can include `<enaga/dsp.h>` and work on a class's `state_`. cl6x pipelines only loops without branches inside:
 write `cond ? a : b` rather than `if`, and use the library's math, which never divides.
+
+## Testing on a PC
+
+An app's sound code can be tested on a PC, quickly and with a debugger, before it goes near a unit.
+`tools/host_test.py` builds each `tests/*.cpp` in an app's folder as a program of its own, with its own `main`,
+using the PC's g++ and gcc. Each is built together with the app's sources, the DSP library and a stand-in for
+Enaga's host table (`runtime/host/host.cpp`), and then run. `<enaga/testing.hpp>`, as `enaga::testing::`, has what
+tests need. `examples/sampler/tests/engine.cpp` is a worked example.
+
+```
+python3 -B tools/host_test.py ~/my-app               # every tests/*.cpp; output in ~/my-app/build/host-test/
+python3 -B tools/host_test.py ~/my-app engine        # only tests/engine.cpp
+python3 -B tools/host_test.py ~/my-app --sanitize    # with AddressSanitizer and UBSan
+```
+
+```cpp
+#include <enaga/testing.hpp>
+#include "../engine.hpp"
+using namespace enaga::testing;
+
+int main() {
+    Checks t;
+    Engine engine;
+    Buffer out = render(frames(1.0), [&](float *left, float *right, int n) { engine.render(left, right, n); });
+    t.below("never clips", peak(out), 1.0);
+    t.near("plays at 440 Hz", frequency(channel(out, 0)), 440, 1);
+    write_wav(output("engine.wav"), out);                // to listen to
+    return t.finish();
+}
+```
+
+**Building and running.**
+- Every `*.cpp` and `*.c` in the app's folder is compiled in, `*.ti.c` included (by gcc), so tests can call any of
+  the app's code. Its `ENAGA_APP` entry is there too, but nothing calls it.
+- Keep the sound apart from the screen and controls (an engine with a `render`, as the synth and the sampler
+  have) and the tests can drive it directly.
+- Each test runs in the build folder.
+- The tool's exit status is 0 if every test passed, 1 if any failed (non-zero from `main`, as `finish()` returns
+  it, or a crash), and 2 if one did not build. A crash is reported with its signal; `--sanitize` usually says
+  where.
+- `CC` and `CXX` choose other compilers (clang, say).
+
+**Same samples.** The DSP library and the fast math in `enaga::dsp` give the same samples on the PC as on Enaga.
+`<cmath>`'s functions are the PC's own, and can differ from Enaga's libm in the last bits. A PC also differs from
+the C674x elsewhere: pointers are 64-bit, and a misaligned access works. The emulator (see the README) runs the
+real thing.
+
+**Signals.** All are `Buffer` (`std::vector<float>`) at `rate` (48 kHz). Mono unless stated; stereo is interleaved.
+- `silence(frames)`.
+- `sine(hz, frames, amplitude, phase)`.
+- `impulse(frames, at, height)`.
+- `noise(frames, amplitude, seed)`: white, the same for the same seed.
+- `frames(seconds)` converts seconds to frames.
+
+**Running code in blocks, as `audio()` does.**
+- `render(frames, f, block = 64)` calls `f(left, right, n)` a block at a time, clearing the buffers before each,
+  and returns interleaved stereo. Use it for an engine's render or `render_add`.
+- `process(in, f, block = 64)` runs `f(buffer, n)` on a copy of `in` in place, a block at a time, for a mono
+  effect.
+- `channel(stereo, 0 or 1)` takes one channel out, and `interleave(left, right)` puts two together.
+- `slice(buffer, from, to)` gives frames `from` to `to`, `to` excluded.
+
+**Measurements.**
+- `peak` and `rms`.
+- `mean`, which is the DC offset.
+- `db(ratio)` turns an amplitude ratio into decibels.
+- `frequency(mono)`: a steady tone's frequency, from its zero crossings.
+- `first_above(buffer, threshold)`: the first frame at or above the threshold, or -1. Use it for when a sound
+  starts or an echo arrives.
+- `gain_at(hz, f)`: a mono process's gain at a frequency (a sine through `process`, compared by RMS), for a
+  filter's response.
+
+**`Checks`.** Each failure prints a line as it happens. `finish()` prints the count and returns the exit status,
+so return it from `main`. Each check returns whether it passed.
+- `check(what, ok)`.
+- `near(what, got, want, tolerance)`.
+- `below(what, got, limit)` and `above(what, got, limit)`.
+- `same(what, a, b)`: bit for bit (blocks of any size, a C loop against the class, a refactor).
+- `failed()` counts the failures.
+
+**Files.**
+- `input(name)` is a file in the app's `tests/` folder (a WAV to feed in). `output(name)` is one in the build
+  folder. The tool passes the two folders as `ENAGA_TEST_INPUT` and `ENAGA_TEST_OUTPUT`; without them, both are
+  the current folder.
+- `write_wav(path, samples, channels = 2, rate)` writes 32-bit float.
+- `read_wav(path, samples, channels, rate)` reads any format Enaga reads, as float, interleaved if stereo.
+
+**The stand-in host.** What `enaga::host()` reaches in a test:
+- `enaga::log` prints the line and keeps it: `logged()`.
+- MIDI sent is kept: `midi_sent()`, each message's bytes.
+- `clear_host()` forgets both.
+- `set_ms(ms)` sets what `enaga::ms()` returns.
+- `run_clock(bpm, from_tick)` runs the clock, and each `enaga::clock::ticks` call takes the next block's ticks (call
+  it once per block, as `audio()` does). `stop_clock()` stops it.
+- `enaga::fatal` prints the reason and ends the test with exit status 3.
+- The file and stream services answer `ENAGA_FILE_NO_CARD`.
+- The lights, speaker, input and menu do nothing.
+- Text draws nothing, though `draw()` can run and its other pixels can be read.
 
 ## The C interface
 

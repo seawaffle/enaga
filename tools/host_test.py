@@ -12,13 +12,14 @@ Every *.cpp and *.c in the app's folder is compiled in (as build_app.py does; *.
 call any of the app's code; the app's own ENAGA_APP entry is there but nothing calls it. Each test runs in the
 build folder; testing::input(name) is a file in the app's tests/ folder and testing::output(name) one in the build
 folder. The exit status is 1 if any test failed (a test fails by returning non-zero from main, as
-Checks::finish() does), 2 if it did not build.
+Checks::finish() does, or by crashing), 2 if it did not build.
 
 CC and CXX choose other compilers (clang, say).
 """
 import argparse
 import os
 import shlex
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -81,7 +82,10 @@ def run(programs, out):
     results = {}
     for program in programs:
         print(f"== {program.name}", flush=True)
-        results[program.name] = subprocess.run([str(program)], cwd=out).returncode
+        status = subprocess.run([str(program)], cwd=out).returncode
+        if status < 0:
+            print(f"host_test: {program.name} crashed ({signal.Signals(-status).name}); --sanitize may say where")
+        results[program.name] = status
     return results
 
 

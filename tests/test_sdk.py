@@ -56,7 +56,7 @@ class Sdk(unittest.TestCase):
             mine = d / "projects" / "my-synth"
             shutil.copytree(sdk / "template", mine)
             for app, source in [(mine, ENAGA / "template")] + [
-                    (sdk / "examples" / n, ENAGA / "examples" / n) for n in ("tone", "widgets", "synth")]:
+                    (sdk / "examples" / n, ENAGA / "examples" / n) for n in ("tone", "widgets", "synth", "sampler")]:
                 with self.subTest(app=source.name):
                     package = self.build_with_sdk(sdk, app, paths.TOOLCHAIN, d)
                     here = self.build_here(source, paths.TOOLCHAIN, d / "here" / source.name)
@@ -65,6 +65,24 @@ class Sdk(unittest.TestCase):
                     self.assertEqual(package[:40] + package[64:], here[:40] + here[64:])
                     if app == mine:
                         self.assertEqual(build_app.HEADER.unpack_from(package)[9], 1)   # with the template's icon
+
+    @unittest.skipUnless(shutil.which("g++") and shutil.which("gcc"), "needs the PC's g++ and gcc")
+    def test_host_tests_run_from_the_sdk_alone(self):
+        """The sampler's tests on the PC with the SDK's host_test.py, from a copy outside the SDK."""
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            with zipfile.ZipFile(make_sdk.make("vtest", d / "sdk.zip")) as z:
+                z.extractall(d)
+            sdk = d / "enaga-sdk-vtest"
+            mine = d / "projects" / "my-sampler"
+            shutil.copytree(sdk / "examples" / "sampler", mine)
+            env = dict(os.environ)
+            env.pop("ENAGA_BUILD", None)
+            result = subprocess.run([sys.executable, "-B", str(sdk / "tools" / "host_test.py"), str(mine)], env=env,
+                                    capture_output=True, text=True, cwd=d)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("1 of 1 passed", result.stdout)
+            self.assertTrue((mine / "build" / "host-test" / "engine.wav").is_file())
 
     def test_packaged_toolchain_builds_the_same_bytes(self):
         import package_toolchain

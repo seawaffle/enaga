@@ -106,7 +106,12 @@ The rules that matter most:
 
 - `docs/api.md`: the reference, header by header.
 - `examples/tone`: the smallest app. `examples/widgets`: the UI toolkit's widgets. `examples/synth`: a full
-  instrument (eight voices, filters, effects, patches on the card).
-- To run apps without a unit: the SDK has no emulator. The project's repository has one (its README, ["Testing
-  without a unit"](https://github.com/seawaffle/enaga#testing-without-a-unit)): with a clone of it and of the
-  emulator, `tools/panel.py` plays any app folder in a browser, with the screen, the controls and the sound.
+  instrument (eight voices, filters, effects, patches on the card). `examples/sampler`: WAV files on the pads,
+  trimmed and tuned on a waveform, with its sound tested on a PC.
+- To test sound code on your PC: put tests in a `tests/` folder in your app and run
+  `python3 -B tools/host_test.py ~/my-app`. It needs only g++ and gcc. `docs/api.md`, "Testing on a PC", has the
+  helpers, and `examples/sampler/tests/engine.cpp` is an example.
+- To run whole apps without a unit: the emulator is public, in
+  [smpltrek-re](https://github.com/seawaffle/smpltrek-re). With a clone of it and of Enaga's repository
+  (its README, ["Testing without a unit"](https://github.com/seawaffle/enaga#testing-without-a-unit)),
+  `tools/panel.py` plays any app folder in a browser, with the screen, the controls and the sound.

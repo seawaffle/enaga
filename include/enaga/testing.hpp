@@ -43,6 +43,11 @@ using Buffer = std::vector<float>;
 
 constexpr float rate = float(ENAGA_SAMPLE_RATE);
 
+namespace detail {
+// Output a line at a time, so what a test printed before a crash is not lost in the buffer.
+inline const bool line_buffered = (std::setvbuf(stdout, nullptr, _IOLBF, 0), true);
+}  // namespace detail
+
 // ---- Where files go ---------------------------------------------------------------------------------------------
 
 // A file in the app's tests/ folder (inputs: a WAV to feed in), and one in the tests' build folder (outputs).
@@ -92,8 +97,9 @@ inline size_t frames(double seconds) { return size_t(seconds * rate + 0.5); }
 template <class F> Buffer render(size_t frames, F f, int block = ENAGA_BLOCK_FRAMES) {
     Buffer out(2 * frames);
     std::vector<float> l(static_cast<size_t>(block)), r(static_cast<size_t>(block));
-    for (size_t at = 0; at < frames; at += size_t(block)) {
-        int n = int(frames - at < size_t(block) ? frames - at : size_t(block));
+    const size_t step = static_cast<size_t>(block);
+    for (size_t at = 0; at < frames; at += step) {
+        int n = int(frames - at < step ? frames - at : step);
         std::fill(l.begin(), l.end(), 0.0f);
         std::fill(r.begin(), r.end(), 0.0f);
         f(l.data(), r.data(), n);
@@ -106,8 +112,9 @@ template <class F> Buffer render(size_t frames, F f, int block = ENAGA_BLOCK_FRA
 }
 // Runs f(buffer, n) on `in` a block at a time, in place, and returns the result: for a mono effect's process.
 template <class F> Buffer process(Buffer in, F f, int block = ENAGA_BLOCK_FRAMES) {
-    for (size_t at = 0; at < in.size(); at += size_t(block)) {
-        int n = int(in.size() - at < size_t(block) ? in.size() - at : size_t(block));
+    const size_t step = static_cast<size_t>(block);
+    for (size_t at = 0; at < in.size(); at += step) {
+        int n = int(in.size() - at < step ? in.size() - at : step);
         f(in.data() + at, n);
     }
     return in;

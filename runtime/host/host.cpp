@@ -21,25 +21,25 @@ std::vector<std::string> g_logged;
 std::vector<std::vector<uint8_t>> g_midi;
 uint32_t g_ms = 0;
 enaga_clock_state_t g_clock = {0, 0, 120.0f, 0, 0.0f};
-double g_position = 0.0;                   // ticks, with the fraction
+uint64_t g_frames = 0;                     // frames since run_clock
+uint32_t g_from = 0, g_next = 0;           // the tick it started at, and the next to come
 
 constexpr int32_t no_card = ENAGA_FILE_NO_CARD;
 
+// The next block's ticks: tick t falls (t - from) x frames-per-tick frames after the start, so nothing drifts.
 uint32_t clock_ticks(enaga_clock_tick_t *ticks, uint32_t max) {
     if (!g_clock.running) return 0;
-    const double per_frame = g_clock.tempo * double(ENAGA_CLOCK_PPQN) / 60.0 / ENAGA_SAMPLE_RATE;
-    const double start = g_position;
-    g_position += per_frame * ENAGA_BLOCK_FRAMES;
+    const double per_tick = 60.0 * ENAGA_SAMPLE_RATE / (double(g_clock.tempo) * ENAGA_CLOCK_PPQN);
+    const uint64_t end = g_frames + ENAGA_BLOCK_FRAMES;
     uint32_t n = 0;
-    for (uint64_t t = uint64_t(start) + (start > double(uint64_t(start)) ? 1 : 0); double(t) < g_position && n < max;
-         t++) {
-        ticks[n].tick = uint32_t(t);
-        ticks[n].frame = uint32_t((double(t) - start) / per_frame);
-        if (ticks[n].frame >= ENAGA_BLOCK_FRAMES) ticks[n].frame = ENAGA_BLOCK_FRAMES - 1;
-        n++;
+    for (double at; n < max && (at = double(g_next - g_from) * per_tick) < double(end); g_next++, n++) {
+        ticks[n].tick = g_next;
+        ticks[n].frame = at > double(g_frames) ? uint32_t(at - double(g_frames)) : 0;   // late (max was short): 0
     }
-    g_clock.position = uint32_t(g_position);
-    g_clock.fraction = float(g_position - double(uint64_t(g_position)));
+    g_frames = end;
+    const double position = double(g_from) + double(g_frames) / per_tick;
+    g_clock.position = uint32_t(position);
+    g_clock.fraction = float(position - double(g_clock.position));
     return n;
 }
 
@@ -123,7 +123,8 @@ void set_ms(uint32_t ms) { g_ms = ms; }
 void run_clock(float bpm, uint32_t from_tick) {
     g_clock.running = 1;
     g_clock.tempo = bpm;
-    g_position = from_tick;
+    g_frames = 0;
+    g_from = g_next = from_tick;
     g_clock.position = from_tick;
     g_clock.fraction = 0.0f;
 }
