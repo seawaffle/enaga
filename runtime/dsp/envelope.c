@@ -42,3 +42,10 @@ void enaga_envelope_render(enaga_envelope *e, const enaga_envelope_shape *s, flo
     }
     e->level = l;
 }
+
+void enaga_smoother_render(enaga_smoother *s, float *out, int n) {
+    float v = s->value, t = s->target, a = s->a;
+    int i;
+    for (i = 0; i < n; i++) out[i] = v += a * (t - v);
+    s->value = v;
+}

@@ -85,4 +85,35 @@ private:
     float phase_ = 0.0f, held_ = 0.0f;
 };
 
+// A parameter that glides to each new value instead of jumping, so knob moves do not click or zipper: one-pole,
+// reaching within 1 % of a new target in the time set. Step it per sample (next, render), or once per block for
+// a coefficient computed per block (advance).
+class Smoothed {
+public:
+    // Glide time in seconds, at `rate` steps a second, starting at `value` with no glide.
+    void init(float seconds, float rate, float value = 0.0f, int block = 64) {
+        state_ = {value, value, enaga_smoother_coefficient(seconds, rate)};
+        block_ = block;
+        block_factor_ = 1.0f;
+        for (int i = 0; i < block; i++) block_factor_ *= 1.0f - state_.a;
+    }
+    void set(float target) { state_.target = target; }                   // glides there
+    void jump(float value) { state_.value = state_.target = value; }     // at once (a new note, a preset)
+    float next() { return enaga_smoother_step(&state_); }                // one step
+    void render(float *out, int n) { enaga_smoother_render(&state_, out, n); }   // n steps (a block function)
+    // Moves on a whole block (init's `block` steps) at once, exactly as that many next() calls would but for
+    // rounding, and returns the value: for settings recomputed once per block.
+    float advance() { return state_.value = state_.target + (state_.value - state_.target) * block_factor_; }
+    float value() const { return state_.value; }
+    float target() const { return state_.target; }
+    bool settled(float tolerance = 1e-5f) const { return abs(state_.value - state_.target) <= tolerance; }
+
+    enaga_smoother state_{};
+
+private:
+    int block_ = 64;
+    float block_factor_ = 1.0f;
+};
+
 }  // namespace enaga::dsp
+

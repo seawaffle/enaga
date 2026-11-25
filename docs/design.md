@@ -507,7 +507,7 @@ Its card is staged by `tools/unit_card.py`.
 - **Library additions before the API review (2026-11-24), one branch each:** (1) math: fast functions and libm
   (log, 2026-11-24); (2) a sample player with a WAV loader, a main-to-audio message queue, voice allocation (the
   synth's, made generic) (log, 2026-11-24); (3) step-sequencing helpers (swing, note lengths with their note-offs, probability),
-  note names and scales, parameter smoothing; (4) a limiter and compressor, DC blocker, bitcrusher, and a waveform
+  note names and scales, parameter smoothing (log, 2026-11-24); (4) a limiter and compressor, DC blocker, bitcrusher, and a waveform
   view widget; (5) host-side DSP testing for app developers, and a small sampler example.
 - **Unit session 6 (2026-11-22/23, E5 exit, in progress; Windows host): USB DRIVE and USB audio failed on the unit;
   both work since round 4 (below).**
@@ -2212,4 +2212,27 @@ entirely from library parts.
   converted or kept, a 40 KB chunk before the data, a size field of 0 with a partial last frame; exact values where
   nothing is converted, within 2e-3 of the sine where it is (0.015 for 8-bit); not a WAV, a missing file, a
   cancelled load; the loaded sample played at 1 kHz.
+
+### Step sequencing, music helpers, parameter smoothing (2026-11-24)
+
+The third of the library additions before the API review.
+- **`<enaga/sequencer.hpp>`** (`enaga::seq`): `StepClock` turns `clock::ticks` into steps of any length in ticks
+  with swing (0.5 to 0.75 of the way through each pair, to the nearest tick) and gives each step's index, count,
+  pass and frame; stateless, so the clock's locates and catch-ups need nothing special. `NoteOffs<N>` holds notes
+  until their length in ticks has run and ends them through a callback or as MIDI note-offs; it also ends a note
+  when time goes back before its start (a locate), ends the same note before it is started again (so the old
+  note-off cannot cut the new note), ends the soonest due when full, and ends all at a stop; tick arithmetic is
+  wrap-safe. `chance` and `every(a, b, pass)` (the a-th of every b passes) for probability and conditions. The
+  pattern itself stays the app's.
+- **`<enaga/music.hpp>`** (`enaga::music`): `note_name` (60 = C4, or C3 by choice; sharps or flats), fourteen scales
+  as 12-bit masks with names for menus, `in_scale`, `quantize` (ties to the lower note), `degree` (a scale across
+  pads, negative indices going down), `note_hz`, note lengths with `dotted` and `triplet`, and tempo to seconds,
+  milliseconds, frames and Hz.
+- **`dsp::Smoothed`** (`enaga_smoother`, `enaga_smoother_render` in `runtime/dsp/envelope.c`): a one-pole glide to
+  within 1 % of a new value in the time set, per sample, as a block function, or a whole block at once for settings
+  recomputed per block.
+- **Tests** (host): note names at the edges and both conventions, scale sizes, quantising with ties, degrees up
+  and down, tempo conversions; straight and swung steps, `step_at` and `tick_of`, a step after a locate; note-offs
+  due, retriggered, after a locate back, when full, all at once, across the tick counter's wrap; `every` and
+  `chance`; smoothing's time, `render` equal to steps, `advance` equal to a block of steps.
 

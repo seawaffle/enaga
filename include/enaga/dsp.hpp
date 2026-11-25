@@ -9,7 +9,7 @@
 //   math.hpp        exp2, log2, pow, sqrt, sin, tanh, atan2, decibels, ..., Random, Memory: fast, no division
 //   oscillator.hpp  PolyBLEP saw and pulse, triangle, sine, hard sync; wavetables and a morph between two
 //   filter.hpp      state-variable filter (low, band, high) and a two-stage cascade, one-pole, biquads, FIR
-//   modulation.hpp  ADSR envelope, LFO
+//   modulation.hpp  ADSR envelope, LFO, parameter smoothing (Smoothed)
 //   effects.hpp     delay line, stereo delay, chorus, reverb (buffers on the app heap)
 //   sample.hpp      samples in memory and their player; rate conversion (Resampler); the sample format
 //                   functions are the C ones in dsp.h
