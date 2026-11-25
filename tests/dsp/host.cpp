@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <algorithm>
 #include <vector>
 
@@ -744,7 +745,116 @@ static void synth_blocks() {
     }
 }
 
+// Converts all of `in` (then the zeros that flush it), in blocks of `block` inputs into at most `room` outputs.
+static std::vector<float> resample_all(const std::vector<float> &in, uint32_t from, uint32_t to, int block, int room) {
+    std::vector<float> table(enaga_resample_table_size()), out;
+    enaga_resample_table(table.data(), from, to);
+    enaga_resampler r;
+    enaga_resampler_init(&r, table.data(), from, to);
+    std::vector<float> feed(in);
+    feed.resize(in.size() + ENAGA_RESAMPLE_TAPS / 2, 0.0f);
+    std::vector<float> chunk(room);
+    for (size_t at = 0;;) {                        // until every input is used and out was not filled
+        int n = int(std::min<size_t>(block, feed.size() - at)), used = 0;
+        int made = enaga_resample(&r, feed.data() + at, n, chunk.data(), room, &used);
+        out.insert(out.end(), chunk.begin(), chunk.begin() + made);
+        at += size_t(used);
+        if (at == feed.size() && made < room) break;
+    }
+    return out;
+}
+
+// The largest error against a sine at `frequency` sampled at `to`, over the outputs from `skip` to `end - skip`.
+static double sine_error(const std::vector<float> &out, double frequency, uint32_t to, size_t skip) {
+    double worst = 0;
+    for (size_t i = skip; i + skip < out.size(); i++)
+        worst = std::fmax(worst, std::fabs(out[i] - 0.5 * std::sin(2 * M_PI * frequency * double(i) / to)));
+    return worst;
+}
+
+static void samples() {
+    // Formats, read at an odd address, every second sample (the right channel of a stereo file).
+    const uint8_t s16[] = {0, 0x00, 0x80, 0xFF, 0x7F, 0x00, 0x40, 0x34, 0x12, 0x01, 0x00};
+    float f[2];
+    int16_t i16[2];
+    enaga_pcm_to_float(s16 + 3, ENAGA_PCM_S16, 2, f, 2);           // 0x7FFF and 0x1234 (0x4000 skipped)
+    near("s16 to float", f[0], 32767.0 / 32768, 1e-9);
+    near("s16 to float, second", f[1], 0x1234 / 32768.0, 1e-9);
+    const uint8_t s24[] = {9, 0x00, 0x00, 0x80, 0xFF, 0xFF, 0x7F, 0x80, 0x00, 0x00};
+    enaga_pcm_to_float(s24 + 1, ENAGA_PCM_S24, 1, f, 2);
+    near("s24 to float", f[0], -1, 0);
+    near("s24 to float, top", f[1], 8388607.0 / 8388608, 1e-9);
+    enaga_pcm_to_int16(s24 + 1, ENAGA_PCM_S24, 1, i16, 2);
+    check(i16[0] == -32768 && i16[1] == 32767, "s24 to int16 saturates", i16[1], 32767);
+    const uint8_t s24_round[] = {0xC0, 0, 0, 0x7F, 0, 0, 0x7F, 0xFF, 0xFF};   // 192, 127, -129: /256 to nearest
+    int16_t r3[3];
+    enaga_pcm_to_int16(s24_round, ENAGA_PCM_S24, 1, r3, 3);
+    check(r3[0] == 1 && r3[1] == 0 && r3[2] == -1, "s24 to int16 rounds", r3[0] * 100 + r3[1] * 10 + r3[2], 99);
+    const uint8_t u8[] = {0, 128, 255};
+    enaga_pcm_to_float(u8, ENAGA_PCM_U8, 1, f, 2);
+    near("u8 to float", f[0], -1, 0);
+    near("u8 to float, middle", f[1], 0, 0);
+    enaga_pcm_to_int16(u8 + 1, ENAGA_PCM_U8, 1, i16, 2);
+    check(i16[0] == 0 && i16[1] == 127 * 256, "u8 to int16", i16[1], 127 * 256);
+    const uint8_t s32[] = {1, 0x00, 0x80, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x7F};
+    enaga_pcm_to_int16(s32 + 1, ENAGA_PCM_S32, 1, i16, 2);
+    check(i16[0] == 1 && i16[1] == 32767, "s32 to int16 rounds and saturates", i16[0], 1);
+    float halves[2] = {-0.25f, 2.0f};
+    uint8_t fl[9];
+    std::memcpy(fl + 1, halves, 8);
+    enaga_pcm_to_float(fl + 1, ENAGA_PCM_FLOAT, 1, f, 2);
+    check(f[0] == -0.25f && f[1] == 2.0f, "float copied", f[0], -0.25);
+    enaga_pcm_to_int16(fl + 1, ENAGA_PCM_FLOAT, 1, i16, 2);
+    check(i16[0] == -8192 && i16[1] == 32767, "float to int16", i16[1], 32767);
+    const float back[4] = {0.5f / 32768, -1.5f, 1.0f, -0.6f / 32768};
+    int16_t out16[4];
+    enaga_float_to_int16(back, out16, 4);
+    check(out16[0] == 1 && out16[1] == -32768 && out16[2] == 32767 && out16[3] == -1, "float_to_int16", out16[0], 1);
+    const int16_t pcm[2] = {-32768, 16384};
+    enaga_int16_to_float(pcm, f, 2, 0.5f);
+    check(f[0] == -0.5f && f[1] == 0.25f, "int16_to_float with gain", f[1], 0.25);
+    check(enaga_pcm_format(1, 24) == ENAGA_PCM_S24 && enaga_pcm_format(3, 32) == ENAGA_PCM_FLOAT &&
+          enaga_pcm_format(3, 64) == -1 && enaga_pcm_format(1, 12) == -1, "pcm_format", 0, 0);
+
+    // Rate conversion: a sine converted matches the same sine sampled at the new rate.
+    const uint32_t from = 44100, to = 48000;
+    std::vector<float> sine(44100);
+    for (size_t i = 0; i < sine.size(); i++) sine[i] = float(0.5 * std::sin(2 * M_PI * 1000 * double(i) / from));
+    std::vector<float> out = resample_all(sine, from, to, 4096, 8192);
+    near("44.1 to 48 kHz length", double(out.size()), 48000, 1);    // one output per 1/48000 s of input, and the end
+    near("44.1 to 48 kHz, 1 kHz error", sine_error(out, 1000, to, 64), 0, 3e-5);
+    for (size_t i = 0; i < sine.size(); i++) sine[i] = float(0.5 * std::sin(2 * M_PI * 18000 * double(i) / from));
+    near("44.1 to 48 kHz, 18 kHz error", sine_error(resample_all(sine, from, to, 4096, 8192), 18000, to, 64), 0, 3e-4);
+    // Any blocking gives the same samples: inputs a few at a time, outputs a few at a time.
+    std::vector<float> small = resample_all(sine, from, to, 7, 3), large = resample_all(sine, from, to, 100000, 100000);
+    check(small == large, "the same in any blocks", double(small.size()), double(large.size()));
+    // Down: 96 to 48 kHz keeps 10 kHz and removes 30 kHz, which would otherwise alias to 18 kHz.
+    std::vector<float> high(96000);
+    for (size_t i = 0; i < high.size(); i++) high[i] = float(0.5 * std::sin(2 * M_PI * 10000 * double(i) / 96000));
+    out = resample_all(high, 96000, 48000, 512, 512);
+    near("96 to 48 kHz length", double(out.size()), 48000, 0);
+    near("96 to 48 kHz, 10 kHz error", sine_error(out, 10000, 48000, 64), 0, 3e-5);
+    for (size_t i = 0; i < high.size(); i++) high[i] = float(0.5 * std::sin(2 * M_PI * 30000 * double(i) / 96000));
+    out = resample_all(high, 96000, 48000, 512, 512);
+    double peak = 0;
+    for (size_t i = 64; i + 64 < out.size(); i++) peak = std::fmax(peak, std::fabs(out[i]));
+    check(20 * std::log10(peak / 0.5) < -85, "96 to 48 kHz, 30 kHz removed", 20 * std::log10(peak / 0.5), -85);
+    // The C++ class: a second channel sharing the first's table gives the same samples as its own.
+    Resampler left, right;
+    left.init(44100, 48000);
+    right.init(left);
+    std::vector<float> a(256), b(256);
+    int used_a, used_b;
+    int made_a = left.process(sine.data(), 200, a.data(), 256, used_a), made_b = right.process(sine.data(), 200, b.data(), 256, used_b);
+    check(made_a == made_b && used_a == 200 && a == b, "Resampler sharing a table", made_b, made_a);
+    left.reset();
+    std::vector<float> c(256);
+    int made_c = left.process(sine.data(), 200, c.data(), 256, used_a);
+    check(made_c == made_a && c == a, "Resampler reset", made_c, made_a);
+}
+
 int main() {
+    samples();
     math();
     oscillators();
     filters();

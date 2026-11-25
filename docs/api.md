@@ -209,9 +209,13 @@ app's function key, though F1 + POWER always opens the Enaga menu.
 | Confirm and cancel | `ENAGA_KEY_OK` `ENAGA_KEY_CLR` |
 | Octave | `ENAGA_KEY_OCTAVE_LEFT` `ENAGA_KEY_OCTAVE_RIGHT` |
 | Selection buttons | `ENAGA_KEY_SELECT_LEFT` `ENAGA_KEY_SELECT_RIGHT` |
-| Knob pushes | `ENAGA_KEY_PUSH_A` `ENAGA_KEY_PUSH_B` `ENAGA_KEY_PUSH_C` `ENAGA_KEY_PUSH_D` `ENAGA_KEY_PUSH_VALUE` |
+| Knob pushes | `ENAGA_KEY_PUSH_B` (0) `ENAGA_KEY_PUSH_A` (1) `ENAGA_KEY_PUSH_C` (2) `ENAGA_KEY_PUSH_D` (3) `ENAGA_KEY_PUSH_VALUE` (4) |
 
 `ENAGA_KEY_COUNT` (48) bounds key numbers, for arrays indexed by key. Keys are debounced by Enaga.
+
+**The knob pushes are not in A-D order:** `ENAGA_KEY_PUSH_B` is 0 and `ENAGA_KEY_PUSH_A` is 1, the order the panel
+reports them, while `on_encoder`'s `encoder` 0-3 is A-D. Use the names; code that takes key 0 for knob A swaps the
+first two knobs.
 
 ### Encoders: `on_encoder(int encoder, int delta)`
 
@@ -813,6 +817,44 @@ C functions from `<enaga/dsp.h>`, callable from C++ as they are. Block functions
 The math buffers are for control values too: gather every voice's pitch or cutoff into one array and convert them
 in one call. cl6x's fast loops need 10 values or more, so pad a short array (16 values cost less than 8).
 
+### Sample formats and rate conversion: `Resampler`
+
+From a WAV's data (`<enaga/wav.hpp>` finds it) to float or int16, and from one sample rate to another. C functions
+from `<enaga/dsp.h>`, block functions; `Resampler` (`<enaga/dsp/sample.hpp>`) wraps the rate conversion.
+
+| Function | Does |
+|---|---|
+| `ENAGA_PCM_U8`, `ENAGA_PCM_S16`, `ENAGA_PCM_S24`, `ENAGA_PCM_S32`, `ENAGA_PCM_FLOAT` | the formats: the bits per sample, 33 for 32-bit float. 8-bit WAV is unsigned |
+| `enaga_pcm_format(encoding, bits)` | the format of a `wav::Format`'s `encoding` and `bits`, or -1 |
+| `enaga_pcm_bytes(format)` | bytes per sample |
+| `enaga_pcm_to_float(src, format, stride, out, n)` | `n` samples from `src`, every `stride`-th, to float (±1 full scale). `src` may be at any address: it is read byte by byte. `stride` 1 keeps samples as they are (mono, or interleaved kept interleaved); the channel count, with `src` at a channel's first sample, takes that channel out of interleaved data |
+| `enaga_pcm_to_int16(src, format, stride, out, n)` | the same to int16, half the memory of float: rounded to nearest, saturated |
+| `enaga_int16_to_float(in, out, n, gain)` | out = gain × in / 32768, for playing int16 samples |
+| `enaga_float_to_int16(in, out, n)` | out = in × 32768, rounded and saturated, for a 16-bit WAV |
+
+```cpp
+// A stereo file's left channel, from data read off the card, as int16 (the right: src + bytes, the same stride).
+int format = enaga_pcm_format(wav.encoding, wav.bits), bytes = enaga_pcm_bytes(format);
+enaga_pcm_to_int16(data, format, wav.channels, left, frames);
+```
+
+**Rate conversion** is a 64-tap Kaiser-windowed sinc, mono and streaming: feed it input in blocks of any size and
+it writes the outputs they make. From 44.1 kHz it is flat to 19 kHz (-0.6 dB at 20 kHz); going down, what would
+alias below 0.86 of the new Nyquist is about 89 dB down. Each output costs about 128 multiply-adds, so convert a
+sample when it is loaded, not per voice in `audio` (to play at a pitch, interpolate).
+
+| Name | Does |
+|---|---|
+| `Resampler::init(in_rate, out_rate)` | a conversion from the start of a sound; makes its filter table (16.6 KB, from the heap: in `init()`) |
+| `Resampler::init(other)` | another channel at the same rates, sharing `other`'s table |
+| `process(in, n_in, out, max_out, used)` | converts up to `n_in` inputs into at most `max_out` outputs; returns the outputs written and sets `used` to the inputs taken. If it filled `out`, call again with the inputs not yet used (none, if all were): outputs may still be waiting |
+| `reset()` | back to the start of a sound |
+| C: `enaga_resample_table_size()`, `enaga_resample_table(table, in_rate, out_rate)`, `enaga_resampler_init(&r, table, in_rate, out_rate)`, `enaga_resample(&r, in, n_in, out, max_out, &used)`; `ENAGA_RESAMPLE_TAPS`, `ENAGA_RESAMPLE_PHASES`; the state `enaga_resampler` | the same; the table is the caller's |
+
+Output 0 is input 0's instant, with no delay. Each output needs `ENAGA_RESAMPLE_TAPS / 2` (32) inputs after it, so
+at the end of a sound feed that many zeros to get the last outputs. Rates are whole Hz, 1 to 1,000,000; the
+ratio is exact (32.32 fixed point), so a long sound does not drift.
+
 ### Oscillators: `Oscillator`, `Wave`
 
 Saw and pulse are PolyBLEP band-limited; triangle and sine are plain. `dt` is the frequency in cycles per sample
@@ -1005,6 +1047,11 @@ The `_memory` functions give the floats of zeroed memory the `_init` functions n
 - **C++20** with `-fno-exceptions -fno-rtti`, and C11. The freestanding standard library: `<array>`,
   `<algorithm>`, `<span>`, `<optional>`, `<variant>`, `<type_traits>`, `<bit>`, `<atomic>`, `<numbers>`,
   `<cstdint>` and the like. No allocating containers (`std::vector`, `std::string`), no iostreams.
+- **`<atomic>`: 32-bit types only for read-modify-write.** `fetch_add`, `exchange` and `compare_exchange` on
+  32-bit types work, and are atomic against the audio interrupt (GCC puts the load, change and store in branch
+  delay slots, where the C674x takes no interrupt). On 8- and 16-bit types they compile but fail to link
+  (`__atomic_fetch_add_1`, `__atomic_compare_exchange_1`, ...), as there is no libatomic. Loads and stores work at
+  any size.
 - **Memory:** `new`, `delete`, `malloc` and `free` work on the app's heap (everything above the image, about
   124 MiB). Running out calls `fatal("out of memory")`.
 - **Strings:** there is no C library and no `<string.h>`. `<enaga/string.h>` declares what the runtime provides:

@@ -189,7 +189,7 @@ heavy patches break up.
 
 Without `ENAGA_EMULATOR` the emulator tests are skipped; `tests/test_dsp.py` (the DSP library on the host) needs
 only `g++`, and `test_sysimage.py` and `test_api_docs.py` need nothing. `tools/emulate.py` writes the last screen to
-`build/emulate/frame.png`, the captured output to `build/emulate/audio.wav` (32-bit samples, as the codec gets
+`build/emulate/frame.png`, the whole run's output to `build/emulate/audio.wav` (32-bit samples, as the codec gets
 them), and a JSON report. Its other options (`--help`): `--card-mib` for a larger card, `--file` to put files on it
 (long names too), `--turn` for the knobs, `--power-off` (the app's `stop()` runs, as when the unit is switched off) and
 `--get` to save files from the card afterwards. In Python, `Emulation` in the same file does each step by step.

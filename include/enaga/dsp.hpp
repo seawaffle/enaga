@@ -11,6 +11,7 @@
 //   filter.hpp      state-variable filter (low, band, high) and a two-stage cascade, one-pole, biquads, FIR
 //   modulation.hpp  ADSR envelope, LFO
 //   effects.hpp     delay line, stereo delay, chorus, reverb (buffers on the app heap)
+//   sample.hpp      rate conversion (Resampler); the sample format functions are the C ones in dsp.h
 //
 // docs/api.md, "DSP library", is the reference.
 #pragma once
@@ -20,3 +21,4 @@
 #include <enaga/dsp/math.hpp>
 #include <enaga/dsp/modulation.hpp>
 #include <enaga/dsp/oscillator.hpp>
+#include <enaga/dsp/sample.hpp>
