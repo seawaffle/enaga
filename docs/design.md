@@ -503,6 +503,13 @@ Its card is staged by `tools/unit_card.py`.
 
 ## Open items
 
+- **From the code review (2026-11-25, log), left open:** a short SCSI answer stalled while its packet may still be in
+  the FIFO (`dcd_musb.c`, with the double-buffered FIFOs of `usb-drive-speed`; settle with a capture of one mount);
+  the SPLOOP flag in ITSR when an app is dropped inside an SPLOOP (`start.s`, unknown on the chip); `update(ms)` can
+  be given the pass's ms, from before an app's init() read `ms()`; the file service's `sd_wait_hook` feeding the
+  watchdog, so an app looping on card I/O in `update` is never dropped; apps beyond 24 left out of the menu
+  silently; SYNC IN with no minimum interval; three version numbers (build.py, kernel.h, usb.c) of which the
+  release workflow checks one; no CI on pull requests (the workflow builds and publishes without running tests).
 - Input gain ("1.0 addition: input gain"): one value or a left/right pair; build before or at the API review.
 - **Library additions before the API review (2026-11-24), one branch each:** (1) math: fast functions and libm
   (log, 2026-11-24); (2) a sample player with a WAV loader, a main-to-audio message queue, voice allocation (the
@@ -674,8 +681,6 @@ Its card is staged by `tools/unit_card.py`.
 - Hangs with interrupts disabled (in a kernel handler, or an app that clears GIE) escape the software
   watchdog; the C6748's hardware watchdog (TIMER64P1) would catch them by resetting the chip, which probably
   also drops the power hold. Whether a reset on the unit switches it off or restarts Enaga is to be checked.
-- Loading a very large app: the loader's CRC and bss clearing run without feeding the watchdog, so an image
-  that takes over a second to check would trip it. To be measured on the unit with caches on.
 - Interrupt stack gap (firmware/start.s): GCC code is held to 16 KiB frames by the build; libgcc (prebuilt, small
   frames) and cl6x-built code are not checked. cl6x is not known to release frames early. An app that needs a
   bigger local array puts it in a static or on the heap.
@@ -1923,7 +1928,7 @@ user's request: `usb_iso_stream_out` / `_in`, ISOUPDATE, SOF every millisecond).
   `dcd_sof_enable` was empty; it now sets the SOF interrupt enable (a marked local change).
 - **The app's side:** `ENAGA_INPUT_USB` (abi.h, value 5) makes the computer's audio the callback's `in`; the codec
   route is left alone. The callback's `out` goes to the computer before VOLUME, whatever the input.
-- **Clocks:** OUT is resampled (linear interpolation) by a ratio that keeps its ring at 144 frames, the ratio
+- **Clocks:** OUT is resampled (linear interpolation) by a ratio that keeps its ring at 176 frames (144 until the review of 2026-11-25 found the level's sign wrong), the ratio
   following the smoothed level (proportional, at most 2000 ppm); IN packets are 47, 48 or 49 frames to keep its ring
   at 128, on a level averaged over about 32 packets. Both levels are taken at a steady phase: the frames the other
   side made or used since its last packet or block are counted from the TSC, since 1 ms packets against 1.33 ms
@@ -2459,3 +2464,44 @@ signature (0xAA550000) at 508. The vendored R0.15a has it so (and so does the em
   driver scanning for free space past an FSInfo it does not trust. Not established: Windows may scan anyway, and
   the copies were made by Windows itself, which writes a correct sector. To check on the unit after Enaga has
   written to the card with this build.
+
+### The code review's fixes (2026-11-25)
+
+Two reviews of the code at db18911 (`build/review/findings.md`, 14 findings with probes on the emulator, and
+`analysis.md`, a second pass over the whole tree: 33 more, suspicions, drift) were fixed on `review-fixes`, the
+firmware here and the SDK, DSP library and tools on `review-sdk`, merged into it. What changed for apps and users:
+- **The data folder is the package's folder** (`/ENAGA/DATA/<folder under /ENAGA/APPS>`), as api.md and
+  getting-started always said; the code used the display name. An app whose title differs from its folder finds
+  its old data under the title's name and must move it once.
+- **Starting:** set_busy and open_menu from init() stand; an init() that fails, or a constructor or init() that
+  faults, gives back what it took (files, input, clock, LEDs) and drops the app rather than the kernel; a large
+  package no longer trips the watchdog (the loader calls `enaga_loader_progress` every 64 KiB); the boot record
+  stays STARTING for 2 s after a start from the menu (the load ran inside the pass, and an unsigned difference
+  with the pass's earlier ms made it RUNNING at once; AUTO OFF had the same underflow with pad events, which could
+  switch the unit off at a pad press).
+- **Crashes** reset the input route and the clock in the next pass; transport events queued for a stopped app are
+  dropped; the exception record is per app; `fatal("")` still shows the crash page.
+- **Settings** are saved however their page is left (F1+POWER, power-off) and read again after USB DRIVE.
+- **Files:** paths of 256 bytes are refused (one byte too many reached the request); a save renames a NAME.TMP left
+  as the only copy before reusing the name; 8 files and 8 streams fit together (`FF_FS_LOCK` 24); unaligned
+  transfers bounce 16 sectors a command (a 46-byte WAV header made a stereo recording go one sector a command,
+  below its rate); removing the card unmounts before the callbacks; a card changed while USB DRIVE is open is
+  initialised for the computer and reported changed, never mounted by FatFs under it.
+- **MIDI clock:** DIN follows MIDI IN like USB; Song Position is parsed per port and only one port's clock is
+  followed at a time; a pause clears the last clock time (the 11.5 s counter wrapped into one bogus interval);
+  more than 32 ticks to catch up are given over the next blocks instead of lost to the app; after CONTINUE the
+  internal clock waits for FB to leave the DIN queue, since F8 jumps it. A SysEx whose F7 fills a chunk ends there.
+- **USB:** the OUT ring's level added where it subtracted (its saw-tooth doubled); the target went 144 -> 176 frames
+  to keep the old margin at 1000 ppm, which the test showed. The debug port answers a 32-word PEEK whole and keeps
+  four waiting requests. `timer_ms` masks interrupts itself.
+- **SDK, DSP and tools** (review-sdk's six commits): sample loops at any rate (ping-pong by modulo, forward loops'
+  cubic taps wrap), `Smoothed` settles, Inf/NaN in float WAVs read as 0 and NaN out of an app is silence, `wav`
+  parse bounds and an 8-192 kHz Loader, Settings out-of-range numbers and no save after a failed load, ui cursor
+  and INT_MIN edges, FileBrowser roots with a slash, the stand-in host's midi_send and clock, `usb_debug.py`'s
+  log reading and argument checks, the DSP library rebuilt on a new compiler, objects named by their whole file name.
+- **Tests:** `test_lifecycle.py` (11 cases, each failing on main and passing here), plus cases in test_midi,
+  test_usb_debug, test_dsp, test_ui, test_host_test, test_sampler and test_sdk.
+Left open, in Open items: the SCSI stall question (on usb-drive-speed), the SPLOOP flag, and the smaller items
+listed there. Not taken up: the reviews' suspicions without a trigger (C2-C14), and the release-process notes
+beyond what Open items records.
+
