@@ -162,6 +162,7 @@ output, or play into it as an input), a script can check an app's MIDI and sound
 | Line | Shows |
 |---|---|
 | `VERSION` | Enaga's version |
+| `BUILD` | the commit the firmware was built from (`d0eb6c1`), with `+` if it had changes not yet committed, or `unknown` |
 | `UPTIME_MS` | milliseconds since power-on |
 | `APP`, `APP_STATUS` | the app running, and whether it runs, failed to load, or was stopped |
 | `CRASH`, `CRASH_PC` | why the last app stopped, and where, if it crashed |

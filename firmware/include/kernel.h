@@ -6,6 +6,9 @@
 #include <enaga/abi.h>
 
 #define ENAGA_VERSION "0.3.0"
+#ifndef ENAGA_BUILD
+#define ENAGA_BUILD "unknown"                /* the commit it was built from (firmware/build.py build_id) */
+#endif
 
 /* start.s */
 extern char vectors[];

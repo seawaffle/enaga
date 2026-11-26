@@ -2751,3 +2751,14 @@ block functions is 2-12 times slower than cl6x's (tools/bench.py), and most deve
   source edited, the synth's is byte-identical to the GCC build. Both need cl6x on the machine running the tests;
   CI runs no tests.
 
+### The build in the firmware (2026-11-26)
+
+Which build is on a unit was the person's word: the version string is the same for every build, and the image's
+hash is known only on the computer. `firmware/build.py` now compiles in `ENAGA_BUILD`, the commit's short hash with
+`+` when anything compiled into the firmware (`firmware/`, `loader/`, `include/`) differs from the commit, tracked
+or untracked, or `unknown` outside a git checkout. It shows as the debug port's `BUILD` status line (after
+`VERSION`), the boot log's first line (`ENAGA 0.3.0 d0eb6c1`) and the STATUS page's header (`0.3.0 d0eb6c1`, in
+place of `ENAGA 0.3.0`). A `+` build says only "this commit and changes", so unit builds still note the image's
+hash. A release is built from its tag's clean checkout and carries that commit; a local build of the same commit
+gives the same bytes, so the check of a release against a local build still holds. HELLO's answer is unchanged.
+Tests: test_usb_debug's status (`BUILD` equals build.py's `build_id`), test_e1's boot logs.
