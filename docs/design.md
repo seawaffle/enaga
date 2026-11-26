@@ -681,7 +681,10 @@ Its card is staged by `tools/unit_card.py`.
     needs no login: https://dr-download.ti.com/software-development/ide-configuration-compiler-or-debugger/
     MD-vqU2jj6ibH/8.5.0.LTS/ti_cgt_c6000_8.5.0.LTS_linux-x64_installer.bin answered a plain curl with HTTP 200 and
     43,933,713 bytes (2026-11-26); TI's page gives its SHA-256 as 772511aa...b37c, and the installer has an
-    unattended mode (`--mode unattended --prefix DIR`). Not yet run from CI.
+    unattended mode (`--mode unattended --prefix DIR`). Tried on this machine the same day: downloaded, the
+    checksum matched, the unattended install took 2 s with no prompt, and the library built with that copy was
+    byte-identical to the local build's once debug info was stripped (all 8 objects). Stripped, the objects hold
+    no paths. Not yet run on GitHub's runners.
   - GCC 13's tic6x back end pipelines no loop with a float multiply (its SPLOOP pass gives up on them: "We don't
     handle floating point multiplies yet"). Its selective scheduler crashes the compiler, and the list scheduler
     does not overlap the unrolled copies, so each value waits for its whole chain. Inline math in an app's own
