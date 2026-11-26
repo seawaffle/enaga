@@ -1,4 +1,4 @@
-// Loader check app: starts a load and cancels it, then loads /SAMPLES/0.WAV to 8.WAV one after another with
+// Loader check app: starts a load and cancels it, then loads /SAMPLES/0.WAV to 9.WAV one after another with
 // enaga::wav::Loader (7.WAV keeping its rate), logs each result and some frames for tests/test_sampler.py, then
 // plays 0.WAV through a SamplePlayer.
 // Log lines: "L<n> <result> <channels> <rate>", then "V<n> <frame> <channel> <value x 1e6>" for each frame asked.
@@ -8,7 +8,7 @@
 
 namespace {
 
-constexpr int kFiles = 9;
+constexpr int kFiles = 10;
 constexpr uint32_t kFrames[] = {0, 1000, 5000};
 
 void append(char *&out, const char *text) { while (*text) *out++ = *text++; }

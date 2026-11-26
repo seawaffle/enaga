@@ -6,6 +6,7 @@
 #include <enaga/music.hpp>
 #include <enaga/queue.hpp>
 #include <enaga/sequencer.hpp>
+#include <enaga/wav.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -923,6 +924,13 @@ static void samples() {
     int16_t out16[4];
     enaga_float_to_int16(back, out16, 4);
     check(out16[0] == 1 && out16[1] == -32768 && out16[2] == 32767 && out16[3] == -1, "float_to_int16", out16[0], 1);
+    {
+        // wav::parse: a chunk size that puts the next chunk at 2^32 - 8 must not wrap back into the buffer.
+        uint8_t file[20] = {'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'A', 'V', 'E', 'J', 'U', 'N', 'K'};
+        enaga::wav::detail::put32(file + 16, 0xFFFFFFE4u);
+        enaga::wav::Format format;
+        check(!enaga::wav::parse(file, sizeof file, format), "wav parse: a chunk size that wraps", 0, 0);
+    }
     const int16_t pcm[2] = {-32768, 16384};
     enaga_int16_to_float(pcm, f, 2, 0.5f);
     check(f[0] == -0.5f && f[1] == 0.25f, "int16_to_float with gain", f[1], 0.25);

@@ -483,8 +483,9 @@ Recording a WAV: `create(path, 44, ...)`, write samples, then `wav::header(head,
 | `load<&T::done>(path, sample, object, to_output_rate = true)`, `load(path, sample, done, user, ...)` | starts loading; `sample`'s old frames are released at once. Returns `ENAGA_FILE_OK`, or an error at once with no callback (`ENAGA_FILE_BUSY` while a load is under way, `ENAGA_FILE_NOT_FOUND`, ...). `done(int32_t result)` runs later: the frames loaded, or a negative error, the sample then empty |
 | `cancel()` | stops a load, with no callback; `busy()` until the file service hands back the buffer (a main-loop pass or so) |
 | `busy()`, `progress()` | whether a load is under way; how far, 0 to 1 |
-| `not_wav` (-64), `no_memory` (-65) (enum `LoadError`) | its errors besides `ENAGA_FILE_*`: not a WAV it can read, or no room on the heap for the sample (the app goes on) |
+| `not_wav` (-64), `no_memory` (-65) (enum `LoadError`) | its errors besides `ENAGA_FILE_*`: not a WAV it can read (a sample rate outside `min_rate` - `max_rate` included), or no room on the heap for the sample (the app goes on) |
 | `chunk_bytes` | 16,384, read and converted per step |
+| `min_rate`, `max_rate` | 8,000 and 192,000: the sample rates it takes (a lower one would make each step's conversion too long) |
 
 ```cpp
 enaga::wav::Loader loader_;
@@ -1376,7 +1377,8 @@ so return it from `main`. Each check returns whether it passed.
 - `clear_host()` forgets both.
 - `set_ms(ms)` sets what `enaga::ms()` returns.
 - `run_clock(bpm, from_tick)` runs the clock, and each `enaga::clock::ticks` call takes the next block's ticks (call
-  it once per block, as `audio()` does). `stop_clock()` stops it.
+  it once per block, as `audio()` does). `stop_clock()` stops it. The app's own `enaga::clock::start`, `stop`,
+  `continue_`, `locate` and `set_tempo` work as with the INTERNAL source.
 - `enaga::fatal` prints the reason and ends the test with exit status 3.
 - The file and stream services answer `ENAGA_FILE_NO_CARD`.
 - The lights, speaker, input and menu do nothing.
