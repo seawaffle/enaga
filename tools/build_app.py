@@ -77,10 +77,11 @@ def compile_ti(src, obj, cwd):
     return obj
 
 
-def compile_source(src, out):
+def compile_source(src, out, name=None):
+    """src compiled to out/<name, the source's file name by default>.o: foo.c and foo_c.cpp do not meet."""
+    obj = out / f"{name or src.name}.o"
     if src.name.endswith(".ti.c") and paths.ti_present():
-        return compile_ti(src, out / (src.name[:-len(".ti.c")] + "_ti.o"), out)
-    obj = out / (src.stem + ("_c" if src.suffix == ".c" else "") + ".o")
+        return compile_ti(src, obj, out)
     compiler, flags = (GCC, CFLAGS) if src.suffix == ".c" else (GXX, CXXFLAGS)
     run([compiler, *flags, "-c", "-o", obj, src], out)
     return obj
@@ -88,14 +89,17 @@ def compile_source(src, out):
 
 def dsp_library():
     """The DSP library's block functions (runtime/dsp/*.c, include/enaga/dsp.h) and libm (runtime/libm.c) as an
-    archive: built by cl6x when it is installed, by GCC otherwise, and again only when a source, a header or this
-    script changes."""
+    archive: built by cl6x when it is installed, by GCC otherwise, and again only when a source, a header, this
+    script or the compiler changes."""
     ti = paths.ti_present()
     lib = paths.BUILD / "dsplib" / ("cl6x" if ti else "gcc")
-    archive = lib / "libenaga_dsp.a"
+    archive, stamp = lib / "libenaga_dsp.a", lib / "compiler.txt"
     sources = [*sorted((RUNTIME / "dsp").glob("*.c")), RUNTIME / "libm.c"]
     inputs = [*sources, INCLUDE / "enaga" / "dsp.h", *(INCLUDE / "enaga" / "dsp").glob("*.h"), Path(__file__)]
-    if archive.exists() and archive.stat().st_mtime >= max(p.stat().st_mtime for p in inputs):
+    compiler = (paths.TI_CGT / "bin" / "cl6x" if ti else GCC).resolve()
+    identity = f"{compiler} {compiler.stat().st_size} {compiler.stat().st_mtime_ns}\n"   # another version, another key
+    if (archive.exists() and archive.stat().st_mtime >= max(p.stat().st_mtime for p in inputs)
+            and stamp.exists() and stamp.read_text() == identity):
         return archive
     lib.mkdir(parents=True, exist_ok=True)
     objs = []
@@ -108,6 +112,7 @@ def dsp_library():
         objs.append(obj)
     archive.unlink(missing_ok=True)
     run([AR, "rcs", archive, *objs], lib)
+    stamp.write_text(identity)
     return archive
 
 
@@ -133,7 +138,7 @@ def build(app_dir, out, name=None, app_version=1):
         raise ValueError(f"no .cpp or .c sources in {app_dir}")
     out.mkdir(parents=True, exist_ok=True)
     objs = [compile_source(src, out) for src in sources]
-    objs.append(compile_source(RUNTIME / "runtime.cpp", out))
+    objs.append(compile_source(RUNTIME / "runtime.cpp", out, "enaga.runtime.cpp"))   # not an app's runtime.cpp
     libgcc = paths.libgcc()
     elf = out / "app.elf"
     run([LD, "-EL", "-T", RUNTIME / "app.ld", "-nostdlib", "--gc-sections", "-u", "enaga_entry",

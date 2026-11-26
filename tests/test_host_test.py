@@ -116,6 +116,9 @@ class HostTest(unittest.TestCase):
             self.assertTrue((app / "build" / "host-test" / "out.wav").is_file())
             r = self.run_tool(app, "passing")                     # one test by name
             self.assertEqual((r.returncode, r.stdout.count("== ")), (0, 1), r.stdout + r.stderr)
+            r = self.run_tool(app, "passing", "pasing")           # a mistyped name, beside a right one
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("no test named pasing", r.stderr)
 
     def test_a_test_that_does_not_compile(self):
         with tempfile.TemporaryDirectory() as d:

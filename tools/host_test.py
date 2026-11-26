@@ -49,10 +49,12 @@ def build(app, out, sanitize=False, only=None):
     app, out = Path(app).resolve(), Path(out)
     tests = sorted((app / "tests").glob("*.cpp"))
     if only:
+        unknown = sorted(set(only) - {t.stem for t in tests})
+        if unknown:
+            raise ValueError(f"no test named {', '.join(unknown)} in {app / 'tests'}")
         tests = [t for t in tests if t.stem in only]
     if not tests:
-        raise ValueError(f"no tests in {app / 'tests'}" + (f" named {', '.join(only)}" if only else "") +
-                         " (each tests/*.cpp is a program with its own main)")
+        raise ValueError(f"no tests in {app / 'tests'} (each tests/*.cpp is a program with its own main)")
     cc, cxx = compilers()
     common = flags(app, out, sanitize)
     objects = out / "obj"
