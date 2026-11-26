@@ -6,7 +6,7 @@
 //     int32_t got = enaga::files::read_all("/ENAGA/DATA/SYNTH/patch 1.syn", &patch, sizeof patch);
 //
 //     // Large ones in the background: done() runs in the main context when the load has finished.
-//     enaga::files::load("/SAMPLES/Kick.raw", buffer, bytes, this, &MyApp::loaded);   // void loaded(int32_t)
+//     enaga::files::load<&MyApp::loaded>("/SAMPLES/Kick.raw", buffer, bytes, this);   // void loaded(int32_t)
 //
 //     // Longer than memory, or recorded: a Stream (below), read or written in audio(). <enaga/wav.hpp> reads and
 //     // writes WAV headers.

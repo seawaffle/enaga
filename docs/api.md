@@ -839,7 +839,8 @@ canvas.text(0, 20, line);
 - `hex(value, digits)`, upper case.
 - `note(note)`: a MIDI note's name with middle C (60) as `C4`; 61 is `C#4` and 0 `C-1`.
 - `shown(text, max)`: text from outside the app (a file name, say) as the font can draw it: lower case raised and
-  anything else the font lacks shown as `-`, at most `max` characters. `kick_01.wav` becomes `KICK-01.WAV`.
+  anything else the font lacks shown as `-`, at most `max` characters. `kick_01é.wav` becomes `KICK_01--.WAV` (é is
+  two bytes).
 - `add_if_fits(part)` adds all of `part` or none of it, and says which: for a status line made of optional
   pieces, most important first.
 - `column(at)` pads with spaces up to character column `at`, to line values up.

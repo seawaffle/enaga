@@ -11,7 +11,7 @@
 //         Engine engine;
 //         Buffer out = render(48000, [&](float *left, float *right, int n) { engine.render(left, right, n); });
 //         t.below("never clips", peak(out), 1.0);
-//         t.near("plays at 440 Hz", frequency(out), 440, 1);
+//         t.near("plays at 440 Hz", frequency(channel(out, 0)), 440, 1);   // render gives interleaved stereo
 //         write_wav(output("engine.wav"), out);                    // to listen to: the test's build folder
 //         return t.finish();
 //     }
