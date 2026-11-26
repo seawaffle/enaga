@@ -610,7 +610,9 @@ Its card is staged by `tools/unit_card.py`.
   raises its own interrupt, the trap the IN side fell into). Measured 2026-11-25 (log, "USB DRIVE's time"):
   the packets, both ways; double buffering is on branch usb-drive-speed. On the unit (2026-11-26, log "Which side
   waits"): 0.20 MiB/s writing, 0.24 reading, and the computer is the slower side both ways (one packet per two
-  microframes, where full speed carries about four times that); why the host polls so sparsely is open (log).
+  microframes). By port (log, "By port and with audio off"): on the CPU's controller with the unit's audio off,
+  0.67 MiB/s writing, 0.92 reading; the front port's chipset controller was the slowness. Left: overlapping the SD
+  card with the USB transfer (writing could reach about 0.9 MiB/s), and high speed (step 3).
   - Earlier plan: the user started a Claude session on the Windows PC with a read-only brief: raw sectors 0-63 and
     the partition start over USB vs a card reader, a USBPcap capture of drive mount / playback / recording, and
     scripted play / record tests. Debug from its evidence. Also ask whether STATUS showed a crash row.
@@ -2485,6 +2487,30 @@ per bulk endpoint, each packet's time from load to its TX interrupt, and the tim
   comparison: they run at high speed or faster. To try: a port on the other controller, the unit's audio devices
   disabled in Windows, and a USB 2.0 hub. Double buffering stays: it removed the NAKs and is the 1.3-1.7 times
   already measured.
+- **By port and with audio off** (2026-11-26, same build and PC; `~/smpltrek-debug/drive-waits/
+  FINDINGS-drive-ports.md`). Mostly the controller, partly the audio streams:
+
+  | Port, controller | Audio | Write | Read | Read, per IN packet | Mount |
+  |---|---|---|---|---|---|
+  | rear, CPU's xHCI (AMD 15B7) | off | 29.7 s, 0.67 MiB/s | 21.7 s, 0.92 MiB/s | 0.057 ms | 8.2-8.7 s |
+  | rear, CPU's xHCI (AMD 15B7) | on | 33.0 s, 0.61 MiB/s | 25.7 s, 0.78 MiB/s | 0.069 ms | 10.1-10.3 s |
+  | front, chipset's xHCI (AMD 43FC) | off | 64.9 s, 0.31 MiB/s | 57.8 s, 0.35 MiB/s | 0.166 ms | 22.0 s |
+  | front, chipset's xHCI (AMD 43FC) | on | 99.5 s, 0.20 MiB/s | 83.3 s, 0.24 MiB/s | 0.244 ms | 31.6 s |
+
+  On the CPU's controller with audio off, reading takes 17.6 packets a millisecond, near full speed's 19 for
+  64-byte bulk (1.16 MiB/s), and every TX interrupt still found a packet queued: the unit keeps up at full speed.
+  The audio streams (392 bytes of each frame reserved) cost 15 % there and 30 % on the chipset's controller,
+  which schedules full-speed bulk three to four times more sparsely. All read-backs matched.
+  - Against the 700 KiB/s target, on a good port: reading 943 KiB/s with audio off, 796 on; writing 689 and 621.
+    What is left is the unit's own: the SD card's time is in series with the USB transfer, 25 % of a write
+    (7.4 s of 29.7) and 11 % of a read. Overlapping them (the next 8 KiB from USB while the card writes the last)
+    would bring writing to about 0.9 MiB/s; not done.
+  - What a user can do: use a port on the CPU's controller (on this PC the rear ones), and disable the unit's
+    audio in Windows while copying if it is not wanted.
+  - `DRV R RANGE` after the last eject came again on the front port (twice in two sessions there, never on the
+    rear): one read after STOP UNIT, refused. Harmless. Once in set-up B, Explorer's first Eject did nothing (D:
+    stayed ready, a few sectors read and written meanwhile); the second, 17 s later, worked: Windows still using
+    the volume, most likely, since the unit saw no STOP.
   - After the last eject (a file deleted, then Eject), `USB_DRIVE ERRORS` went to 1 with `DRV R RANGE`: Windows
     read once after its STOP UNIT, which `drive_range` refuses (the drive is no longer ready). The writes before
     the STOP had all landed; nothing was lost. Only once in three ejects.
