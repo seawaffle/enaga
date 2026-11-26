@@ -1,6 +1,7 @@
 """enaga::wav::Loader and enaga::dsp::SamplePlayer on the emulator: tests/apps/sampler loads WAV files of every
 format from the card (16-, 24- and 32-bit, 8-bit unsigned, float; mono and stereo; 22.05, 44.1, 48 and 96 kHz,
-converted to 48 kHz or kept; a long chunk before the data; a header still saying 0 bytes; not a WAV; missing) and
+converted to 48 kHz or kept; a long chunk before the data; a header still saying 0 bytes; not a WAV; missing; a
+rate below what the Loader takes) and
 logs what it got, then plays one; the test made the files, so it knows every frame.
 
     ENAGA_EMULATOR=/path/to/emulator python3 -B -m unittest tests.test_sampler
@@ -92,6 +93,8 @@ class Sampler(unittest.TestCase):
             (WORK / f"{n}.wav").write_bytes(data)
             files[f"/SAMPLES/{n}.WAV"] = WORK / f"{n}.wav"
         (WORK / "4.wav").write_bytes(bytes(range(256)) * 4)                    # not a WAV
+        (WORK / "9.wav").write_bytes(make_wav(1, 4000, 16, 0.25)[0])           # below Loader::min_rate
+        files["/SAMPLES/9.WAV"] = WORK / "9.wav"
         files["/SAMPLES/4.WAV"] = WORK / "4.wav"                               # and no 5.WAV at all
         with Emulation(HERE / "apps" / "sampler", card_files=files, card_mib=8) as emu:
             cls.log = []
@@ -145,6 +148,7 @@ class Sampler(unittest.TestCase):
     def test_errors(self):
         self.assertEqual(self.lines(4)[0][0], -64)              # wav::not_wav, through the callback
         self.assertEqual(self.lines(5)[0][0], -2)               # ENAGA_FILE_NOT_FOUND, from load() at once
+        self.assertEqual(self.lines(9)[0][0], -64)              # 4 kHz: not_wav
 
     def test_the_player_plays_it_at_1_khz(self):
         crossings = [i for i in range(1, len(self.left)) if self.left[i - 1] < 0 <= self.left[i]]

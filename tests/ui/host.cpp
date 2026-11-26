@@ -1,7 +1,9 @@
 // The UI toolkit (include/enaga/ui.hpp) on the host, with a stand-in for Enaga's host table that records the text
 // each widget draws. Run by tests/test_ui.py; prints one line per failed check and exits non-zero if any failed.
+#include <enaga/settings.hpp>
 #include <enaga/ui.hpp>
 
+#include <climits>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -37,9 +39,28 @@ void deliver(size_t request, std::vector<std::pair<const char *, bool>> entries,
     l.done(l.user, result < 0 && result != -1 ? result : int32_t(entries.size()));
 }
 
+// One whole file for Settings: read_all and save on a string.
+std::string g_file;
+bool g_file_there = false;
+int32_t g_saves = 0;
+int32_t host_read_all(const char *, void *buffer, uint32_t max) {
+    if (!g_file_there) return ENAGA_FILE_NOT_FOUND;
+    if (g_file.size() > max) return ENAGA_FILE_TOO_BIG;
+    std::memcpy(buffer, g_file.data(), g_file.size());
+    return int32_t(g_file.size());
+}
+int32_t host_save(const char *, const void *data, uint32_t bytes) {
+    g_file.assign(static_cast<const char *>(data), bytes);
+    g_file_there = true;
+    g_saves++;
+    return ENAGA_FILE_OK;
+}
+
 enaga_host_t g_host = [] {
     enaga_host_t h{};
     h.text = host_text; h.ms = host_ms; h.file_list = host_file_list;
+    h.file_read_all = host_read_all; h.file_save = host_save;
+    h.file_data_folder = [] { return "/ENAGA/DATA/TEST"; };
     return h;
 }();
 uint8_t g_pixels[ENAGA_SCREEN_W * ENAGA_SCREEN_H];
@@ -103,6 +124,8 @@ static void test_list() {
     check(empty.key(ENAGA_KEY_OK, true) == Action::none, "list: OK on an empty list does nothing");
     draw_list(empty);
     check(find("EMPTY") != nullptr, "list: an empty list says so");
+    many.set_count(0);
+    check(many.cursor() == 0 && empty.cursor() == 0, "list: the cursor is 0 with no entries");
 }
 
 static void cents(int v, char *out) { std::snprintf(out, 13, "%+d CT", v); }
@@ -203,6 +226,8 @@ static void test_line() {
     check(same(Line().number(12345, 3), "12345"), "line: a wider number is not cut to the width");
     check(same(Line().fixed(-5, 2), "-0.05") && same(Line().fixed(1005, 1), "100.5"), "line: fixed point");
     check(same(Line().fixed(3, 0), "3"), "line: fixed point with no decimals");
+    check(same(Line().fixed(INT_MIN, 0), "-2147483648") && same(Line().fixed(INT_MIN, 3), "-2147483.648")
+          && same(Line().number(INT_MIN), "-2147483648"), "line: the most negative int");
     check(same(Line().hex(0x3C, 2).add(' ').hex(0xBEEF, 4), "3C BEEF"), "line: hex");
     check(same(Line().note(60), "C4") && same(Line().note(61), "C#4") && same(Line().note(0), "C-1")
           && same(Line().note(127), "G9") && same(Line().note(69), "A4"), "line: note names");
@@ -318,6 +343,9 @@ static void test_grid() {
     check(a1 && a1->grey == 10 && px(2, 13) == 2 && a2->x == 34, "grid: others dim; cells a quarter wide");
     grid.clear_lights();
     check(!grid.lit(2), "grid: clear_lights");
+    Grid none;
+    none.set_items(names, 0, 4);
+    check(none.cursor() == 0, "grid: the cursor is 0 with no cells");
 
     Grid many;                                            // scrolling: 16 rows of 4 in 3 visible rows
     many.set_items(64, 4, [](int i, char *out, int size, void *) { std::snprintf(out, size, "%02d", i); }, nullptr);
@@ -392,6 +420,25 @@ static void test_param_tabs_and_columns() {
     check(row(25) == "ATTAC" && row(38) == "10MS", "columns: a short last group");
 }
 
+// Settings (settings.hpp), on the one-file stand-in above.
+static void test_settings() {
+    enaga::Settings settings;
+    g_file = "BIG=2147483647\nSMALL=-2147483648\nOVER=2147483648\nUNDER=-2147483649\nHUGE=99999999999\n";
+    g_file_there = true;
+    check(settings.load() == ENAGA_FILE_OK, "settings: load");
+    check(settings.get("BIG", 0) == INT32_MAX && settings.get("SMALL", 0) == INT32_MIN, "settings: int32_t's ends");
+    check(settings.get("OVER", 7) == 7 && settings.get("UNDER", 7) == 7 && settings.get("HUGE", 7) == 7,
+          "settings: numbers out of range give the fallback");
+    g_file = std::string(3000, '#');                      // more than load() can read
+    g_saves = 0;
+    check(settings.load() == ENAGA_FILE_TOO_BIG, "settings: a file too big");
+    check(settings.set("TEMPO", 120) && settings.save() == ENAGA_FILE_TOO_BIG && g_saves == 0
+          && g_file.size() == 3000, "settings: and a save does not replace it");
+    g_file_there = false;
+    check(settings.load() == ENAGA_FILE_OK && settings.set("TEMPO", 120) && settings.save() == ENAGA_FILE_OK
+          && g_file == "TEMPO=120\n", "settings: saving again once a load succeeds");
+}
+
 static void test_file_browser() {
     g_listings.clear();
     static FileBrowser browser;                           // large: not on the stack
@@ -448,6 +495,17 @@ static void test_file_browser() {
     browser.open("/");
     deliver(6, {{longname.c_str(), false}, {"ok", false}});
     check(browser.count() == 1, "files: a name too long to keep is left out");
+    browser.open("/SAMPLES/", ".wav");                    // a trailing slash: still its own root
+    check(std::string(browser.folder()) == "/SAMPLES", "files: a root with a trailing slash");
+    deliver(7, {{"Kicks", true}});
+    browser.key(ENAGA_KEY_OK, true);
+    check(browser.key(ENAGA_KEY_CLR, true) == Action::moved && browser.key(ENAGA_KEY_CLR, true) == Action::back,
+          "files: and CLR back to it gives back");
+    deliver(8, {});
+    deliver(9, {{"A FOLDER NAMED AT LENGTH", true}, {"A FILE NAMED AT LENGTH.WAV", false}});
+    blank();
+    browser.draw(canvas);
+    check(find("A FOLDER NAMED AT/") && find("A FILE NAMED AT LE"), "files: a long folder name keeps its '/'");
 }
 
 static void test_param_steps_and_speed() {
@@ -590,6 +648,7 @@ int main() {
     test_pad_map();
     test_param_tabs_and_columns();
     test_file_browser();
+    test_settings();
     test_frame_and_notice();
     test_bars_and_meters();
     test_list();

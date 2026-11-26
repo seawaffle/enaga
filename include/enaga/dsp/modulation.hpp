@@ -103,7 +103,10 @@ public:
     void render(float *out, int n) { enaga_smoother_render(&state_, out, n); }   // n steps (a block function)
     // Moves on a whole block (init's `block` steps) at once, exactly as that many next() calls would but for
     // rounding, and returns the value: for settings recomputed once per block.
-    float advance() { return state_.value = state_.target + (state_.value - state_.target) * block_factor_; }
+    float advance() {
+        float v = state_.target + (state_.value - state_.target) * block_factor_;
+        return state_.value = v == state_.value ? state_.target : v;
+    }
     float value() const { return state_.value; }
     float target() const { return state_.target; }
     bool settled(float tolerance = 1e-5f) const { return abs(state_.value - state_.target) <= tolerance; }

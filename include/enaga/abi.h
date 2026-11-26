@@ -142,7 +142,7 @@ typedef struct enaga_clock_tick {
 /* MIDI ports, as bits: a message's source (ENAGA_EVENT_MIDI's id), and where midi_send sends. */
 enum enaga_midi_port {
     ENAGA_MIDI_DIN = 1,                     /* the MIDI IN / OUT jacks */
-    ENAGA_MIDI_USB = 2                      /* USB MIDI (not yet: E4 step 5) */
+    ENAGA_MIDI_USB = 2                      /* USB MIDI, while a computer has the unit configured */
 };
 /* midi_sysex flags */
 enum enaga_sysex_flags {
@@ -305,10 +305,10 @@ typedef struct enaga_host {
      * takes a few milliseconds (codec writes). Reset to LINE_STEREO, NORMAL when the app stops. */
     int32_t (*input)(uint32_t source, uint32_t level);
     /* MIDI. midi_send queues complete messages (one or several, SysEx included, each starting with its status
-     * byte; no running status) for `ports` (enaga_midi_port bits; 0 = where the user's settings send, now the DIN
-     * jack): 0 when queued whole, -1 when the queue lacks room (nothing is queued, so a
-     * message is never cut). A single real-time byte (F8-FF) goes ahead of anything queued. Main or audio
-     * context. midi_channel: the user's MIDI CH setting, 0-15, for an app to listen and send on. */
+     * byte; no running status) for `ports` (enaga_midi_port bits; 0 = where the user's MIDI OUT setting sends):
+     * 0 when queued whole, -1 when a queue lacks room (nothing is queued, so a message is never cut) or the data
+     * does not start with a status byte. A single real-time byte (F8-FF) goes ahead of anything queued. Main or
+     * audio context. midi_channel: the user's MIDI CH setting, 0-15, for an app to listen and send on. */
     int32_t (*midi_send)(uint32_t ports, const uint8_t *data, uint32_t bytes);
     uint32_t (*midi_channel)(void);
     /* The clock. clock_control (enaga_clock_command): 0, or -1 when the source is not INTERNAL or the value is out

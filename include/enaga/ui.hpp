@@ -55,7 +55,7 @@ inline void copy(char *out, int size, const char *s) {
 inline void number(char *out, int value) {   // decimal, with a minus sign
     char digits[12];
     int n = 0, k = 0;
-    unsigned v = value < 0 ? unsigned(-value) : unsigned(value);
+    unsigned v = value < 0 ? 0u - unsigned(value) : unsigned(value);
     do { digits[n++] = char('0' + v % 10); v /= 10; } while (v);
     if (value < 0) out[k++] = '-';
     while (n) out[k++] = digits[--n];
@@ -116,7 +116,7 @@ public:
         for (int i = 0; i < decimals; i++) scale *= 10;
         unsigned v = value < 0 ? 0u - unsigned(value) : unsigned(value);
         if (value < 0) add('-');
-        number(int(v / scale));
+        whole(v / scale);
         if (decimals > 0) { add('.'); number(int(v % scale), decimals, '0'); }
         return *this;
     }
@@ -160,6 +160,13 @@ public:
     int room() const { return capacity - n_; }
 
 private:
+    Line &whole(unsigned v) {                         // the digits alone
+        char digits[10];
+        int k = 0;
+        do { digits[k++] = char('0' + v % 10); v /= 10; } while (v);
+        while (k) add(digits[--k]);
+        return *this;
+    }
     char text_[capacity + 1] = {};
     int n_ = 0;
 };
@@ -477,7 +484,7 @@ public:
 
     int count() const { return count_; }
     int cursor() const { return cursor_; }
-    void select(int index) { cursor_ = index >= count_ ? count_ - 1 : index < 0 ? 0 : index; }
+    void select(int index) { index = index >= count_ ? count_ - 1 : index; cursor_ = index < 0 ? 0 : index; }
 
     Action key(int key, bool down) {
         if (!down) return Action::none;
@@ -550,7 +557,7 @@ public:
     int count() const { return count_; }
     int columns() const { return columns_; }
     int cursor() const { return cursor_; }
-    void select(int cell) { cursor_ = cell >= count_ ? count_ - 1 : cell < 0 ? 0 : cell; }
+    void select(int cell) { cell = cell >= count_ ? count_ - 1 : cell; cursor_ = cell < 0 ? 0 : cell; }
     void light(int cell, bool on) {
         if (cell < 0 || cell >= max_cells) return;
         uint64_t bit = uint64_t(1) << cell;
@@ -1008,8 +1015,9 @@ public:
     // Starts at `folder` ("/SAMPLES"), which is also as far up as CLR goes.
     void open(const char *folder, const char *extension = nullptr) {
         detail::copy(root_, path_bytes, folder);
+        for (int n = detail::length(root_); n > 1 && root_[n - 1] == '/';) root_[--n] = 0;   // "/SAMPLES/" too
         extension_ = extension;
-        enter(folder);
+        enter(root_);
     }
 
     bool loading() const { return pending_ > 0; }
@@ -1122,8 +1130,10 @@ private:
     static void label(int index, char *out, int size, void *user) {
         const FileBrowser *self = static_cast<const FileBrowser *>(user);
         Line text;
-        text.shown(self->name(index));
-        if (self->is_folder(index)) text.add('/');
+        bool folder = self->is_folder(index);
+        int room = size - 1 < Line::capacity ? size - 1 : Line::capacity;
+        text.shown(self->name(index), folder ? room - 1 : room);   // a long folder's name keeps its '/'
+        if (folder) text.add('/');
         detail::copy(out, size, text);
     }
 

@@ -242,6 +242,7 @@ typedef struct {
 
 /* The floats of memory enaga_stereo_delay_init needs (zeroed) for delays up to max_seconds. */
 uint32_t enaga_stereo_delay_memory(float max_seconds, float rate);
+/* The time starts at 0.25 s, or max_seconds if that is shorter. */
 void enaga_stereo_delay_init(enaga_stereo_delay *s, float *memory, float max_seconds, float rate);
 /* seconds; feedback 0-0.95; tone 0 (dark) to 1 (bright); ping_pong crosses the feedback. The time glides there. */
 void enaga_stereo_delay_set(enaga_stereo_delay *s, float seconds, float feedback, float tone, int ping_pong);
@@ -281,7 +282,8 @@ typedef struct {
 /* The floats of memory enaga_chorus_init needs (zeroed) at this sample rate. */
 uint32_t enaga_chorus_memory(float rate);
 void enaga_chorus_init(enaga_chorus *c, float *memory, float rate);
-/* sweep_hz: the sweep's rate; depth 0-1, up to +-5 ms around an 8 ms delay. */
+/* sweep_hz: the sweep's rate; depth 0-1, up to +-5 ms around an 8 ms delay (below about 22 kHz, less: the
+ * delay stays 66 samples or more). */
 void enaga_chorus_set(enaga_chorus *c, float sweep_hz, float depth);
 /* Adds mix x the chorused in_l / in_r to out_l / out_r. out may be in (in place). */
 void enaga_chorus_process(enaga_chorus *c, const float *in_l, const float *in_r, float *out_l, float *out_r, int n,
@@ -397,8 +399,12 @@ static inline float enaga_smoother_coefficient(float seconds, float rate) {
     float steps = seconds * rate;
     return steps < 1.0f ? 1.0f : 1.0f - enaga_exp(-4.60517019f * enaga_reciprocal(steps));
 }
-/* One step; returns the new value. */
-static inline float enaga_smoother_step(enaga_smoother *s) { return s->value += s->a * (s->target - s->value); }
+/* One step; returns the new value. A step too small to change the value (under half its last bit) lands on the
+ * target, so the glide ends there. */
+static inline float enaga_smoother_step(enaga_smoother *s) {
+    float v = s->value + s->a * (s->target - s->value);
+    return s->value = v == s->value ? s->target : v;
+}
 /* n steps into out: the same values as n calls of enaga_smoother_step. */
 void enaga_smoother_render(enaga_smoother *s, float *out, int n);
 
@@ -416,7 +422,8 @@ static inline int enaga_pcm_bytes(int format) { return format == ENAGA_PCM_FLOAT
 
 /* n samples of `format` from src, little-endian at any alignment (read byte by byte), every stride-th sample:
  * stride 1 for mono or for interleaved samples kept interleaved, or the channel count with src at a channel's
- * first sample to take that channel out. Floats are full scale at ±1; 8-bit WAV is unsigned. */
+ * first sample to take that channel out. Floats are full scale at ±1 (infinity and NaN read as 0); 8-bit WAV is
+ * unsigned. */
 void enaga_pcm_to_float(const void *src, int format, int stride, float *out, int n);
 /* The same into int16 (half the memory of float), rounded to nearest and saturated. */
 void enaga_pcm_to_int16(const void *src, int format, int stride, int16_t *out, int n);
@@ -474,8 +481,9 @@ enum { ENAGA_LOOP_OFF = 0, ENAGA_LOOP_FORWARD = 1, ENAGA_LOOP_PING_PONG = 2 };
 
 /* Plays a sample from `start` to `end` (frames, end excluded), forwards or in reverse, looping between
  * `loop_start` and `loop_end` once it gets there if `loop` says so. The position is 32.32 fixed point in frames,
- * read by 4-point cubic (Catmull-Rom) interpolation; frames outside the sample read as its first or last. The
- * fields may be changed between calls: `loop` set to ENAGA_LOOP_OFF lets a looping note play out to its end. */
+ * read by 4-point cubic (Catmull-Rom) interpolation; frames outside the sample read as its first or last, and in a
+ * forward loop those past the loop's ends as the frames at its other end. The fields may be changed between calls:
+ * `loop` set to ENAGA_LOOP_OFF lets a looping note play out to its end. */
 typedef struct {
     const enaga_sample *sample;              /* must outlive the playing */
     int64_t position;                        /* frames << 32 */

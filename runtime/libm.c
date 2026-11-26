@@ -9,7 +9,7 @@
  * cl6x's division needs TI's run-time library): 1 / x is enaga_reciprocal's guess refined in double.
  *
  * Only float functions: an app gets no double math (sinf, not sin), as cmath's deleted double overloads say.
- * sinf, cosf and tanf are exact to |x| < 1.6e6, past which their argument reduction loses bits.
+ * sinf, cosf and tanf reduce their argument exactly at any size (Payne and Hanek's method past 1.6e6).
  *
  * ENAGA_LIBM_HOST renames everything enaga_host_<name>, for the host test, whose own libm has the real names. */
 #include <stdint.h>

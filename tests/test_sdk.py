@@ -1,7 +1,8 @@
 """The SDK as an outside developer gets it (tools/make_sdk.py, tools/package_toolchain.py): the SDK zip unpacked
 on its own, the template copied to a folder of the developer's, and every app built with the SDK's build tool
 into the developer's folder, byte for byte as the repository builds them; the packaged (stripped) toolchain
-building the same bytes as the full one; and the template app playing a MIDI note on the emulator.
+building the same bytes as the full one; the build tool's object names and DSP library rebuilds; and the template
+app playing a MIDI note on the emulator.
 
     python3 -B -m unittest tests.test_sdk
 """
@@ -100,6 +101,32 @@ class Sdk(unittest.TestCase):
                 with self.subTest(app=app.name):
                     self.assertEqual(self.build_here(app, d / "unpacked" / "tic6x", d / "a" / app.name),
                                      self.build_here(app, paths.TOOLCHAIN, d / "b" / app.name))
+
+    def test_objects_of_like_names_and_a_new_compiler(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            app = d / "names"
+            app.mkdir()
+            (app / "app.cpp").write_text('#include <enaga/app.hpp>\nextern "C" int from_c(void);\nint from_cpp();\n'
+                                         'class A : public enaga::App {\n'
+                                         '    bool init() override { return from_c() + from_cpp() == 3; }\n};\n'
+                                         'ENAGA_APP(A)\n')
+            (app / "foo.c").write_text("int from_c(void) { return 1; }\n")          # foo.c and foo_c.cpp: two objects
+            (app / "foo_c.cpp").write_text("int from_cpp() { return 2; }\n")
+            (app / "runtime.cpp").write_text("int app_runtime = 0;\n")              # and none the runtime's
+            saved = paths.BUILD, paths.TI_CGT
+            paths.BUILD, paths.TI_CGT = d / "build", None                # GCC only: quicker
+            try:
+                self.assertGreater(build_app.build(app, d / "out")["payload_size"], 0)
+                archive = build_app.dsp_library()
+                stamp = archive.parent / "compiler.txt"
+                built = archive.stat().st_mtime_ns
+                self.assertEqual(build_app.dsp_library().stat().st_mtime_ns, built)     # nothing changed
+                stamp.write_text("another compiler\n")
+                self.assertNotEqual(build_app.dsp_library().stat().st_mtime_ns, built)  # rebuilt
+                self.assertNotEqual(stamp.read_text(), "another compiler\n")
+            finally:
+                paths.BUILD, paths.TI_CGT = saved
 
     @unittest.skipUnless(paths.emulator_present(), "needs ENAGA_EMULATOR")
     def test_template_plays_a_midi_note(self):
