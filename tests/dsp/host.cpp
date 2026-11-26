@@ -231,6 +231,13 @@ static void effects() {
     double echo = 0;
     for (int i = 9500; i < 9700; i++) echo += l[i];
     near("second echo at feedback 0.5", echo, 0.5, 0.05);
+    StereoDelay short_delay;                            // a delay shorter than the 0.25 s default starts at its max
+    short_delay.init(0.1f, kRate);
+    std::fill(l.begin(), l.end(), 0.0f);
+    for (int i = 0; i < 48000; i += 64) short_delay.process(&in[i], &in[i], &l[i], &r[i], 64, 1.0f);
+    first = 0;
+    while (first < 48000 && std::fabs(l[first]) < 0.1f) first++;
+    near("a short delay's first time (samples)", first, 4800, 2);
 
     Reverb reverb;
     reverb.init(kRate);
@@ -288,7 +295,7 @@ public:
         rate_ = sample_rate;
         left_.allocate(uint32_t(max_seconds * sample_rate) + 4);
         right_.allocate(uint32_t(max_seconds * sample_rate) + 4);
-        current_ = target_ = 0.25f * sample_rate;
+        current_ = target_ = std::min(0.25f * sample_rate, max_seconds * sample_rate);
     }
     void set(float seconds, float feedback, float tone, bool ping_pong) {
         target_ = clamp(seconds * rate_, 16.0f, float(left_.capacity() - 2));
@@ -637,8 +644,8 @@ static void building_blocks() {
         for (size_t i = 0; i < in.size(); i++) yf[i] = f2.step(f1.step(in[i], c1), c2);
         same("biquad cascade = two steps", ye, yf);
     }
-    // FIR: lengths below, at and past a chunk, against the plain sum; in place too.
-    for (int length : {1, 3, 32, 64, 65, 150}) {
+    // FIR: lengths below, at and past a chunk, against the plain sum; in place too. No taps: silence.
+    for (int length : {0, 1, 3, 32, 64, 65, 150}) {
         std::vector<float> taps(length);
         for (float &t : taps) t = noise.bipolar() / float(length);
         Fir a, d;
@@ -708,19 +715,20 @@ static void building_blocks() {
 }
 
 // Chorus, hard sync and the product mix.
+static float c_base(float rate) { return std::max(0.008f * rate, 66.0f); }   // effects.c's chorus_base
 static void synth_blocks() {
     Random noise;
     std::vector<float> in(4096);
     for (float &x : in) x = noise.bipolar();
     const int sizes[] = {64, 37, 1, 16, 100, 64, 13, 200};
-    // Chorus against a per-sample reference on DelayLine (tap_linear, then write), also in place, at two rates.
-    for (float rate : {48000.0f, 22050.0f}) {
+    // Chorus against a per-sample reference on DelayLine (tap_linear, then write), also in place, at three rates.
+    for (float rate : {48000.0f, 22050.0f, 8000.0f}) {
         Chorus a, b;
         a.init(rate);
         b.init(rate);
         a.set(1.3f, 0.8f);
         b.set(1.3f, 0.8f);
-        DelayLine rl(uint32_t(0.016f * rate) + 4), rr(uint32_t(0.016f * rate) + 4);
+        DelayLine rl(uint32_t(2 * c_base(rate)) + 4), rr(uint32_t(2 * c_base(rate)) + 4);
         const enaga_chorus &c = a.state_;
         std::vector<float> al(in.size()), ar(in.size()), bl = in, br = in, wl(in.size()), wr(in.size());
         std::vector<float> in_r(in.rbegin(), in.rend());
@@ -905,6 +913,12 @@ static void samples() {
     check(f[0] == -0.25f && f[1] == 2.0f, "float copied", f[0], -0.25);
     enaga_pcm_to_int16(fl + 1, ENAGA_PCM_FLOAT, 1, i16, 2);
     check(i16[0] == -8192 && i16[1] == 32767, "float to int16", i16[1], 32767);
+    const uint32_t odd[3] = {0x7F800000u, 0xFF800000u, 0x7FC00000u};    // +inf, -inf, NaN
+    float odd_f[3];
+    enaga_pcm_to_float(odd, ENAGA_PCM_FLOAT, 1, odd_f, 3);
+    enaga_pcm_to_int16(odd, ENAGA_PCM_FLOAT, 1, r3, 3);
+    check(odd_f[0] == 0 && odd_f[1] == 0 && odd_f[2] == 0 && r3[0] == 0 && r3[1] == 0 && r3[2] == 0,
+          "infinity and NaN in a float WAV read as silence", odd_f[2], 0);
     const float back[4] = {0.5f / 32768, -1.5f, 1.0f, -0.6f / 32768};
     int16_t out16[4];
     enaga_float_to_int16(back, out16, 4);
@@ -1168,6 +1182,40 @@ static void sample_player() {
     for (int i = 0; i < 24; i++) exact = exact && l[i] == bounce[i];
     check(exact, "ping-pong between 40 and 44", l[16], 42);
 
+    for (float rate : {3.0f, 11.0f}) {                  // steps that cross the loop's ends once or more
+        p.start(mono, 40, 0);
+        p.set_loop(SamplePlayer::ping_pong, 40, 45);    // frames 40-44: a fold every 4, a period of 8
+        p.render(l.data(), nullptr, 64, rate);
+        exact = true;
+        for (int i = 0; i < 64; i++) {
+            int u = int(rate) * i % 8;
+            exact = exact && l[i] == float(40 + (u <= 4 ? u : 8 - u));
+        }
+        check(exact, "ping-pong with a step longer than the loop", rate, 0);
+    }
+    p.start(mono, 40, 0);
+    p.set_loop(SamplePlayer::ping_pong, 40, 42);        // two frames at twice the rate: always the first
+    p.render(l.data(), nullptr, 16, 2.0f);
+    check(std::count(l.begin(), l.begin() + 16, 40.0f) == 16, "ping-pong over two frames at rate 2", l[1], 40);
+    p.start(mono, 0, 100, true);
+    p.set_loop(SamplePlayer::forward, 40, 50);
+    p.render(l.data(), nullptr, 8, 23.0f);
+    const float wrapped[] = {99, 76, 53, 40, 47, 44, 41, 48};
+    exact = true;
+    for (int i = 0; i < 8; i++) exact = exact && l[i] == wrapped[i];
+    check(exact, "a reversed forward loop with a step longer than the loop", l[4], 47);
+
+    Sample cycle;                                       // one cycle of a sine, looped: seamless at any rate
+    cycle.allocate(64, 1, 48000);
+    for (int i = 0; i < 64; i++) cycle.data()[i] = float(std::sin(2 * M_PI * i / 64));
+    p.start(cycle);
+    p.set_loop(SamplePlayer::forward, 0, 64);
+    worst = 0;
+    std::vector<float> long_block(2000);
+    p.render(long_block.data(), nullptr, 2000, 0.37f);
+    for (int i = 0; i < 2000; i++) worst = std::fmax(worst, std::fabs(long_block[i] - std::sin(2 * M_PI * 0.37 * i / 64)));
+    near("a looped cycle at rate 0.37: no glitch at the join", worst, 0, 1e-4);
+
     Sample stereo;
     stereo.allocate(8, 2, 44100);
     for (int i = 0; i < 8; i++) { stereo.data()[2 * i] = float(i); stereo.data()[2 * i + 1] = float(-i); }
@@ -1309,6 +1357,20 @@ static void sequencing() {
     near("advance = a block of steps", c.advance(), b.value(), 1e-5);
     c.jump(0.25f);
     check(c.value() == 0.25f && c.settled(), "jump", c.value(), 0.25);
+    Smoothed d, e;                                      // long glides stall short of the target without a snap
+    d.init(0.05f, 48000.0f, 0.0f);
+    e.init(0.05f, 750.0f, 0.0f, 64);
+    d.set(1.0f);
+    e.set(1.0f);
+    for (int k = 0; k < 48000 && !d.settled(); k++) d.next();
+    for (int k = 0; k < 750 && !e.settled(); k++) e.advance();
+    check(d.settled() && e.settled(), "smoothed: a glide settles", d.value(), 1);
+    for (int k = 0; k < 48000; k++) d.next();
+    check(d.value() == 1.0f, "smoothed: and lands on the target", d.value(), 1);
+    d.set(0.3f);
+    std::vector<float> glide(48000);
+    d.render(glide.data(), 48000);
+    check(d.value() == 0.3f, "smoothed: render lands on the target too", d.value(), 0.3);
 }
 
 static void dynamics() {

@@ -9,6 +9,9 @@ static uint32_t read_u32(const uint8_t *p) {
     return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
 }
 
+/* A float sample's bits, with infinities and NaN read as silence. */
+static float finite_float(uint32_t bits) { return (bits & 0x7F800000u) == 0x7F800000u ? 0.0f : enaga_bits_float(bits); }
+
 static int16_t saturate16(int32_t v) { return (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v); }
 
 static int16_t float_to_int16(float x) {
@@ -34,7 +37,7 @@ void enaga_pcm_to_float(const void *src, int format, int stride, float *restrict
         for (i = 0; i < n; i++) out[i] = (float)(int32_t)read_u32(p + i * step) * (1.0f / 2147483648.0f);
         break;
     case ENAGA_PCM_FLOAT:
-        for (i = 0; i < n; i++) out[i] = enaga_bits_float(read_u32(p + i * step));
+        for (i = 0; i < n; i++) out[i] = finite_float(read_u32(p + i * step));
         break;
     default:
         for (i = 0; i < n; i++) out[i] = 0.0f;
@@ -58,7 +61,7 @@ void enaga_pcm_to_int16(const void *src, int format, int stride, int16_t *restri
         for (i = 0; i < n; i++) out[i] = saturate16((((int32_t)read_u32(p + i * step) >> 15) + 1) >> 1);
         break;
     case ENAGA_PCM_FLOAT:
-        for (i = 0; i < n; i++) out[i] = float_to_int16(enaga_bits_float(read_u32(p + i * step)));
+        for (i = 0; i < n; i++) out[i] = float_to_int16(finite_float(read_u32(p + i * step)));
         break;
     default:
         for (i = 0; i < n; i++) out[i] = 0;
@@ -201,23 +204,33 @@ static float cubic(float xm1, float x0, float x1, float x2, float t) {
     return ((c3 * t + c2) * t + c1) * t + x0;
 }
 
-/* Moves on by step, through the loop if there is one, and stops at the start or end. */
+/* x mod m for x >= 0 and m > 0, by shift and subtract (no division). */
+static int64_t modulo(int64_t x, int64_t m) {
+    int64_t d = m;
+    while (d <= x >> 1) d <<= 1;
+    for (; d >= m; d >>= 1)
+        if (x >= d) x -= d;
+    return x;
+}
+
+/* Moves on by step, through the loop if there is one (however many times the step crosses it), and stops at the
+ * start or end. A ping-pong loop is a forward one of twice the length, folded at its last frame. */
 static void player_advance(enaga_sample_player *p, int64_t step) {
     int64_t before = p->position, at = p->direction > 0 ? before + step : before - step;
     int64_t ls = (int64_t)p->loop_start << 32, le = (int64_t)p->loop_end << 32;
     if (p->loop != ENAGA_LOOP_OFF && p->loop_end > p->loop_start) {
-        int64_t last = le - FRAME, length = le - ls;
+        int64_t last = le - FRAME, length = le - ls, u;
         if (p->loop == ENAGA_LOOP_FORWARD) {
-            if (p->direction > 0 && before < le) while (at >= le) at -= length;
-            if (p->direction < 0 && before >= ls) while (at < ls) at += length;
-        } else if (p->direction > 0 && before <= last && at > last) {
-            at = 2 * last - at;
-            if (at < ls) at = ls;
-            p->direction = -1;
-        } else if (p->direction < 0 && before >= ls && at < ls) {
-            at = 2 * ls - at;
-            if (at > last) at = last;
-            p->direction = 1;
+            if (p->direction > 0 && before < le && at >= le) at = ls + modulo(at - ls, length);
+            if (p->direction < 0 && before >= ls && at < ls) {
+                u = modulo(ls - at, length);
+                at = u ? le - u : ls;
+            }
+        } else if (p->direction > 0 ? before <= last && at > last : before >= ls && at < ls) {
+            int64_t half = last - ls;
+            u = half > 0 ? modulo(p->direction > 0 ? at - ls : ls - at, 2 * half) : 0;
+            p->direction = u <= half ? 1 : -1;
+            at = u <= half ? ls + u : ls + 2 * half - u;
         }
     }
     p->position = at;
@@ -228,15 +241,23 @@ int enaga_sample_player_render(enaga_sample_player *p, float *left, float *right
     const enaga_sample *s = p->sample;
     const float *d = s->data;
     int last = (int)s->frames - 1, stereo = s->channels == 2, i, made = 0;
+    int ls = (int)p->loop_start, le = (int)p->loop_end, forward = p->loop == ENAGA_LOOP_FORWARD && le > ls;
     int64_t step;
     uint32_t whole;
     rate = enaga_clamp(rate, 0.0f, 1048576.0f);
     whole = (uint32_t)rate;
     step = (int64_t)whole << 32 | (uint32_t)((rate - (float)whole) * 2147483648.0f) << 1;
     for (i = 0; i < n && p->active; i++) {
-        int x = (int)(p->position >> 32);
-        int a = x - 1 < 0 ? 0 : x - 1 > last ? last : x - 1, b = x < 0 ? 0 : x > last ? last : x;
-        int c = x + 1 > last ? last : x + 1 < 0 ? 0 : x + 1, e = x + 2 > last ? last : x + 2 < 0 ? 0 : x + 2;
+        int x = (int)(p->position >> 32), a = x - 1, b = x, c = x + 1, e = x + 2;
+        if (forward && x >= ls && x < le) {     /* in a forward loop the taps wrap, so its join is seamless */
+            if (a < ls) a += le - ls;
+            while (c >= le) c -= le - ls;
+            while (e >= le) e -= le - ls;
+        }
+        a = a < 0 ? 0 : a > last ? last : a;
+        b = b < 0 ? 0 : b > last ? last : b;
+        c = c < 0 ? 0 : c > last ? last : c;
+        e = e < 0 ? 0 : e > last ? last : e;
         float t = (float)((uint32_t)p->position >> 8) * (1.0f / 16777216.0f);
         if (stereo) {
             left[i] = cubic(d[2 * a], d[2 * b], d[2 * c], d[2 * e], t);

@@ -43,7 +43,7 @@ int main() {
     t.same("the same samples", back, stereo);
     t.check("an input file", read_wav(input("in.wav"), back, channels, sample_rate) && sample_rate == 22050);
     enaga::log("HELLO");
-    enaga::midi::note_on(2, 60, 100);
+    t.check("a MIDI send succeeds", enaga::midi::note_on(2, 60, 100));
     t.check("the log", logged().size() == 1 && logged()[0] == "HELLO");
     t.check("the MIDI", midi_sent().size() == 1 && midi_sent()[0][0] == 0x92);
     run_clock(120);
@@ -51,6 +51,12 @@ int main() {
     uint32_t count = 0;
     for (int block = 0; block < 750; block++) count += enaga::clock::ticks(ticks, 8);
     t.check("192 ticks a second at 120 BPM", count == 192);
+    t.check("the app stops the clock", enaga::clock::stop() && !enaga::clock::running());
+    t.check("sets its tempo", enaga::clock::set_tempo(60) && enaga::clock::tempo() == 60 && !enaga::clock::set_tempo(400));
+    t.check("and starts it from 0", enaga::clock::start() && enaga::clock::running() && enaga::clock::position() == 0);
+    count = 0;
+    for (int block = 0; block < 750; block++) count += enaga::clock::ticks(ticks, 8);
+    t.check("96 ticks a second at 60 BPM", count == 96);
     return t.finish();
 }
 """
@@ -101,7 +107,7 @@ class HostTest(unittest.TestCase):
             app = self.make_app(d, passing=PASSING, failing=FAILING, crashing=CRASHING)
             r = self.run_tool(app)
             self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-            self.assertIn("ok: 12 checks", r.stdout)
+            self.assertIn("ok: 17 checks", r.stdout)
             self.assertIn("FAIL one is two: got 1, want 2 (within 0.5)", r.stdout)
             self.assertIn("1 of 2 checks failed", r.stdout)
             self.assertIn("BEFORE THE CRASH", r.stdout)           # printed before the crash, not lost

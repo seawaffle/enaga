@@ -3,10 +3,10 @@
 //
 // What it does: log prints the line (and keeps it, testing::logged()); ms is a clock the test sets; fatal prints
 // the reason and ends the run with exit status 3; midi_send keeps what was sent (testing::midi_sent()); the clock
-// runs at a tempo the test sets, each clock_ticks call taking the next block's ticks; the file and stream services
-// answer as if no card were in (ENAGA_FILE_NO_CARD); the panel's lights, the speaker, the input and the menu do
-// nothing. The text drawing does nothing either: draw() can run, and the canvas's pixels are there to read,
-// but text leaves none.
+// runs as the test (run_clock) or the app (clock_control) says, each clock_ticks call taking the next block's ticks;
+// the file and stream services answer as if no card were in (ENAGA_FILE_NO_CARD); the panel's lights, the speaker,
+// the input and the menu do nothing. The text drawing does nothing either: draw() can run, and the canvas's pixels
+// are there to read, but text leaves none.
 #include <enaga/app.hpp>
 #include <enaga/testing.hpp>
 
@@ -41,6 +41,29 @@ uint32_t clock_ticks(enaga_clock_tick_t *ticks, uint32_t max) {
     g_clock.position = uint32_t(position);
     g_clock.fraction = float(position - double(g_clock.position));
     return n;
+}
+
+// clock_control as the kernel's, for the INTERNAL source: START from 0, CONTINUE from the next tick, LOCATE, TEMPO
+// (BPM x 100, 2000-30000). A change while running restarts the count at the next tick, which comes at once.
+int32_t clock_control(uint32_t command, int32_t value) {
+    switch (command) {
+    case ENAGA_CLOCK_START: enaga::testing::run_clock(g_clock.tempo, 0); return 0;
+    case ENAGA_CLOCK_STOP: g_clock.running = 0; return 0;
+    case ENAGA_CLOCK_CONTINUE:
+        if (!g_clock.running) enaga::testing::run_clock(g_clock.tempo, g_next);
+        return 0;
+    case ENAGA_CLOCK_LOCATE:
+        if (value < 0) return -1;
+        if (g_clock.running) enaga::testing::run_clock(g_clock.tempo, uint32_t(value));
+        else g_next = g_clock.position = uint32_t(value), g_clock.fraction = 0.0f;
+        return 0;
+    case ENAGA_CLOCK_TEMPO:
+        if (value < 2000 || value > 30000) return -1;
+        if (g_clock.running) enaga::testing::run_clock(float(value) * 0.01f, g_next);
+        else g_clock.tempo = float(value) * 0.01f;
+        return 0;
+    default: return -1;
+    }
 }
 
 enaga_host_t make() {
@@ -91,10 +114,10 @@ enaga_host_t make() {
     h.input = [](uint32_t, uint32_t) { return int32_t(0); };
     h.midi_send = [](uint32_t, const uint8_t *data, uint32_t bytes) {
         g_midi.emplace_back(data, data + bytes);
-        return int32_t(bytes);
+        return int32_t(0);
     };
     h.midi_channel = [] { return 0u; };
-    h.clock_control = [](uint32_t, int32_t) { return int32_t(0); };
+    h.clock_control = clock_control;
     h.clock_state = [](enaga_clock_state_t *state) { *state = g_clock; };
     h.clock_ticks = clock_ticks;
     h.battery = [] { return int32_t(-1); };
