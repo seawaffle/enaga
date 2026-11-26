@@ -668,12 +668,20 @@ Its card is staged by `tools/unit_card.py`.
   calibration.
 - Synth on the unit: measured 8 % idle, 10 % one note, 24 % eight notes (INIT), 25 % SUPERSAW two notes (eight
   voices), no dropouts; the worst case (30 % on the emulator) not yet measured there.
-- DSP library: the SVF runs at 21 cycles a sample under cl6x (its recurrence), twice a biquad's 10; a faster
-  form is worth trying. The synth's modulation is 6.4 % of the budget with cl6x, most of it the scalar part
-  (matrix 1.5 %, LFOs 1.1 %, envelopes 0.7 %); GCC compiles the math-buffer loops poorly (about 80 cycles an
-  exp2, mostly NOPs and constants rebuilt per use), so the GCC-only build lost 3 points to the restructure. The library is built from source with each app for now; a
-  release SDK would ship it prebuilt. Before shipping cl6x-built code, check that it calls none of TI's run-time
-  library (the link would show it: apps link only libgcc) and TI's licence terms.
+- **DSP library speed (2026-11-26, log "The DSP library's speed"):**
+  - Whether the SDK ships the library prebuilt by cl6x is still the owner's call ("decide later"). GCC's build of
+    the block functions is 2-12 times slower than cl6x's (tools/bench.py), and most developers have only GCC.
+    Before shipping cl6x-built code, check that it calls none of TI's run-time library (the link would show it:
+    apps link only libgcc) and check TI's licence terms. CI has no cl6x, so the archive would be built locally.
+  - GCC 13's tic6x back end pipelines no loop with a float multiply (its SPLOOP pass gives up on them: "We don't
+    handle floating point multiplies yet"). Its selective scheduler crashes the compiler, and the list scheduler
+    does not overlap the unrolled copies, so each value waits for its whole chain. Inline math in an app's own
+    code is therefore slow whatever the library does (exp2 about 85 cycles a value, tanh 190). Fixing that means
+    patching the toolchain we build, a project of its own.
+  - The SVF runs at 21 cycles a sample under cl6x (its recurrence). Regrouping into a state-space form would cut
+    that to about 12, but it rounds the low-cutoff coefficients (1 - 2 g^2 near 1) far worse, so it was not taken.
+  - Not yet looked at closely: the resampler (180 cycles an output under cl6x, 128 multiply-adds), the
+    compressor, the limiter and the reverb, and libm's tanhf, which cl6x builds slower than GCC.
 - USB stack: the C6748's USB0 is a Mentor MUSB controller; a TinyUSB port (TinyUSB has a MUSB driver for
   other TI parts) is plausible and unverified.
 - A fault in Enaga code called by an app (a host function given a bad pointer) currently counts as a kernel
@@ -2505,3 +2513,41 @@ Left open, in Open items: the SCSI stall question (on usb-drive-speed), the SPLO
 listed there. Not taken up: the reviews' suspicions without a trigger (C2-C14), and the release-process notes
 beyond what Open items records.
 
+### The DSP library's speed (2026-11-26)
+
+The owner asked for the libraries to be as fast as we can make them.
+- **`tools/bench.py`** and `tests/apps/bench`: every block function on 64-frame blocks, and the inline functions in
+  an app's own loop, timed with TSCL on the emulator. The library is built once by cl6x and once by GCC, and the
+  two columns are printed side by side. The emulator models no caches, so the figures compare with each other only.
+- **The sample player** (`runtime/dsp/sample.c`): it worked out every frame's loop wrap, tap clamping and end
+  check, which kept both compilers from pipelining it. That cost about 10,000 cycles a 64-frame block under either.
+  `player_run` now finds how many frames from the position need none of that and plays them in a loop that only
+  interpolates and steps; the frame at a boundary takes the old path. The output is the same bit for bit. A host test plays
+  3,000 random samples against the old code kept as a reference: loops of both kinds and empty ones, both
+  directions, rates from 0 to 10^6, uneven blocks, the loop switched off mid-way. Five of `player_run`'s bounds,
+  each loosened in turn, failed that test. `render_add` mixes each channel in a loop of its own.
+- **The hard-synced sine:** cl6x could not pipeline it (two sines a sample in the loop that follows the restarts).
+  Under cl6x it now runs in three passes: phases, both sines, then the corrections. GCC is faster with the one
+  loop and keeps it. `ENAGA_DSP_SELECTS` selects cl6x's branch-free forms under any compiler, and
+  `test_dsp.py` now runs the host checks in both forms, which until now GCC never compiled.
+- **A held envelope and a smoother at rest** fill the block. The envelope check sits outside the stepping loop's
+  function, because inside it GCC's code for the moving envelope lost 18 %.
+- **test_synth's cl6x / GCC comparison** now runs the chorus at depth 0. The chorus sweep runs from the app's
+  start, and the test lines the two captures up at their first sound. With the new code the cl6x build's first
+  sound came two blocks later, so its chorus was out of step and the samples differed in the last bits, though
+  neither changed path ran in that test. The two builds had been starting in the same block by luck.
+- **Tried and dropped:** GCC flags (the best set, `-fsched-pressure`, gains 2 %; dropping `-funroll-loops` loses
+  19 %). `-fmodulo-sched` gives no SPLOOP on float loops (see Open items), and the selective scheduler crashes
+  GCC. cl6x's `--opt_for_speed=5` changes nothing over `-O3`. Writing clamp and floor_int branch-free for GCC
+  leaves the iterations serial.
+
+Cycles for 64 frames, cl6x / GCC, before and after:
+
+| Item | Before | After |
+|---|---|---|
+| Sample player, mono, any rate | 9,896 / 10,767 | 950 / 3,397 |
+| Sample player, stereo | 13,608 / 13,967 | 1,212 / 6,075 |
+| `render_add`, stereo | 15,664 / 17,527 | 1,860 / 6,955 |
+| Synced sine | 7,220 / 7,179 | 2,203 / 7,179 |
+| Envelope, held | 1,134 / 1,874 | 112 / 133 |
+| Smoother, at rest | 917 / 930 | 96 / 111 |
