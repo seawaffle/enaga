@@ -515,14 +515,15 @@ void stop() override { settings.set("TEMPO", tempo); settings.save(); }
 |---|---|
 | `Settings(file = "SETTINGS.TXT")` | the file name in the data folder |
 | `load()` | reads the file; a missing one is empty settings. `ENAGA_FILE_OK` or an error |
-| `save()` | writes the file (safely, as `files::save`) if anything changed since `load()` or the last `save()` |
-| `get(key, fallback)` | a whole-number value, or `fallback` if missing or not a number |
+| `save()` | writes the file (safely, as `files::save`) if anything changed since `load()` or the last `save()`. After a `load()` that failed (a file too big, a card error) it writes nothing and returns that error, so a file it could not read is not replaced |
+| `get(key, fallback)` | a whole-number value, or `fallback` if missing, not a number or outside `int32_t` |
 | `text(key, fallback = "")` | the text value |
 | `set(key, value)` | a number or text; `false` if the key or value is invalid or 32 keys are in use |
 | `changed()` | whether there is something to save |
 
 Limits: `max_keys` (32) keys; keys up to `key_bytes` - 1 (23) bytes without `=` or a line break; text values up
-to `value_bytes` - 1 (31). Enaga's own settings are separate and not here.
+to `value_bytes` - 1 (31); the file up to 1,824 bytes. Lines other than `KEY=VALUE` are dropped on a save. Enaga's
+own settings are separate and not here.
 
 ## MIDI
 
