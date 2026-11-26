@@ -610,7 +610,7 @@ Its card is staged by `tools/unit_card.py`.
   raises its own interrupt, the trap the IN side fell into). Measured 2026-11-25 (log, "USB DRIVE's time"):
   the packets, both ways; double buffering is on branch usb-drive-speed. On the unit (2026-11-26, log "Which side
   waits"): 0.20 MiB/s writing, 0.24 reading, and the computer is the slower side both ways (one packet per two
-  microframes). Full speed is done; the rest is high speed (step 3).
+  microframes, where full speed carries about four times that); why the host polls so sparsely is open (log).
   - Earlier plan: the user started a Claude session on the Windows PC with a read-only brief: raw sectors 0-63 and
     the partition start over USB vs a card reader, a USBPcap capture of drive mount / playback / recording, and
     scripted play / record tests. Debug from its evidence. Also ask whether STATUS showed a crash row.
@@ -2477,10 +2477,14 @@ per bulk endpoint, each packet's time from load to its TX interrupt, and the tim
   Reading, every TX interrupt found the other FIFO half still holding a packet: the host never asked for one the
   unit didn't have. Writing, after nearly every packet the next had not yet come; the 2,586 backlogs are about one
   per 8 KiB write callback (2,970), the packets that arrived while the SD card was being written. The interrupt
-  takes 3-5 us of each 250 us. So this host gives a full-speed bulk endpoint one 64-byte packet per two
-  microframes, about 256 KB/s, and nothing on the unit's side of full speed changes that: the 700 KiB/s target
-  needs high speed (step 3). No hub was at hand to see whether a USB 2.0 hub's transaction translator schedules
-  differently. Double buffering stays: it removed the NAKs and is the 1.3-1.7 times already measured.
+  takes 3-5 us of each 250 us. So the unit is not late packet by packet: the host polls the drive's endpoints
+  only every 0.25 ms, about 256 KB/s. That is a quarter of what full speed carries in practice (about 1 MB/s), so
+  why the host schedules this device so sparsely is still open. Candidates: this controller (the front port is on
+  the chipset's xHCI, AMD 43FC; the PC has a second, the CPU's 15B8), or the unit's isochronous audio streams
+  (Windows streamed USB_AUDIO_IN throughout; 392 of each frame's bytes reserved). The PC's other drives are no
+  comparison: they run at high speed or faster. To try: a port on the other controller, the unit's audio devices
+  disabled in Windows, and a USB 2.0 hub. Double buffering stays: it removed the NAKs and is the 1.3-1.7 times
+  already measured.
   - After the last eject (a file deleted, then Eject), `USB_DRIVE ERRORS` went to 1 with `DRV R RANGE`: Windows
     read once after its STOP UNIT, which `drive_range` refuses (the drive is no longer ready). The writes before
     the STOP had all landed; nothing was lost. Only once in three ejects.
