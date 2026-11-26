@@ -296,7 +296,7 @@ static void status_page(u32 ms)
     u32 i, first, kept = log_count < LOG_LINES ? log_count : LOG_LINES;
     int most = kept > 5 ? (int)kept - 5 : 0;
     gfx_clear(0);
-    gfx_text(0, 0, "ENAGA " ENAGA_VERSION, 15);
+    gfx_text(0, 0, ENAGA_VERSION " " ENAGA_BUILD, 15);   /* the build: firmware/build.py build_id */
     gfx_dec(96, 0, (int)(ms / 1000u), 8);
     gfx_text(0, 12, app_status, 15);
     if (app_name[0]) gfx_text(0, 21, app_name, 10);
@@ -550,7 +550,7 @@ void main(void)
     usb_init();                               /* USB MIDI: PHY, then connect */
     irq_enable(1u << IRQ_USB0);
     irq_global_enable();                      /* audio blocks start being serviced (silence until an app) */
-    log_line("ENAGA " ENAGA_VERSION);
+    log_line("ENAGA " ENAGA_VERSION " " ENAGA_BUILD);
     log_cache(cache_entry_config(), cache_config());   /* the second line: hardware.md "Checks on a unit" step 2 */
     log_line(device_name);
     watchdog_start();

@@ -153,46 +153,47 @@ static int status_line(u32 step)
     begin(STATUS);
     switch (step) {
     case 0: add_text("VERSION " ENAGA_VERSION); break;
-    case 1: add_text("UPTIME_MS "); add_dec(timer_ms()); break;
-    case 2: add_text("APP "); add_text(app_name[0] ? app_name : "-"); break;
-    case 3: add_text("APP_STATUS "); add_text(app_status); break;
-    case 4: add_text("CRASH "); add_text(crash_reason[0] ? crash_reason : "-"); break;
-    case 5: add_text("CRASH_PC "); add_hex(crash_pc); add_text(" EFR "); add_hex(crash_efr); add_text(" IERR ");
+    case 1: add_text("BUILD " ENAGA_BUILD); break;
+    case 2: add_text("UPTIME_MS "); add_dec(timer_ms()); break;
+    case 3: add_text("APP "); add_text(app_name[0] ? app_name : "-"); break;
+    case 4: add_text("APP_STATUS "); add_text(app_status); break;
+    case 5: add_text("CRASH "); add_text(crash_reason[0] ? crash_reason : "-"); break;
+    case 6: add_text("CRASH_PC "); add_hex(crash_pc); add_text(" EFR "); add_hex(crash_efr); add_text(" IERR ");
             add_hex(crash_ierr); break;
-    case 6: add_text("AUDIO "); add_signed(audio_status); add_text(" BLOCKS "); add_dec(audio_blocks);
+    case 7: add_text("AUDIO "); add_signed(audio_status); add_text(" BLOCKS "); add_dec(audio_blocks);
             add_text(" OVERRUNS "); add_dec(audio_overruns); break;
-    case 7: add_text("AUDIO_LOAD_PEAK "); add_dec(audio_cycles_peak / (AUDIO_BUDGET_CYCLES / 1000u)); break;
-    case 8: add_text("USB_AUDIO_OUT "); add_dec(usb_audio_out_packets); add_text(" OVERRUNS ");
+    case 8: add_text("AUDIO_LOAD_PEAK "); add_dec(audio_cycles_peak / (AUDIO_BUDGET_CYCLES / 1000u)); break;
+    case 9: add_text("USB_AUDIO_OUT "); add_dec(usb_audio_out_packets); add_text(" OVERRUNS ");
             add_dec(usb_audio_out_overruns); add_text(" UNDERRUNS "); add_dec(usb_audio_out_underruns); break;
-    case 9: add_text("USB_AUDIO_IN "); add_dec(usb_audio_in_packets); add_text(" LATE "); add_dec(usb_audio_in_late);
+    case 10: add_text("USB_AUDIO_IN "); add_dec(usb_audio_in_packets); add_text(" LATE "); add_dec(usb_audio_in_late);
             add_text(" UNDERRUNS "); add_dec(usb_audio_in_underruns); break;
-    case 10: add_text("USB_DRIVE READ "); add_dec(usb_drive_read_sectors); add_text(" WRITTEN ");
+    case 11: add_text("USB_DRIVE READ "); add_dec(usb_drive_read_sectors); add_text(" WRITTEN ");
              add_dec(usb_drive_written_sectors); add_text(" ERRORS "); add_dec(usb_drive_errors); break;
-    case 11: add_text("USB_MIDI_LOST "); add_dec(usb_tx_lost); break;
+    case 12: add_text("USB_MIDI_LOST "); add_dec(usb_tx_lost); break;
     /* Where USB DRIVE's time went since the page opened (usb.c): per direction the callbacks, the ms in the SD
      * driver, and the ms between callbacks; then the drive's packets and the ms the host took to take or send
      * them (musb_enaga.h). */
-    case 16: add_text("USB_DRIVE_TIME R "); add_dec(usb_drive_calls[0]); add_text(" SD_MS ");
+    case 17: add_text("USB_DRIVE_TIME R "); add_dec(usb_drive_calls[0]); add_text(" SD_MS ");
              add_dec(usb_drive_sd_us[0] / 1000u); add_text(" GAP_MS "); add_dec(usb_drive_gap_us[0] / 1000u);
              add_text(" W "); add_dec(usb_drive_calls[1]); add_text(" SD_MS "); add_dec(usb_drive_sd_us[1] / 1000u);
              add_text(" GAP_MS "); add_dec(usb_drive_gap_us[1] / 1000u); add_text(" AHEAD ");
              add_dec(usb_drive_ahead[0]); add_text(" BEHIND "); add_dec(usb_drive_ahead[1]); break;
-    case 17: add_text("USB_DRIVE_PACKETS IN "); add_dec(enaga_musb_in_packets[2]); add_text(" WAIT_MS ");
+    case 18: add_text("USB_DRIVE_PACKETS IN "); add_dec(enaga_musb_in_packets[2]); add_text(" WAIT_MS ");
              add_dec(enaga_musb_in_wait_us[2] / 1000u); add_text(" OUT "); add_dec(enaga_musb_out_packets[2]);
              add_text(" GAP_MS "); add_dec(enaga_musb_out_gap_us[2] / 1000u); break;
-    case 12: add_text("MIDI IN "); add_dec(midi_messages_in); add_text(" OUT "); add_dec(midi_messages_out);
+    case 13: add_text("MIDI IN "); add_dec(midi_messages_in); add_text(" OUT "); add_dec(midi_messages_out);
              add_text(" DROPPED "); add_dec(midi_dropped_out); break;
-    case 13: add_text("SD READ "); add_dec(sd_reads); add_text(" WRITTEN "); add_dec(sd_writes); add_text(" ERROR ");
+    case 14: add_text("SD READ "); add_dec(sd_reads); add_text(" WRITTEN "); add_dec(sd_writes); add_text(" ERROR ");
              add_signed(sd_io_error); add_text(" COMMAND "); add_dec(sd_io_command); add_text(" STATUS ");
              add_hex(sd_io_status); break;
-    case 14: add_text("BATTERY "); add_signed(battery_level()); break;
-    case 15: add_text("LOG_COUNT "); add_dec(log_count); break;
-    case 18: add_text("USB_DRIVE_FIFO IN_EMPTY "); add_dec(enaga_musb_in_empty[2]); add_text(" IN_QUEUED ");
+    case 15: add_text("BATTERY "); add_signed(battery_level()); break;
+    case 16: add_text("LOG_COUNT "); add_dec(log_count); break;
+    case 19: add_text("USB_DRIVE_FIFO IN_EMPTY "); add_dec(enaga_musb_in_empty[2]); add_text(" IN_QUEUED ");
              add_dec(enaga_musb_in_queued[2]); add_text(" OUT_BACKLOG "); add_dec(enaga_musb_out_backlog[2]);
              add_text(" OUT_ALONE "); add_dec(enaga_musb_out_alone[2]); break;
-    case 19: add_text("USB_ISR "); add_dec(usb_isr_count); add_text(" US "); add_dec(usb_isr_us); add_text(" MAX_US ");
+    case 20: add_text("USB_ISR "); add_dec(usb_isr_count); add_text(" US "); add_dec(usb_isr_us); add_text(" MAX_US ");
              add_dec(usb_isr_max_us); break;
-    case 20: break;                            /* the end: the command alone */
+    case 21: break;                            /* the end: the command alone */
     default: return 0;
     }
     finish();

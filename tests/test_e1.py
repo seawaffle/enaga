@@ -20,13 +20,14 @@ sys.path.insert(0, str(ENAGA / "tools"))
 
 import build_app  # noqa: E402
 import paths  # noqa: E402
-from emulate import Emulation  # noqa: E402
+from emulate import Emulation, firmware_build  # noqa: E402
 
 WORK_E1 = paths.BUILD / "tests"
 BOOT = 300_000_000          # past card, app load and audio start
 STEP1 = 32
 BLOCK_CYCLES = 64 * 372_000_000 // 48_000
 MS = 372_000
+FIRST_LOG = "ENAGA 0.3.0 " + firmware_build.build_id()   # the version and the commit built from
 CACHE_LOG = "CACHE 043 8F>444 FF"   # the bootloader's hand-over as measured (smpltrek-re session M1), then after set-up
 
 
@@ -86,7 +87,7 @@ class E1(unittest.TestCase):
             self.assertIn(emu.word("watchdog_ticks") - ticks, range(10, 13))    # one tick per 10 ms
             self.assertEqual(emu.report()["audio_overruns"], 0)
             self.assertTrue(all(v == 0 for v in samples(emu)[-4096:]))
-            self.assertEqual(report["log"], ["ENAGA 0.3.0", CACHE_LOG, "SMPLTREK"])
+            self.assertEqual(report["log"], [FIRST_LOG, CACHE_LOG, "SMPLTREK"])
             self.assertGreater(report["oled"]["complete_frames"], 0)
 
     def test_cache_set_up_from_the_bootloaders_hand_over(self):
@@ -101,7 +102,7 @@ class E1(unittest.TestCase):
             for n in range(16, 256):
                 put(0x01848000 + 4 * n, int(n in cacheable))
             self.assertIsNone(emu.run(BOOT)["error"])
-            self.assertEqual(emu.report()["log"][:2], ["ENAGA 0.3.0", "CACHE 043 8F>444 FF"])
+            self.assertEqual(emu.report()["log"][:2], [FIRST_LOG, "CACHE 043 8F>444 FF"])
             self.assertEqual([get(0x01840000) & 7, get(0x01840020), get(0x01840040)], [4, 4, 4])
             self.assertEqual([n for n in range(16, 256) if get(0x01848000 + 4 * n)], list(range(192, 200)))
             self.assertGreater(emu.report()["audio_blocks"], 100)
@@ -111,7 +112,7 @@ class E1(unittest.TestCase):
             self.assertIsNone(emu.run(BOOT)["error"])
             report = emu.report()
             self.assertEqual((report["app_status"], report["app_name"]), ("APP RUNNING", "TONE"))
-            self.assertEqual(report["log"], ["ENAGA 0.3.0", CACHE_LOG, "SMPLTREK", "tone ready", "TONE"])
+            self.assertEqual(report["log"], [FIRST_LOG, CACHE_LOG, "SMPLTREK", "tone ready", "TONE"])
             # The heap follows the image (4 KiB aligned) and runs to the end of the 128 MiB DDR.
             package = (paths.BUILD / "emulate" / "TONE.ENA").read_bytes()
             _, _, _, base, size, bss, *_ = build_app.HEADER.unpack_from(package)

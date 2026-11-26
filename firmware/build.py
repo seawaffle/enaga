@@ -55,6 +55,24 @@ def symbols(elf):
 _built = {}
 
 
+# What went into the firmware, from git: the commit's short hash, with "+" when anything compiled into it (firmware/,
+# loader/, include/) differs from that commit, tracked or not; "unknown" outside a git checkout. Shown by the debug
+# port's status (BUILD), the boot log's first line and the menu's STATUS page. A release, built from its tag's clean
+# checkout, carries the tag's commit, and a local build of the same commit gives the same bytes.
+BUILD_PATHS = ("firmware", "loader", "include")
+
+
+def build_id():
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=ENAGA, capture_output=True, text=True, check=True).stdout.strip()
+    try:
+        commit = git("rev-parse", "--short=7", "HEAD")
+        changed = git("status", "--porcelain", "--", *BUILD_PATHS)
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+    return commit + ("+" if changed else "")
+
+
 def build(out=OUT):
     """Compile and link; returns {"elf", "image", "symbols", "code_size", ...}. Once per process for each output
     folder: the sources do not change while it runs, and the emulator tests start an emulation per test (3.4 s a
@@ -67,13 +85,15 @@ def build(out=OUT):
 
 def _build(out):
     out.mkdir(parents=True, exist_ok=True)
+    ident = build_id()
+    flags = [*CFLAGS, f'-DENAGA_BUILD="{ident}"']
     objs = [out / "start.o"]
     run([AS, "-mlittle-endian", "-march=c674x", "-o", objs[0], HERE / "start.s"], out)
     sources = (sorted((HERE / "hal").glob("*.c")) + sorted((HERE / "kernel").glob("*.c")) + sorted((HERE / "usb").glob("*.c"))
                + [ENAGA / "loader" / "loader.c"])
     for src in sources:
         obj = out / f"{src.parent.name}_{src.stem}.o"
-        run([GCC, *CFLAGS, "-c", "-o", obj, src], out)
+        run([GCC, *flags, "-c", "-o", obj, src], out)
         objs.append(obj)
     for name in TINYUSB_SOURCES:                          # third-party code: not held to -Werror
         obj = out / ("tinyusb_" + name.replace("/", "_").replace(".c", ".o"))
@@ -105,7 +125,7 @@ def _build(out):
     name = "ENAGA_" + "_".join(map(str, VERSION)) + ".bin"           # the SmplTrek's, under the release name
     (out / name).write_bytes(images["smpltrek"].read_bytes())
     return {"elf": elf, "map": mapfile, "image": (out / name).read_bytes(), "image_path": out / name,
-            "images": images, "symbols": sym, "code_size": len(code)}
+            "images": images, "symbols": sym, "code_size": len(code), "build_id": ident}
 
 
 def main(argv=None):
@@ -120,7 +140,7 @@ def main(argv=None):
     for device, path in b["images"].items():
         print(f"  {sysimage.DEVICES[device]['label']:10}  {path.relative_to(ENAGA)}  "
               f"SHA-256 {hashlib.sha256(path.read_bytes()).hexdigest()[:16]}")
-    print(f"code {b['code_size']} bytes at {LOAD:#x}, ELF {b['elf']}")
+    print(f"code {b['code_size']} bytes at {LOAD:#x}, ELF {b['elf']}, build {b['build_id']}")
     return 0
 
 

@@ -145,6 +145,8 @@ class UsbDebug(Emulated):
     def test_status(self):
         status = dict(line.split(" ", 1) for line in self.client.status())
         self.assertEqual(status["VERSION"], "0.3.0")
+        self.assertEqual(status["BUILD"], self.emu.firmware["build_id"])          # the commit, from git
+        self.assertRegex(status["BUILD"], r"^([0-9a-f]{7}\+?|unknown)$")
         self.assertEqual(status["APP_STATUS"], "APP RUNNING")
         self.assertEqual(int(status["LOG_COUNT"]), self.emu.word("log_count"))
         self.assertIn("USB_AUDIO_IN", status)
