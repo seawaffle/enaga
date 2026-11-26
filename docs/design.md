@@ -682,6 +682,9 @@ Its card is staged by `tools/unit_card.py`.
     that to about 12, but it rounds the low-cutoff coefficients (1 - 2 g^2 near 1) far worse, so it was not taken.
   - Not yet looked at closely: the resampler (180 cycles an output under cl6x, 128 multiply-adds), the
     compressor, the limiter and the reverb, and libm's tanhf, which cl6x builds slower than GCC.
+  - Enaga's own share of a block (log "Enaga's own share of the audio block"): 7,027 to 2,644 cycles on the
+    emulator; the unit's figure (about 13,000 before) is to be measured. `memcpy` copies a byte at a time (in the
+    firmware and the app runtime), a 7x gain on aligned copies left for when an app needs it.
 - USB stack: the C6748's USB0 is a Mentor MUSB controller; a TinyUSB port (TinyUSB has a MUSB driver for
   other TI parts) is plausible and unverified.
 - A fault in Enaga code called by an app (a host function given a bad pointer) currently counts as a kernel
@@ -2551,3 +2554,24 @@ Cycles for 64 frames, cl6x / GCC, before and after:
 | Synced sine | 7,220 / 7,179 | 2,203 / 7,179 |
 | Envelope, held | 1,134 / 1,874 | 112 / 133 |
 | Smoother, at rest | 917 / 930 | 96 / 111 |
+
+### Enaga's own share of the audio block (2026-11-26)
+
+On the unit, Enaga's share of every block was about 13,000 cycles, 3 % of the budget (first unit session); on the
+emulator, with an app that does nothing, it was 7,027. Timing the interrupt in parts showed that most of it was
+two loops: converting the received words to float (about 1,800 cycles) and converting the output back to words
+with clipping and the NaN check (about 4,800); the clock, the call into the app, USB audio, the level and the cache
+operations together took about 400.
+- **The output conversion** (`to_word` in `kernel/audio.c`) now works on the float's bits with shifts and masks:
+  no float instruction and no branch. It gives the same words as the float form for all 2^32 bit patterns (checked
+  on the host against the old expression), and `test_output_words_are_the_samples_clipped` checks the build on
+  the emulator with edge cases and random patterns (with the NaN mask removed, it fails).
+- **`audio_isr` is unrolled** (`optimize("unroll-loops")`). The firmware is built without `-funroll-loops`, unlike
+  apps, and GCC overlaps nothing between passes of a loop with float in it, so the input conversion took about
+  14 cycles a sample. Unrolled, it takes 3.
+- Result on the emulator: 7,027 to 2,644 cycles a block. Not yet measured on the unit.
+- **Also found, not changed:** the firmware's and the app runtime's `memcpy` copy a byte at a time (6 cycles a
+  byte). A word-wise version copies 512 aligned bytes in 451 cycles instead of 3,162. GCC turns some loops in app
+  code into `memcpy` and `memset` calls, including in the synth's audio path, but the synth's worst case stayed
+  at 29 % with the fast version, so its copies are small. The runtime's `memset` is already pipelined (about 1
+  cycle a byte).
