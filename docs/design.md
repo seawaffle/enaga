@@ -2423,3 +2423,17 @@ the computer behaves (waiting for a frame, pads without raw readings, POWER with
 hold), scripting with `Client` (an example checked on the emulator), the status lines, peek, and the protocol for
 other languages. The SDK now ships it with `tools/usb_debug.py`, which needs nothing from the repository. Linked
 from getting-started's "Where next", `enaga::log` in api.md, the README and hardware.md.
+
+### The test suite side by side (2026-11-25)
+
+The serial suite had grown to about 16 minutes (162 tests on the drive branch). Two changes:
+- **Builds once per process.** Every emulator test started an emulation, and each one compiled the whole firmware
+  (3.4 s) and its app again: about half the suite's time. `firmware/build.py` now builds once per process for each
+  output folder, and `tools/emulate.py` keeps each app's package, rebuilding only when the DSP library's compiler
+  changes or another build has since gone into the same folder (the synth tests read symbols from the app's ELF
+  there, and its cl6x/GCC comparison builds the same app both ways).
+- **`tests/run.py`** runs each test file as its own process, as many at once as there are cores, with its own
+  `ENAGA_BUILD` under build/test-runs/ so that no two write the same firmware, app or card files (the approach of
+  the emulator's own verify.py). Logs go beside them; files start longest first from the last run's times. On the
+  16-core host: 83 s for all 27 files, against about 950 s, the longest file (test_sdk) setting the time.
+  `discover` still runs everything in one process.
