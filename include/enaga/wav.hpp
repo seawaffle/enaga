@@ -43,7 +43,7 @@ inline bool parse(const void *start, uint32_t bytes, Format &out) {
     const uint8_t *p = static_cast<const uint8_t *>(start);
     if (bytes < 12 || !tag(p, "RIFF") || !tag(p + 8, "WAVE")) return false;
     bool have_format = false;
-    for (uint32_t at = 12; at + 8 <= bytes;) {
+    for (uint32_t at = 12; at < bytes && bytes - at >= 8;) {
         uint32_t size = u32(p + at + 4), body = at + 8;
         if (tag(p + at, "fmt ")) {
             if (size < 16 || body + 16 > bytes) return false;
@@ -87,7 +87,8 @@ inline void header(uint8_t out[44], const Format &format, uint32_t data_bytes) {
 
 // Loader's errors, besides the file service's ENAGA_FILE_* codes.
 enum LoadError : int32_t {
-    not_wav = -64,                  // not a RIFF WAVE in a format parse() knows, or no sample data
+    not_wav = -64,                  // not a RIFF WAVE in a format parse() knows, no sample data, or a rate
+                                    // outside Loader::min_rate - max_rate
     no_memory = -65,                // the heap has no room for the sample
 };
 
@@ -104,6 +105,7 @@ enum LoadError : int32_t {
 class Loader {
 public:
     static constexpr uint32_t chunk_bytes = 16384;  // read and converted per step (a few ms of the main loop)
+    static constexpr uint32_t min_rate = 8000, max_rate = 192000;   // the sample rates it takes (others: not_wav)
 
     Loader() = default;
     Loader(const Loader &) = delete;
@@ -193,8 +195,8 @@ private:
             if (r < 0) return finish(r);
             return;
         }
-        if (!parsed || !format_.frame_bytes() || format_.frame_bytes() > sizeof carry_bytes_ || !format_.rate ||
-            format_.data_offset > got)
+        if (!parsed || !format_.frame_bytes() || format_.frame_bytes() > sizeof carry_bytes_ ||
+            format_.rate < min_rate || format_.rate > max_rate || format_.data_offset > got)
             return finish(not_wav);
         uint32_t available = file_size_ - format_.data_offset;
         data_total_ = format_.data_bytes && format_.data_bytes < available ? format_.data_bytes : available;

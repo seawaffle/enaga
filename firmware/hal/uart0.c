@@ -93,6 +93,7 @@ int uart0_read(u8 *byte)
 }
 
 u32 uart0_tx_free(void) { return TX_RING - (tx_head - tx_tail); }
+int uart0_tx_empty(void) { return tx_head == tx_tail; }
 
 int uart0_send(const u8 *data, u32 bytes)
 {

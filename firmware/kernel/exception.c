@@ -73,7 +73,7 @@ void kernel_crash(const char *reason)
 void enaga_exception(void)
 {
     u32 pc = exception_record[0];
-    if (app_current && pc >= ENAGA_APP_BASE && pc < ENAGA_APP_LIMIT) {
+    if ((app_current || app_busy) && pc >= ENAGA_APP_BASE && pc < ENAGA_APP_LIMIT) {   /* app_busy: constructors, init() */
         crash_pc = pc;
         crash_efr = exception_record[1];
         crash_ierr = exception_record[2];

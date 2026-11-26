@@ -399,7 +399,7 @@ void audio_isr(void)
         tx_last = tx;
         for (i = 0; i < WORDS; i++) {
             float v = out_block[i] * 2147483648.0f;
-            tx[i] = v >= 2147483647.0f ? 0x7FFFFFFFu : v <= -2147483648.0f ? 0x80000000u : (u32)(int)v;
+            tx[i] = v >= 2147483647.0f ? 0x7FFFFFFFu : v <= -2147483648.0f ? 0x80000000u : v == v ? (u32)(int)v : 0u;   /* NaN: silence */
         }
         cache_wbinv(tx, WORDS * 4);
         audio_blocks++;

@@ -9,6 +9,9 @@
 
 static u32 last_ticks, ms_count, ms_remainder;
 
+u32  irq_global_disable(void);                /* start.s */
+void irq_global_enable(void);
+
 void timer_init(void)
 {
     REG32(TIMER0 + 0x20) = 0;              /* TCR: stopped */
@@ -33,15 +36,18 @@ int timer64_counts(void)
 
 u32 timer_ticks(void) { return tsc_read(); }
 
-u32 timer_ms(void)
+u32 timer_ms(void)                          /* both contexts call it (USB MIDI from the audio interrupt, an app's ms()) */
 {
+    u32 gie = irq_global_disable(), result;
     u32 now = tsc_read();
     ms_remainder += now - last_ticks;      /* wraps correctly in unsigned arithmetic */
     last_ticks = now;
     ms_count += ms_remainder / TICKS_PER_MS;   /* a constant divisor: GCC multiplies, no libgcc routine (0.2.9: the
                                                   subtraction loop it replaces cost a few cycles per elapsed ms) */
     ms_remainder %= TICKS_PER_MS;
-    return ms_count;
+    result = ms_count;
+    if (gie) irq_global_enable();
+    return result;
 }
 
 void delay_us(u32 us)

@@ -39,7 +39,7 @@
  *     blocks do not look like clock drift. */
 
 #define USB_OUT_RING    1024u                  /* frames, a power of two */
-#define USB_OUT_TARGET  144u                   /* 3 ms */
+#define USB_OUT_TARGET  176u                   /* 3.7 ms: a 64-frame block plus margin at 1000 ppm off */
 #define USB_IN_RING     1024u
 #define USB_IN_TARGET   128u                   /* two audio blocks */
 #define USB_IN_SLACK    12u
@@ -83,7 +83,8 @@ static float sample(u32 frame, int right)
 void usb_audio_read(float *in, u32 frames)    /* audio interrupt: the computer's audio, or silence */
 {
     u32 i, avail = out_head - out_tail;
-    float level = (float)avail - (float)frames_since(out_arrived);   /* what is left now of the last packet's frames */
+    float level = (float)avail + (float)frames_since(out_arrived);   /* the level just after the last packet, less
+                                                    the frames taken since: avail falls as the time since it grows */
     if (!out_alt || (!out_primed && avail < USB_OUT_TARGET)) {
         for (i = 0; i < 2 * frames; i++) in[i] = 0.0f;
         return;
