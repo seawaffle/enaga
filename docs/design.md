@@ -2437,3 +2437,25 @@ The serial suite had grown to about 16 minutes (162 tests on the drive branch). 
   the emulator's own verify.py). Logs go beside them; files start longest first from the last run's times. On the
   16-core host: 83 s for all 27 files, against about 950 s, the longest file (test_sdk) setting the time.
   `discover` still runs everything in one process.
+
+### FAT32's FSInfo signature (2026-11-25)
+
+A reviewer found FatFs's `FSI_TrailSig` at 498; Microsoft's FAT specification puts the FSInfo sector's trailing
+signature (0xAA550000) at 508. The vendored R0.15a has it so (and so does the emulator's copy). The effects:
+- **Reading:** a correct FSInfo sector never validated, so its free cluster count and next free cluster were
+  ignored and the first free-space query scanned the whole FAT.
+- **Writing:** FatFs rewrites the sector only while it knows the free count, which it learns from a valid sector
+  or a free-space query (`f_getfree`). The firmware never asks, so on a unit the sector was never rewritten: it
+  kept its signature and a free count that went stale whenever Enaga wrote files (on a card from mkfs.fat, 129,021
+  free still recorded after three clusters were taken), which other systems then trusted. After a query (the card
+  tool's `free`), the rewrite put the signature at 498 (bytes 500-501 = 55 AA, in the reserved area) and zeros at
+  508. With the fix the count is known from mount, so each sync after an allocation writes a correct sector: one
+  more sector written per sync.
+- **Fix:** 508 (ff.c, marked "Enaga:"). `tests/test_fsinfo.py` formats a FAT32 image with mkfs.fat, so FatFs is
+  not graded against itself: a free count only FSInfo knows is trusted, and after a write the sector has the
+  signature at 508, nothing in the reserved bytes, the count three clusters lower, and fsck.fat finds no fault. Both
+  tests failed before the change. The card tool rebuilds by itself (its folder is keyed on the sources' hash).
+- **Windows' mount:** it read 15,412 sectors (7.9 MB) each time on the 3.6 GiB card, about both FATs, which fits a
+  driver scanning for free space past an FSInfo it does not trust. Not established: Windows may scan anyway, and
+  the copies were made by Windows itself, which writes a correct sector. To check on the unit after Enaga has
+  written to the card with this build.
