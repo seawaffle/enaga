@@ -237,17 +237,92 @@ static void player_advance(enaga_sample_player *p, int64_t step) {
     if (p->direction > 0 ? at >= (int64_t)p->end << 32 : at < (int64_t)p->start << 32) p->active = 0;
 }
 
+/* How many frames from here, up to n, play with nothing to do but interpolate and step: their four taps neither
+ * clamp nor wrap round a forward loop, and no step after them crosses a loop's end or the playing's end (each
+ * such frame takes the per-frame path in render). *moved gets the distance those frames move, k x step. */
+static int player_run(const enaga_sample_player *p, int64_t step, int n, int64_t *moved) {
+    int64_t pos = p->position, room, acc = 0;
+    int x = (int)(pos >> 32), last = (int)p->sample->frames - 1, lo = 1, hi = last - 2, k = 0, b;
+    int ls = (int)p->loop_start, le = (int)p->loop_end, looping = p->loop != ENAGA_LOOP_OFF && le > ls;
+    int64_t lsf = (int64_t)ls << 32, lef = (int64_t)le << 32;
+    if (looping && p->loop == ENAGA_LOOP_FORWARD) {            /* the taps of frames in the loop wrap at its ends */
+        if (x < ls) { if (hi > ls - 1) hi = ls - 1; }
+        else if (x < le) { if (lo < ls + 1) lo = ls + 1; if (hi > le - 3) hi = le - 3; }
+        else if (lo < le) lo = le;
+    }
+    *moved = 0;
+    if (x < lo || x > hi) return 0;
+    if (p->direction > 0) {                                    /* positions after a step stay below `bound` */
+        int64_t bound = (int64_t)p->end << 32, taps = ((int64_t)(hi + 1) << 32) + step;
+        if (looping && p->loop == ENAGA_LOOP_FORWARD && pos < lef && lef < bound) bound = lef;
+        if (looping && p->loop == ENAGA_LOOP_PING_PONG && pos <= lef - FRAME && lef - FRAME + 1 < bound) bound = lef - FRAME + 1;
+        if (taps < bound) bound = taps;
+        room = bound - 1 - pos;
+    } else {                                                   /* ... and at or above `bound` */
+        int64_t bound = (int64_t)p->start << 32, taps = ((int64_t)lo << 32) - step;
+        if (looping && pos >= lsf && lsf > bound) bound = lsf;
+        if (taps > bound) bound = taps;
+        room = pos - bound;
+    }
+    if (room < 0) return 0;
+    if (step == 0) k = n;
+    else
+        for (b = 6; b >= 0; b--)                               /* the largest k <= n with k x step <= room */
+            if (k + (1 << b) <= n && acc + (step << b) <= room) { acc += step << b; k += 1 << b; }
+    *moved = step == 0 ? 0 : acc;
+    return k;
+}
+
+/* k frames from the position, which player_run has cleared: interpolation and the step alone. */
+static void player_run_mono(const float *restrict d, int x, uint32_t frac, int32_t whole, uint32_t part,
+                            float *restrict out, int k) {
+    int i;
+    for (i = 0; i < k; i++) {
+        const float *q = d + x - 1;
+        uint32_t next = frac + part;
+        out[i] = cubic(q[0], q[1], q[2], q[3], (float)(frac >> 8) * (1.0f / 16777216.0f));
+        x += whole + (int32_t)(next < frac);
+        frac = next;
+    }
+}
+static void player_run_stereo(const float *restrict d, int x, uint32_t frac, int32_t whole, uint32_t part,
+                              float *restrict left, float *restrict right, int k) {
+    int i;
+    for (i = 0; i < k; i++) {
+        const float *q = d + 2 * (x - 1);
+        uint32_t next = frac + part;
+        float t = (float)(frac >> 8) * (1.0f / 16777216.0f);
+        left[i] = cubic(q[0], q[2], q[4], q[6], t);
+        right[i] = cubic(q[1], q[3], q[5], q[7], t);
+        x += whole + (int32_t)(next < frac);
+        frac = next;
+    }
+}
+
 int enaga_sample_player_render(enaga_sample_player *p, float *left, float *right, int n, float rate) {
     const enaga_sample *s = p->sample;
     const float *d = s->data;
-    int last = (int)s->frames - 1, stereo = s->channels == 2, i, made = 0;
+    int last = (int)s->frames - 1, stereo = s->channels == 2, i = 0, made = 0;
     int ls = (int)p->loop_start, le = (int)p->loop_end, forward = p->loop == ENAGA_LOOP_FORWARD && le > ls;
     int64_t step;
     uint32_t whole;
     rate = enaga_clamp(rate, 0.0f, 1048576.0f);
     whole = (uint32_t)rate;
     step = (int64_t)whole << 32 | (uint32_t)((rate - (float)whole) * 2147483648.0f) << 1;
-    for (i = 0; i < n && p->active; i++) {
+    while (i < n && p->active) {
+        int64_t moved, signed_step = p->direction > 0 ? step : -step;
+        int k = player_run(p, step, n - i, &moved);
+        if (k) {
+            int x = (int)(p->position >> 32);
+            uint32_t frac = (uint32_t)p->position;
+            if (stereo) player_run_stereo(d, x, frac, (int32_t)(signed_step >> 32), (uint32_t)signed_step, left + i,
+                                          right + i, k);
+            else player_run_mono(d, x, frac, (int32_t)(signed_step >> 32), (uint32_t)signed_step, left + i, k);
+            p->position += p->direction > 0 ? moved : -moved;
+            i += k;
+            made += k;
+            if (i == n) break;
+        }
         int x = (int)(p->position >> 32), a = x - 1, b = x, c = x + 1, e = x + 2;
         if (forward && x >= ls && x < le) {     /* in a forward loop the taps wrap, so its join is seamless */
             if (a < ls) a += le - ls;
@@ -267,12 +342,24 @@ int enaga_sample_player_render(enaga_sample_player *p, float *left, float *right
         }
         player_advance(p, step);
         made++;
+        i++;
     }
     for (; i < n; i++) {
         left[i] = 0.0f;
         if (stereo) right[i] = 0.0f;
     }
     return made;
+}
+
+/* out += in x g, g stepping by step before each sample. */
+static void ramp_add(const float *restrict in, float *restrict out, int n, float *g, float step) {
+    float v = *g;
+    int i;
+    for (i = 0; i < n; i++) {
+        v += step;
+        out[i] += v * in[i];
+    }
+    *g = v;
 }
 
 int enaga_sample_player_render_add(enaga_sample_player *p, float *left, float *right, int n, float rate, float gain_l,
@@ -290,13 +377,13 @@ int enaga_sample_player_render_add(enaga_sample_player *p, float *left, float *r
     step_l = (gain_l - gl) * scale;
     step_r = (gain_r - gr) * scale;
     while (done < n && p->active) {
-        int count = n - done > 64 ? 64 : n - done, i;
+        int count = n - done > 64 ? 64 : n - done;
         made += enaga_sample_player_render(p, block_l, block_r, count, rate);
-        for (i = 0; i < count; i++) {
-            gl += step_l;
-            gr += step_r;
-            left[done + i] += gl * block_l[i];
-            right[done + i] += gr * (stereo ? block_r[i] : block_l[i]);
+        if (stereo) {
+            ramp_add(block_l, left + done, count, &gl, step_l);
+            ramp_add(block_r, right + done, count, &gr, step_r);
+        } else {
+            enaga_ramp_stereo_add(block_l, left + done, right + done, count, &gl, &gr, step_l, step_r);
         }
         done += count;
     }
