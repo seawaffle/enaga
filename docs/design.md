@@ -2415,3 +2415,11 @@ photographs of STATUS.
       read USB input (the ring-drain fix planned with the USB work). The count stopped after a replug, since
       Windows no longer streamed to the unit; `USB_AUDIO_IN UNDERRUNS` went 0 → 357 across the unplug. CHECK's
       PAD MSG/S read 82 just after the menu closed (its one-second window spans the pause).
+
+### The debug port's guide (2026-11-25)
+
+`docs/usb-debug.md`, for app developers: setting up python-rtmidi, the commands, logging from an app, how input from
+the computer behaves (waiting for a frame, pads without raw readings, POWER with F1, the mark, taking over, the 5 s
+hold), scripting with `Client` (an example checked on the emulator), the status lines, peek, and the protocol for
+other languages. The SDK now ships it with `tools/usb_debug.py`, which needs nothing from the repository. Linked
+from getting-started's "Where next", `enaga::log` in api.md, the README and hardware.md.

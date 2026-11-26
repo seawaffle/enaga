@@ -111,6 +111,9 @@ The rules that matter most:
 - To test sound code on your PC: put tests in a `tests/` folder in your app and run
   `python3 -B tools/host_test.py ~/my-app`. It needs only g++ and gcc. `docs/api.md`, "Testing on a PC", has the
   helpers, and `examples/sampler/tests/engine.cpp` is an example.
+- To see into your app on the unit: `tools/usb_debug.py` follows the log (your `enaga::log` lines) as it happens,
+  takes screenshots, and presses keys, knobs and pads from the computer or a script. `docs/usb-debug.md` has the
+  guide.
 - To run whole apps without a unit: the emulator is public, in
   [smpltrek-re](https://github.com/seawaffle/smpltrek-re). With a clone of it and of Enaga's repository
   (its README, ["Testing without a unit"](https://github.com/seawaffle/enaga#testing-without-a-unit)),

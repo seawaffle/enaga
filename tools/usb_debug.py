@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Talk to a unit's debug port over USB: Enaga's log as it happens, its state, the screen, and words of memory,
-instead of photographing the STATUS page. The debug port is the unit's second USB MIDI port ("Enaga Debug"; on
+"""Talk to a unit's debug port over USB: Enaga's log as it happens, its state, the screen, words of memory, and
+its keys, knobs and pads (docs/usb-debug.md is the guide). The debug port is the unit's second USB MIDI port ("Enaga Debug"; on
 Windows' older MIDI stack "MIDIIN2 (Enaga SmplTrek)" and "MIDIOUT2 (...)"); the protocol is in
 firmware/usb/usb_debug.c.
 
