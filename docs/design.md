@@ -671,8 +671,13 @@ Its card is staged by `tools/unit_card.py`.
 - **DSP library speed (2026-11-26, log "The DSP library's speed"):**
   - Whether the SDK ships the library prebuilt by cl6x is still the owner's call ("decide later"). GCC's build of
     the block functions is 2-12 times slower than cl6x's (tools/bench.py), and most developers have only GCC.
-    Before shipping cl6x-built code, check that it calls none of TI's run-time library (the link would show it:
-    apps link only libgcc) and check TI's licence terms. CI has no cl6x, so the archive would be built locally.
+    Checked 2026-11-26: the cl6x archive needs only `__c6xabi_fixfu` and `__c6xabi_llshl` from outside itself, and
+    GCC's libgcc defines both (the local SDK build already links it this way), so nothing of TI's run-time library
+    is linked. The only TI headers it includes are the stdint typedefs, so it holds no TI code. CGT 8.5.0's licence
+    ("TI Text File" for the compiler, BSD-3-Clause for the RTS) grants rights over TI's software and claims nothing
+    over what it compiles; its narrowest condition, use only with TI devices, holds anyway (C6748). The objects
+    carry debug info with the build machine's paths, so a shipped archive is built with `--strip-debug`. CI has
+    no cl6x: either the archive is built locally at release, or CI installs TI's public download.
   - GCC 13's tic6x back end pipelines no loop with a float multiply (its SPLOOP pass gives up on them: "We don't
     handle floating point multiplies yet"). Its selective scheduler crashes the compiler, and the list scheduler
     does not overlap the unrolled copies, so each value waits for its whole chain. Inline math in an app's own
