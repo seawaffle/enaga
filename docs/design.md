@@ -684,7 +684,15 @@ Its card is staged by `tools/unit_card.py`.
     unattended mode (`--mode unattended --prefix DIR`). Tried on this machine the same day: downloaded, the
     checksum matched, the unattended install took 2 s with no prompt, and the library built with that copy was
     byte-identical to the local build's once debug info was stripped (all 8 objects). Stripped, the objects hold
-    no paths. Not yet run on GitHub's runners.
+    no paths. On GitHub's runners too: branch `ci-cl6x` (from origin/main, pushed with the owner's permission)
+    has a workflow, `.github/workflows/dsp-cl6x.yml`, that downloads and checks the installer, caches the install,
+    builds with `--symdebug:none` (which drops the paths without a strip step: TI's strip6x would drop the symbol
+    table too) and archives with TI's ar6x. It then checks that the archive needs only `__c6xabi_*` helpers and
+    holds no build path. Its first run (45879715154, 2026-11-26) passed in under a minute. The runner's objects
+    have the same machine code as a local build of the same sources and differ only in a tag cl6x makes up per
+    compilation (8-9 bytes of the symbol table), so the archive's hash differs from build to build. An ar6x
+    archive links into GCC apps (test_synth, test_sampler_example and test_sdk passed with one in place). Its
+    members are stored with no permission bits, which matters only to someone unpacking it.
   - GCC 13's tic6x back end pipelines no loop with a float multiply (its SPLOOP pass gives up on them: "We don't
     handle floating point multiplies yet"). Its selective scheduler crashes the compiler, and the list scheduler
     does not overlap the unrolled copies, so each value waits for its whole chain. Inline math in an app's own
