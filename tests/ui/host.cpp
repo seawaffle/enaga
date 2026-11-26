@@ -2,6 +2,7 @@
 // each widget draws. Run by tests/test_ui.py; prints one line per failed check and exits non-zero if any failed.
 #include <enaga/ui.hpp>
 
+#include <climits>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -103,6 +104,8 @@ static void test_list() {
     check(empty.key(ENAGA_KEY_OK, true) == Action::none, "list: OK on an empty list does nothing");
     draw_list(empty);
     check(find("EMPTY") != nullptr, "list: an empty list says so");
+    many.set_count(0);
+    check(many.cursor() == 0 && empty.cursor() == 0, "list: the cursor is 0 with no entries");
 }
 
 static void cents(int v, char *out) { std::snprintf(out, 13, "%+d CT", v); }
@@ -203,6 +206,8 @@ static void test_line() {
     check(same(Line().number(12345, 3), "12345"), "line: a wider number is not cut to the width");
     check(same(Line().fixed(-5, 2), "-0.05") && same(Line().fixed(1005, 1), "100.5"), "line: fixed point");
     check(same(Line().fixed(3, 0), "3"), "line: fixed point with no decimals");
+    check(same(Line().fixed(INT_MIN, 0), "-2147483648") && same(Line().fixed(INT_MIN, 3), "-2147483.648")
+          && same(Line().number(INT_MIN), "-2147483648"), "line: the most negative int");
     check(same(Line().hex(0x3C, 2).add(' ').hex(0xBEEF, 4), "3C BEEF"), "line: hex");
     check(same(Line().note(60), "C4") && same(Line().note(61), "C#4") && same(Line().note(0), "C-1")
           && same(Line().note(127), "G9") && same(Line().note(69), "A4"), "line: note names");
@@ -318,6 +323,9 @@ static void test_grid() {
     check(a1 && a1->grey == 10 && px(2, 13) == 2 && a2->x == 34, "grid: others dim; cells a quarter wide");
     grid.clear_lights();
     check(!grid.lit(2), "grid: clear_lights");
+    Grid none;
+    none.set_items(names, 0, 4);
+    check(none.cursor() == 0, "grid: the cursor is 0 with no cells");
 
     Grid many;                                            // scrolling: 16 rows of 4 in 3 visible rows
     many.set_items(64, 4, [](int i, char *out, int size, void *) { std::snprintf(out, size, "%02d", i); }, nullptr);
@@ -448,6 +456,17 @@ static void test_file_browser() {
     browser.open("/");
     deliver(6, {{longname.c_str(), false}, {"ok", false}});
     check(browser.count() == 1, "files: a name too long to keep is left out");
+    browser.open("/SAMPLES/", ".wav");                    // a trailing slash: still its own root
+    check(std::string(browser.folder()) == "/SAMPLES", "files: a root with a trailing slash");
+    deliver(7, {{"Kicks", true}});
+    browser.key(ENAGA_KEY_OK, true);
+    check(browser.key(ENAGA_KEY_CLR, true) == Action::moved && browser.key(ENAGA_KEY_CLR, true) == Action::back,
+          "files: and CLR back to it gives back");
+    deliver(8, {});
+    deliver(9, {{"A FOLDER NAMED AT LENGTH", true}, {"A FILE NAMED AT LENGTH.WAV", false}});
+    blank();
+    browser.draw(canvas);
+    check(find("A FOLDER NAMED AT/") && find("A FILE NAMED AT LE"), "files: a long folder name keeps its '/'");
 }
 
 static void test_param_steps_and_speed() {
