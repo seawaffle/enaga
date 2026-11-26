@@ -1,6 +1,6 @@
 """The UI toolkit (include/enaga/ui.hpp) compiled for the host and checked by tests/ui/host.cpp: list movement and
-scrolling, the parameter page's knobs, groups and resets, the dialog and text entry, and what each draws. Needs only
-a host g++.
+scrolling, the parameter page's knobs, groups and resets, the dialog and text entry, and what each draws; and
+enaga::Settings (settings.hpp) on a one-file stand-in. Needs only a host g++.
 
     python3 -B -m unittest discover -s tests -p test_ui.py -v
 """

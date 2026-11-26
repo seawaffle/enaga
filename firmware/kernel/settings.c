@@ -76,7 +76,7 @@ static void apply(int which)
     int v = settings_value[which];
     switch (which) {
     case VOLUME: audio_volume = gain[v]; break;
-    case BRIGHTNESS: oled_contrast((u8)(25 * (v + 1) + 5)); break;   /* 1 -> 55, 10 -> 255 */
+    case BRIGHTNESS: oled_contrast((u8)(25 * (v + 1) + 5)); break;   /* 1 -> 30, 10 -> 255 */
     case PADS: pad_press_level = press[v]; pad_release_level = press[v] * 3u / 4u; break;
     case AUTO_OFF: settings_auto_off_ms = minutes[v] * 60000u; break;
     case SPEAKER: audio_speaker_setting = v == 0; audio_speaker_apply(); break;
@@ -127,6 +127,7 @@ void settings_load(void)                      /* after the card is mounted (or n
     if (files_mounted() && f_open(&f, SETTINGS_FILE, FA_READ) == FR_OK) {
         if (f_read(&f, text, sizeof text - 1, &got) != FR_OK) got = 0;
         f_close(&f);
+        if (got == sizeof text - 1) while (got && text[got - 1] != '\n') got--;   /* a line cut off is not read */
     }
     for (i = start = 0; i <= got; i++)
         if (i == got || text[i] == '\n' || text[i] == '\r') {
@@ -170,9 +171,14 @@ static void change(int by)
     apply(settings_cursor);
 }
 
-int settings_event(const enaga_event_t *e)    /* 1: the page closed */
+void settings_commit(void)                    /* the page closing by any route, or the unit switching off */
 {
     int k;
+    for (k = 0; k < SETTINGS_COUNT; k++) if (settings_value[k] != settings_saved[k]) { save(); break; }
+}
+
+int settings_event(const enaga_event_t *e)    /* 1: the page closed */
+{
     if (e->type == ENAGA_EVENT_ENCODER && e->id == 4) { change(e->value); return 0; }
     if (e->type != ENAGA_EVENT_KEY || !e->value) return 0;
     switch (e->id) {
@@ -182,7 +188,7 @@ int settings_event(const enaga_event_t *e)    /* 1: the page closed */
     case ENAGA_KEY_RIGHT: change(1); break;
     case ENAGA_KEY_OK:
     case ENAGA_KEY_CLR:
-        for (k = 0; k < SETTINGS_COUNT; k++) if (settings_value[k] != settings_saved[k]) { save(); break; }
+        settings_commit();
         return 1;
     default: break;
     }

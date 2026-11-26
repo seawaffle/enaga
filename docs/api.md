@@ -317,7 +317,7 @@ In `<enaga/app.hpp>`. Main context.
 
 | Function | Does |
 |---|---|
-| `enaga::log(text)` | one line on Enaga's log (its status page shows the last lines) |
+| `enaga::log(text)` | one line on Enaga's log, up to 39 characters (its status page shows the last lines, and `tools/usb_debug.py log` shows them on a computer as they happen: [docs/usb-debug.md](usb-debug.md)) |
 | `enaga::ms()` | milliseconds since power-on |
 | `enaga::fatal(reason)` | stops the app at once; Enaga shows `reason` and keeps running. Does not return |
 | `enaga::system::open_menu()` | opens the Enaga menu once the current callback returns, as F1 + POWER does |
@@ -483,8 +483,9 @@ Recording a WAV: `create(path, 44, ...)`, write samples, then `wav::header(head,
 | `load<&T::done>(path, sample, object, to_output_rate = true)`, `load(path, sample, done, user, ...)` | starts loading; `sample`'s old frames are released at once. Returns `ENAGA_FILE_OK`, or an error at once with no callback (`ENAGA_FILE_BUSY` while a load is under way, `ENAGA_FILE_NOT_FOUND`, ...). `done(int32_t result)` runs later: the frames loaded, or a negative error, the sample then empty |
 | `cancel()` | stops a load, with no callback; `busy()` until the file service hands back the buffer (a main-loop pass or so) |
 | `busy()`, `progress()` | whether a load is under way; how far, 0 to 1 |
-| `not_wav` (-64), `no_memory` (-65) (enum `LoadError`) | its errors besides `ENAGA_FILE_*`: not a WAV it can read, or no room on the heap for the sample (the app goes on) |
+| `not_wav` (-64), `no_memory` (-65) (enum `LoadError`) | its errors besides `ENAGA_FILE_*`: not a WAV it can read (a sample rate outside `min_rate` - `max_rate` included), or no room on the heap for the sample (the app goes on) |
 | `chunk_bytes` | 16,384, read and converted per step |
+| `min_rate`, `max_rate` | 8,000 and 192,000: the sample rates it takes (a lower one would make each step's conversion too long) |
 
 ```cpp
 enaga::wav::Loader loader_;
@@ -514,14 +515,15 @@ void stop() override { settings.set("TEMPO", tempo); settings.save(); }
 |---|---|
 | `Settings(file = "SETTINGS.TXT")` | the file name in the data folder |
 | `load()` | reads the file; a missing one is empty settings. `ENAGA_FILE_OK` or an error |
-| `save()` | writes the file (safely, as `files::save`) if anything changed since `load()` or the last `save()` |
-| `get(key, fallback)` | a whole-number value, or `fallback` if missing or not a number |
+| `save()` | writes the file (safely, as `files::save`) if anything changed since `load()` or the last `save()`. After a `load()` that failed (a file too big, a card error) it writes nothing and returns that error, so a file it could not read is not replaced |
+| `get(key, fallback)` | a whole-number value, or `fallback` if missing, not a number or outside `int32_t` |
 | `text(key, fallback = "")` | the text value |
 | `set(key, value)` | a number or text; `false` if the key or value is invalid or 32 keys are in use |
 | `changed()` | whether there is something to save |
 
 Limits: `max_keys` (32) keys; keys up to `key_bytes` - 1 (23) bytes without `=` or a line break; text values up
-to `value_bytes` - 1 (31). Enaga's own settings are separate and not here.
+to `value_bytes` - 1 (31); the file up to 1,824 bytes. Lines other than `KEY=VALUE` are dropped on a save. Enaga's
+own settings are separate and not here.
 
 ## MIDI
 
@@ -837,7 +839,8 @@ canvas.text(0, 20, line);
 - `hex(value, digits)`, upper case.
 - `note(note)`: a MIDI note's name with middle C (60) as `C4`; 61 is `C#4` and 0 `C-1`.
 - `shown(text, max)`: text from outside the app (a file name, say) as the font can draw it: lower case raised and
-  anything else the font lacks shown as `-`, at most `max` characters. `kick_01.wav` becomes `KICK-01.WAV`.
+  anything else the font lacks shown as `-`, at most `max` characters. `kick_01é.wav` becomes `KICK_01--.WAV` (é is
+  two bytes).
 - `add_if_fits(part)` adds all of `part` or none of it, and says which: for a status line made of optional
   pieces, most important first.
 - `column(at)` pads with spaces up to character column `at`, to line values up.
@@ -923,8 +926,8 @@ the same object.
 **Conventions**
 
 - **Process in blocks.** Methods that take a buffer and a count (`render_add`, `process`, `render`, `read`) are
-  *block functions*, built with TI's cl6x when it is installed: several times faster than GCC's code, and the
-  same samples either way. Per-sample `step()` calls are for code that needs them, such as feedback loops.
+  *block functions*, compiled by TI's cl6x (the SDK's prebuilt copy, or your own cl6x): several times faster
+  than GCC's code, and the same samples either way. Per-sample `step()` calls are for code that needs them, such as feedback loops.
 - **`_add` adds** into the output buffer; clear it first (`enaga_clear`) when starting a mix.
 - **Coefficients at control rate.** Filter and envelope settings cost a reciprocal or an exponential; compute them
   when a parameter changes, or once per block, not per sample.
@@ -1376,7 +1379,8 @@ so return it from `main`. Each check returns whether it passed.
 - `clear_host()` forgets both.
 - `set_ms(ms)` sets what `enaga::ms()` returns.
 - `run_clock(bpm, from_tick)` runs the clock, and each `enaga::clock::ticks` call takes the next block's ticks (call
-  it once per block, as `audio()` does). `stop_clock()` stops it.
+  it once per block, as `audio()` does). `stop_clock()` stops it. The app's own `enaga::clock::start`, `stop`,
+  `continue_`, `locate` and `set_tempo` work as with the INTERNAL source.
 - `enaga::fatal` prints the reason and ends the test with exit status 3.
 - The file and stream services answer `ENAGA_FILE_NO_CARD`.
 - The lights, speaker, input and menu do nothing.

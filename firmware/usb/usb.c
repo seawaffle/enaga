@@ -102,6 +102,7 @@ int usb_midi_send(const u8 *data, u32 bytes)   /* all or nothing; 0 when not con
 
 #define DRIVE_SECTORS_MAX (CFG_TUD_MSC_EP_BUFSIZE / 512u)
 static volatile int drive_shared, drive_attention, drive_ejected;
+static volatile int drive_card_ok;            /* the card in the slot is the one initialised; cleared when it leaves */
 u32 usb_drive_read_sectors, usb_drive_written_sectors, usb_drive_errors;
 /* Where a copy's time goes, from the page's opening (STATUS USB_DRIVE_TIME, USB_DRIVE_PACKETS): reads and writes
  * (the callbacks, each up to DRIVE_SECTORS_MAX sectors), the time in the SD driver, and the time from one callback's
@@ -179,11 +180,23 @@ void usb_drive_share(int on)
     drive_shared = on;
     drive_attention = on;                      /* the computer is told the medium changed */
     drive_ejected = 0;
+    drive_card_ok = on;
 }
 
 int usb_drive_ejected(void) { return drive_ejected; }
+int usb_drive_sharing(void) { return drive_shared; }
 
-static int drive_ready(void) { return drive_shared && !drive_ejected && sd_present() && sd_sectors; }
+void usb_drive_card_changed(int ready)        /* files.c: a card left, or one arrived and was initialised (ready) */
+{
+    drive_card_ok = ready;
+    drive_attention = 1;                       /* the computer forgets the old card's size and FAT */
+}
+
+static int drive_ready(void)
+{
+    if (!sd_present()) drive_card_ok = 0;      /* at once, not after the debounce: a new card is not the old one */
+    return drive_shared && !drive_ejected && drive_card_ok && sd_sectors;
+}
 
 bool tud_msc_test_unit_ready_cb(uint8_t lun)
 {

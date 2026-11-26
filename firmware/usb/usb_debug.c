@@ -39,8 +39,8 @@
  * while holding a key never says so, and Windows goes on reading the port (unit session, 2026-11-25), so a
  * script holding longer sends something meanwhile (usb_debug.py's Client.wait sends HELLO each second).
  *
- * One request is answered at a time: a new one waits for the message being sent to finish, then replaces the
- * rest of the answer under way (LOG ON and OFF act at once). If nothing can be sent for DEBUG_STALL_MS (the computer stopped reading), the log stops and the answer
+ * One request is answered at a time: a new one (up to four wait) waits for the message being sent to finish,
+ * then replaces the rest of the answer under way. If nothing can be sent for DEBUG_STALL_MS (the computer stopped reading), the log stops and the answer
  * is dropped (the message under way still ends whole), so a forgotten port does not hold up the app's MIDI for
  * long. */
 
@@ -50,7 +50,7 @@
 #define REMOTE_HOLD_MS  5000u                  /* remote input let go after this long without a request */
 #define DEBUG_SHARE     128u                   /* bytes of TinyUSB's MIDI IN buffer the debug port may fill */
 #define REQUEST_MAX     16
-#define MESSAGE_MAX     (8 + 128 + 2)          /* the longest: a screen row */
+#define MESSAGE_MAX     (8 + 5 + 5 * PEEK_MAX + 2)   /* the longest: a full PEEK (a screen row is 8 + 128 + 2) */
 #define PEEK_MAX        32u
 
 enum { HELLO, LOG_ON, LOG_OFF, STATUS, SCREEN, PEEK, KEY, TURN, PAD, PRESSURE, RELEASE, LOST = 2, ERROR = 0x7F };
@@ -60,9 +60,11 @@ u32 usb_debug_requests, usb_debug_messages;    /* counted for tests and STATUS *
 static u8 request[REQUEST_MAX];                /* the SysEx being received, from its command byte */
 static u32 request_bytes;
 static int receiving;
-static u8 pending[REQUEST_MAX];                /* a request received, waiting for the current message to finish */
-static u32 pending_bytes;
-static int has_pending;
+#define PENDING_MAX     4                      /* requests received, waiting for the current message to finish */
+static u8 pending[PENDING_MAX][REQUEST_MAX];
+static u32 pending_bytes[PENDING_MAX];
+static u32 pending_head;
+static int has_pending;                        /* how many wait */
 
 static u8 message[MESSAGE_MAX];                /* the message being sent */
 static u32 message_bytes, message_sent;
@@ -350,9 +352,11 @@ void usb_debug_byte(u8 byte)                   /* a byte the computer sent on th
         /* 7D 45 <command> ...: anything else on this cable is not for us */
         if (request_bytes >= 3 && request[0] == 0x7D && request[1] == 0x45) {
             u32 i;
-            for (i = 2; i < request_bytes; i++) pending[i - 2] = request[i];
-            pending_bytes = request_bytes - 2;
-            has_pending = 1;
+            u32 slot = (pending_head + (u32)has_pending) % PENDING_MAX;
+            if (has_pending == PENDING_MAX) return;   /* a script sending faster than it reads: dropped */
+            for (i = 2; i < request_bytes; i++) pending[slot][i - 2] = request[i];
+            pending_bytes[slot] = request_bytes - 2;
+            has_pending++;
             request_ms = timer_ms();
             usb_debug_requests++;
         }
@@ -378,8 +382,10 @@ void usb_debug_poll(void)
             continue;
         }
         if (has_pending) {                     /* between messages: the request waiting starts */
-            has_pending = 0;
-            start(pending, pending_bytes);
+            u32 slot = pending_head;
+            pending_head = (pending_head + 1) % PENDING_MAX;
+            has_pending--;
+            start(pending[slot], pending_bytes[slot]);
             continue;
         }
         int next = next_answer();

@@ -1,9 +1,11 @@
 """The debug port (firmware/usb/usb_debug.c, tools/usb_debug.py) on the emulator: a second USB MIDI cable carrying
 Enaga's log, its state, the screen and memory words as SysEx, driven through tools/usb_debug.py's Client over the
 emulator's USB host, while cable 0 stays the app's MIDI, intact; and keys, knobs and pads pressed from the computer.
+Client's own checks run on a stand-in port without the emulator.
 
     ENAGA_EMULATOR=/path/to/emulator python3 -B -m unittest tests.test_usb_debug
 """
+import struct
 import sys
 import unittest
 from pathlib import Path
@@ -159,6 +161,9 @@ class UsbDebug(Emulated):
         self.assertEqual(self.client.peek(address), [self.emu.word("log_count")])
         words = self.client.peek(address, 3)
         self.assertEqual(len(words), 3)
+        expected = [0x55550000 + i for i in range(32)]                   # the most one PEEK may ask for
+        self.emu.cpu.write(0xC7000000, struct.pack("<32I", *expected))
+        self.assertEqual(self.client.peek(0xC7000000, 32), expected)
         with self.assertRaisesRegex(RuntimeError, "NOT ALLOWED"):
             self.client.peek(0x01E00400)                                 # the USB core: reads clear its interrupts
         with self.assertRaisesRegex(RuntimeError, "UNKNOWN"):
@@ -283,6 +288,67 @@ class RemoteInput(Emulated):
         self.transport.run_ms(2500)
         self.assertIn("K32 0", self.log())
         self.assertEqual(self.emu.word("remote_active"), 0)
+
+
+class FakeTransport:
+    """Messages handed out a batch per receive; what was sent is kept, and RELEASE answered."""
+
+    def __init__(self, batches):
+        self.batches, self.sent = list(batches), []
+
+    def send(self, sysex):
+        self.sent.append(bytes(sysex))
+        if usb_debug.decode(sysex)[0] == usb_debug.RELEASE:
+            self.batches.append([usb_debug.request(usb_debug.RELEASE)])
+
+    def receive(self, timeout):
+        return self.batches.pop(0) if self.batches else []
+
+
+class ClientChecks(unittest.TestCase):
+    def test_log_lines_keep_reading_past_other_messages(self):
+        log = [usb_debug.request(usb_debug.LOG, usb_debug.number(n, 3) + f"LINE {n}".encode()) for n in range(3)]
+        status = usb_debug.request(usb_debug.STATUS, b"X")
+        client = usb_debug.Client(FakeTransport([[log[0], status], [log[1]], [log[2]]]))
+        self.assertEqual(client.log_lines(0), [(0, "LINE 0")])
+        self.assertEqual(client.log_lines(0), [(1, "LINE 1")])
+        self.assertEqual(client.log_lines(0), [(2, "LINE 2")])
+        self.assertEqual(client.waiting, [(usb_debug.STATUS, b"X")])
+
+    def test_out_of_range_arguments_are_refused_before_sending(self):
+        transport = FakeTransport([])
+        client = usb_debug.Client(transport)
+        for call in (lambda: client.turn("VALUE", 8192), lambda: client.turn("A", -8193),
+                     lambda: client.peek(0x80000000, 33), lambda: client.peek(0x80000000, 0),
+                     lambda: client.peek(1 << 32)):
+            with self.assertRaises(ValueError):
+                call()
+        with self.assertRaises(KeyError):
+            client.press("300")
+        with self.assertRaises(KeyError):
+            client.key(128, True)
+        self.assertEqual(transport.sent, [])
+
+    def test_a_short_peek_answer_is_an_error(self):
+        answer = usb_debug.request(usb_debug.PEEK, usb_debug.number(0x80000000, 5) + usb_debug.number(7, 5) * 2)
+        client = usb_debug.Client(FakeTransport([[answer]]))
+        with self.assertRaisesRegex(RuntimeError, "2 of the 3 words"):
+            client.peek(0x80000000, 3)
+
+    def test_the_command_line_says_what_is_wrong(self):
+        import contextlib
+        import io
+        client = usb_debug.Client(FakeTransport([]))
+        for argv, message in ((["turn", "VALUE", "10000"], "-8192 to 8191"), (["peek", "0x80000000", "200"], "1 to 32"),
+                              (["press", "300"], "not a key")):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                original, usb_debug.open_port = usb_debug.open_port, lambda port: client
+                try:
+                    self.assertEqual(usb_debug.main(argv), 1)
+                finally:
+                    usb_debug.open_port = original
+            self.assertIn(message, err.getvalue())
 
 
 if __name__ == "__main__":

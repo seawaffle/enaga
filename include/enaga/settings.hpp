@@ -7,6 +7,8 @@
 //
 // Keys are up to 23 bytes without '=' or a line break, text values up to 31. Up to 32 keys; set() on a 33rd
 // returns false. Main context only. Enaga's own settings (volume, brightness...) are separate and not here.
+// A file load() could not read (too big, a card error) is never replaced: save() returns load()'s error until a
+// load() succeeds. Lines that are not KEY=VALUE are dropped on a save.
 #pragma once
 
 #include <enaga/files.hpp>
@@ -24,9 +26,10 @@ public:
         count_ = 0;
         changed_ = false;
         char path[ENAGA_FILE_PATH_MAX + 1];
-        if (!make_path(path)) return ENAGA_FILE_BAD_PATH;
+        if (!make_path(path)) return unread_ = ENAGA_FILE_BAD_PATH;
         static char text[max_keys * (key_bytes + value_bytes + 1)];
         int32_t got = files::read_all(path, text, sizeof text);
+        unread_ = got < 0 && got != ENAGA_FILE_NOT_FOUND ? got : int32_t(ENAGA_FILE_OK);
         if (got == ENAGA_FILE_NOT_FOUND) return ENAGA_FILE_OK;
         if (got < 0) return got;
         for (int32_t i = 0, start = 0; i <= got; i++)
@@ -38,8 +41,9 @@ public:
         return ENAGA_FILE_OK;
     }
 
-    // Writes the file if anything changed since load() or the last save().
+    // Writes the file if anything changed since load() or the last save(); after a failed load(), its error.
     int32_t save() {
+        if (unread_ < 0) return unread_;
         if (!changed_) return ENAGA_FILE_OK;
         char path[ENAGA_FILE_PATH_MAX + 1];
         if (!make_path(path)) return ENAGA_FILE_BAD_PATH;
@@ -67,9 +71,13 @@ public:
         bool negative = *p == '-';
         if (negative) p++;
         if (*p < '0' || *p > '9') return fallback;
-        int32_t v = 0;
-        for (; *p >= '0' && *p <= '9'; p++) v = v * 10 + (*p - '0');
-        return *p ? fallback : negative ? -v : v;
+        uint32_t v = 0, most = negative ? 0x80000000u : 0x7FFFFFFFu;
+        for (; *p >= '0' && *p <= '9'; p++) {
+            uint32_t digit = uint32_t(*p - '0');
+            if (v > (most - digit) / 10) return fallback;               // out of int32_t's range
+            v = v * 10 + digit;
+        }
+        return *p ? fallback : negative ? int32_t(0u - v) : int32_t(v);
     }
 
     bool set(const char *key, const char *value) {
@@ -150,6 +158,7 @@ private:
     char keys_[max_keys][key_bytes];
     char values_[max_keys][value_bytes];
     int count_ = 0;
+    int32_t unread_ = ENAGA_FILE_OK;                 // load()'s error, which save() keeps returning
     bool changed_ = false;
 };
 

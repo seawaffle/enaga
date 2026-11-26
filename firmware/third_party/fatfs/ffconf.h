@@ -264,7 +264,7 @@
 */
 
 
-#define FF_FS_LOCK		12
+#define FF_FS_LOCK		24	/* Enaga: an app's 8 files and 8 streams, a queued load or list, and the kernel's own */
 /* The option FF_FS_LOCK switches file lock function to control duplicated file open
 /  and illegal operation to open objects. This option must be 0 when FF_FS_READONLY
 /  is 1.

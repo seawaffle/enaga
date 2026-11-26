@@ -12,7 +12,8 @@ docs/hardware.md "Checks on a unit"); everything is also tested on an emulator. 
 (`include/enaga/abi.h`) is provisional until 1.0.
 The app interface is documented in [docs/api.md](docs/api.md); the design and plan are in
 [docs/design.md](docs/design.md); the hardware facts Enaga relies on are in [docs/hardware.md](docs/hardware.md),
-most of them established by [smpltrek-re](https://github.com/seawaffle/smpltrek-re).
+most of them established by [smpltrek-re](https://github.com/seawaffle/smpltrek-re). A unit's log, screen and
+controls are reachable over USB with `tools/usb_debug.py` ([docs/usb-debug.md](docs/usb-debug.md)).
 
 ## Writing an app
 
@@ -139,7 +140,9 @@ tools/build_tic6x_gcc.sh            # 10-30 minutes
 Set `ENAGA_TOOLCHAIN` to use an existing installation elsewhere. Optionally install TI's C6000 code generation
 tools (free from TI; tested with 8.5.0.LTS) for the DSP library and `*.ti.c` files: `tools/paths.py` uses the newest
 `~/ti/ti-cgt-c6000_*`, or `ENAGA_TI_CGT` (`ENAGA_TI_CGT=none` builds them with GCC). The library is built once
-into `build/dsplib/` and again when it changes. Then:
+into `build/dsplib/` and again when it changes. A release's SDK carries the library prebuilt by cl6x
+(`runtime/prebuilt/`, `tools/make_sdk.py --prebuilt`), which apps link when the developer has no cl6x and the
+library's sources are unchanged. Then:
 
 ```sh
 python3 -B tools/build_app.py examples/tone     # -> build/apps/tone/APP.ENA
@@ -159,7 +162,9 @@ per device, built by `.github/workflows/release.yml` (the tag must match `VERSIO
 1. Copy the file for your device to the root of the SD card, keeping its name: `build/firmware/smpltrek/SmplTrek.bin`,
    `build/firmware/lofi12xt/Lofi-12 XT.bin` or `build/firmware/cydrums/CyDrums.bin` (`ENAGA_<version>.bin` is
    the SmplTrek's under the release name). Copy an app's package to `/ENAGA/APPS/<NAME>/APP.ENA` (8.3 names); once Enaga runs, the
-   menu's USB DRIVE page puts the card on a computer over USB for this, without taking it out.
+   menu's USB DRIVE page puts the card on a computer over USB for this, without taking it out. It runs at USB full
+   speed, up to about 1 MB/s; a port on the computer's CPU-side USB controller (often the rear ones) can be several
+   times faster than one on the chipset's.
 2. Hold the fourth key of the upper function row (F4: HOME on a SmplTrek, PAD on a Lofi-12 XT or CyDrums) while
    switching on to reach BOOT MODE, and choose SYSTEM UPDATE.
 
@@ -180,7 +185,9 @@ directory (the one containing `cpu.py`); it builds its core into its own `work/`
 
 ```sh
 export ENAGA_EMULATOR=/path/to/smpltrek-re/emulator
-python3 -B -m unittest discover -s tests -v                           # 119 tests, about 9 minutes
+python3 -B tests/run.py                                               # every test file side by side: ~1.5 min on 16 cores
+python3 -B tests/run.py usb_debug e1                                  # only some files (parts of their names)
+python3 -B -m unittest discover -s tests -v                           # one after another, in one process
 python3 -B tools/emulate.py examples/tone --key 32@300000000           # press STEP 1; writes build/emulate/
 python3 -B tools/emulate.py examples/synth --turn 0:3@350000000 --power-off 450000000 \
     --get /ENAGA/DATA/SYNTH/LAST.SYN                                  # knob A 3 detents, switch off, the saved file
@@ -223,8 +230,8 @@ them), and a JSON report. Its other options (`--help`): `--card-mib` for a large
 | `loader/` | The package loader (freestanding C, used by the firmware and the tests) |
 | `firmware/` | Enaga itself: `hal/` drivers, `kernel/` (interrupts, audio engine, app host, menu, settings, device detection, exceptions, watchdog, main loop), `start.s`, `link.ld`, `build.py` |
 | `examples/` | `synth` (the virtual analogue synthesizer); `widgets` (the UI toolkit); `sampler` (WAV files on the pads, with tests on a PC); `tone` (STEP 1-8 play 750 Hz x step); `cxxcheck` (exercises the C++ runtime) |
-| `tests/` | `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board; `test_check.py` and `unit/check`: the CHECK app for sessions on a unit; `test_synth.py`: the synth example; `test_files.py` and `apps/files`: the file service; `test_streams.py` and `apps/streams`: streams and WAV; `test_menu.py` and `apps/menu`: the Enaga menu, boot policy, app switching and settings; `test_dsp.py` and `dsp/`: the DSP library on the host; `test_ui.py` and `ui/`: the UI toolkit on the host, `test_widgets.py`: on the firmware; `test_midi.py`, `test_clock.py`, `test_usb.py`, `test_usb_drive.py`, `test_usb_audio.py`, `test_input.py`: MIDI, the clock and SYNC, USB MIDI, USB DRIVE, USB audio, input selection; `test_battery.py`: the battery; `test_sysimage.py`: the update files for each device; `test_card_files.py`: extra files, long names included, on the emulator tools' cards; `test_sdk.py`: the SDK and the packaged toolchain, built from outside the repository; `test_bytes.py`: the byte helpers; `test_math.py` and `apps/math`: libm and the fast math on the emulated C674x; `test_sampler.py` and `apps/sampler`: loading WAV files into samples and playing them; `test_sampler_example.py`: the sampler example; `test_host_test.py`: tests on a PC (`tools/host_test.py`); `test_usb_debug.py`: the USB debug port; `test_api_docs.py`: every public name is in docs/api.md |
-| `tools/` | `build_app.py`, `host_test.py` (an app's tests on a PC), `usb_debug.py` (a unit's log, state, screen and memory over its USB debug port), `emulate.py`, `panel.py` (apps live in the emulator's web panel), `card.py` (FAT and exFAT card images through Enaga's own FatFs), `unit_card.py` and `unit_dry_run.py` (files for a session on a unit, and the session walked on the emulator), `sysimage.py` (the update-file format), `register_capture.py` (Enaga's peripheral register accesses phase by phase, to diff against the original firmware's), `paths.py`, toolchain build scripts; `make_sdk.py` and `package_toolchain.py` (release archives) |
+| `tests/` | `run.py`: runs the test files side by side, each with its own build folder under build/test-runs/ (its logs too); `test_e0.py`: packages through the loader and runtime on the emulator's CPU; `test_e1.py`: the whole firmware on the emulated board; `test_check.py` and `unit/check`: the CHECK app for sessions on a unit; `test_synth.py`: the synth example; `test_files.py` and `apps/files`: the file service; `test_streams.py` and `apps/streams`: streams and WAV; `test_menu.py` and `apps/menu`: the Enaga menu, boot policy, app switching and settings; `test_dsp.py` and `dsp/`: the DSP library on the host (in both compilers' forms); `test_ui.py` and `ui/`: the UI toolkit on the host, `test_widgets.py`: on the firmware; `test_midi.py`, `test_clock.py`, `test_usb.py`, `test_usb_drive.py`, `test_usb_audio.py`, `test_input.py`: MIDI, the clock and SYNC, USB MIDI, USB DRIVE, USB audio, input selection; `test_battery.py`: the battery; `test_sysimage.py`: the update files for each device; `test_card_files.py`: extra files, long names included, on the emulator tools' cards; `test_fsinfo.py`: FAT32's FSInfo sector against a card formatted by mkfs.fat; `test_sdk.py`: the SDK and the packaged toolchain, built from outside the repository; `test_bytes.py`: the byte helpers; `test_math.py` and `apps/math`: libm and the fast math on the emulated C674x; `test_sampler.py` and `apps/sampler`: loading WAV files into samples and playing them; `test_sampler_example.py`: the sampler example; `test_host_test.py`: tests on a PC (`tools/host_test.py`); `test_usb_debug.py`: the USB debug port; `test_lifecycle.py`: an app's start, failure and crash at their edges, paths and resource limits, the settings page left without OK; `test_api_docs.py`: every public name is in docs/api.md |
+| `tools/` | `build_app.py`, `host_test.py` (an app's tests on a PC), `bench.py` (the DSP library's cycles, cl6x and GCC, on the emulator), `usb_debug.py` (a unit's log, state, screen and memory over its USB debug port, and its keys, knobs and pads; docs/usb-debug.md), `emulate.py`, `panel.py` (apps live in the emulator's web panel), `card.py` (FAT and exFAT card images through Enaga's own FatFs), `unit_card.py` and `unit_dry_run.py` (files for a session on a unit, and the session walked on the emulator), `sysimage.py` (the update-file format), `register_capture.py` (Enaga's peripheral register accesses phase by phase, to diff against the original firmware's), `paths.py`, toolchain build scripts; `make_sdk.py` and `package_toolchain.py` (release archives) |
 | `docs/` | `getting-started.md` (an app from the SDK), `api.md` (the app interface reference), `design.md` (decisions, architecture, plan, log), `hardware.md` (the hardware notes) |
 
 ## Licence

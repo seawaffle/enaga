@@ -6,6 +6,7 @@
 #include <enaga/music.hpp>
 #include <enaga/queue.hpp>
 #include <enaga/sequencer.hpp>
+#include <enaga/wav.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -231,6 +232,13 @@ static void effects() {
     double echo = 0;
     for (int i = 9500; i < 9700; i++) echo += l[i];
     near("second echo at feedback 0.5", echo, 0.5, 0.05);
+    StereoDelay short_delay;                            // a delay shorter than the 0.25 s default starts at its max
+    short_delay.init(0.1f, kRate);
+    std::fill(l.begin(), l.end(), 0.0f);
+    for (int i = 0; i < 48000; i += 64) short_delay.process(&in[i], &in[i], &l[i], &r[i], 64, 1.0f);
+    first = 0;
+    while (first < 48000 && std::fabs(l[first]) < 0.1f) first++;
+    near("a short delay's first time (samples)", first, 4800, 2);
 
     Reverb reverb;
     reverb.init(kRate);
@@ -288,7 +296,7 @@ public:
         rate_ = sample_rate;
         left_.allocate(uint32_t(max_seconds * sample_rate) + 4);
         right_.allocate(uint32_t(max_seconds * sample_rate) + 4);
-        current_ = target_ = 0.25f * sample_rate;
+        current_ = target_ = std::min(0.25f * sample_rate, max_seconds * sample_rate);
     }
     void set(float seconds, float feedback, float tone, bool ping_pong) {
         target_ = clamp(seconds * rate_, 16.0f, float(left_.capacity() - 2));
@@ -637,8 +645,8 @@ static void building_blocks() {
         for (size_t i = 0; i < in.size(); i++) yf[i] = f2.step(f1.step(in[i], c1), c2);
         same("biquad cascade = two steps", ye, yf);
     }
-    // FIR: lengths below, at and past a chunk, against the plain sum; in place too.
-    for (int length : {1, 3, 32, 64, 65, 150}) {
+    // FIR: lengths below, at and past a chunk, against the plain sum; in place too. No taps: silence.
+    for (int length : {0, 1, 3, 32, 64, 65, 150}) {
         std::vector<float> taps(length);
         for (float &t : taps) t = noise.bipolar() / float(length);
         Fir a, d;
@@ -708,19 +716,20 @@ static void building_blocks() {
 }
 
 // Chorus, hard sync and the product mix.
+static float c_base(float rate) { return std::max(0.008f * rate, 66.0f); }   // effects.c's chorus_base
 static void synth_blocks() {
     Random noise;
     std::vector<float> in(4096);
     for (float &x : in) x = noise.bipolar();
     const int sizes[] = {64, 37, 1, 16, 100, 64, 13, 200};
-    // Chorus against a per-sample reference on DelayLine (tap_linear, then write), also in place, at two rates.
-    for (float rate : {48000.0f, 22050.0f}) {
+    // Chorus against a per-sample reference on DelayLine (tap_linear, then write), also in place, at three rates.
+    for (float rate : {48000.0f, 22050.0f, 8000.0f}) {
         Chorus a, b;
         a.init(rate);
         b.init(rate);
         a.set(1.3f, 0.8f);
         b.set(1.3f, 0.8f);
-        DelayLine rl(uint32_t(0.016f * rate) + 4), rr(uint32_t(0.016f * rate) + 4);
+        DelayLine rl(uint32_t(2 * c_base(rate)) + 4), rr(uint32_t(2 * c_base(rate)) + 4);
         const enaga_chorus &c = a.state_;
         std::vector<float> al(in.size()), ar(in.size()), bl = in, br = in, wl(in.size()), wr(in.size());
         std::vector<float> in_r(in.rbegin(), in.rend());
@@ -905,10 +914,23 @@ static void samples() {
     check(f[0] == -0.25f && f[1] == 2.0f, "float copied", f[0], -0.25);
     enaga_pcm_to_int16(fl + 1, ENAGA_PCM_FLOAT, 1, i16, 2);
     check(i16[0] == -8192 && i16[1] == 32767, "float to int16", i16[1], 32767);
+    const uint32_t odd[3] = {0x7F800000u, 0xFF800000u, 0x7FC00000u};    // +inf, -inf, NaN
+    float odd_f[3];
+    enaga_pcm_to_float(odd, ENAGA_PCM_FLOAT, 1, odd_f, 3);
+    enaga_pcm_to_int16(odd, ENAGA_PCM_FLOAT, 1, r3, 3);
+    check(odd_f[0] == 0 && odd_f[1] == 0 && odd_f[2] == 0 && r3[0] == 0 && r3[1] == 0 && r3[2] == 0,
+          "infinity and NaN in a float WAV read as silence", odd_f[2], 0);
     const float back[4] = {0.5f / 32768, -1.5f, 1.0f, -0.6f / 32768};
     int16_t out16[4];
     enaga_float_to_int16(back, out16, 4);
     check(out16[0] == 1 && out16[1] == -32768 && out16[2] == 32767 && out16[3] == -1, "float_to_int16", out16[0], 1);
+    {
+        // wav::parse: a chunk size that puts the next chunk at 2^32 - 8 must not wrap back into the buffer.
+        uint8_t file[20] = {'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'A', 'V', 'E', 'J', 'U', 'N', 'K'};
+        enaga::wav::detail::put32(file + 16, 0xFFFFFFE4u);
+        enaga::wav::Format format;
+        check(!enaga::wav::parse(file, sizeof file, format), "wav parse: a chunk size that wraps", 0, 0);
+    }
     const int16_t pcm[2] = {-32768, 16384};
     enaga_int16_to_float(pcm, f, 2, 0.5f);
     check(f[0] == -0.5f && f[1] == 0.25f, "int16_to_float with gain", f[1], 0.25);
@@ -1123,6 +1145,185 @@ static void polyphony() {
     check(s.size() == 2 && s.top().key == 2 && s[0].key == 3, "a key played again moves to the top", s[0].key, 3);
 }
 
+// The synced sine as the one-loop SYNC_LOOP computed it (GCC's branching form), as the reference for the three
+// passes, bit for bit.
+static void sync_sine_reference(enaga_oscillator *o, float *carry, const enaga_oscillator *master, float dt_m,
+                                float inv_dt_m, float *out, int n, float dt, float inv_dt, float level) {
+    const float TURN = 4294967296.0f;
+    const uint32_t dpm = (uint32_t)(int32_t)(dt_m * TURN), dp = (uint32_t)(int32_t)(dt * TURN);
+    uint32_t pm = master->phase, p = o->phase;
+    float prev = *carry, dc = 0.0f;
+    for (int i = 0; i < n; i++) {
+        const float wrap_jump = 0.0f;
+        const uint32_t pm1 = pm + dpm, free = p + dp;
+        const int restart = pm1 < pm, wrap = free < p;
+        float a = 0.0f, at = 0.0f, jump, since;
+        uint32_t p1 = free;
+        if (restart) {
+            a = enaga_clamp(enaga_unipolar(pm1) * inv_dt_m, 0.0f, 1.0f);
+            at = enaga_unipolar(p + (uint32_t)(int32_t)((1.0f - a) * dt * TURN));
+            p1 = (uint32_t)(int32_t)(a * dt * TURN);
+        }
+        const float x1 = enaga_unipolar(p1);
+        if (restart) {
+            jump = enaga_sin_turns(0.0f) - enaga_sin_turns(at);
+            since = a;
+        } else {
+            jump = wrap ? wrap_jump : 0.0f;
+            since = x1 * inv_dt;
+        }
+        float cur = enaga_sin_turns(x1) - 0.5f * jump * (1.0f - since) * (1.0f - since);
+        prev += 0.5f * jump * since * since;
+        out[i] += level * (prev + dc);
+        prev = cur;
+        pm = pm1;
+        p = p1;
+    }
+    o->phase = p;
+    *carry = prev;
+}
+
+static void sync_sine_against_reference() {
+    uint32_t seed = 77;
+    int bad = 0;
+    for (int trial = 0; trial < 400 && !bad; trial++) {
+        float dt = 0.001f + 0.45f * enaga_unipolar(enaga_xorshift(&seed));
+        float dt_m = 0.001f + 0.45f * enaga_unipolar(enaga_xorshift(&seed));
+        enaga_oscillator a = {enaga_xorshift(&seed)}, b = a, m = {enaga_xorshift(&seed)};
+        float ca = 0.0f, cb = 0.0f;
+        for (int call = 0; call < 20 && !bad; call++) {
+            int n = 1 + int(enaga_xorshift(&seed) % 150);
+            std::vector<float> oa(n, 0.25f), ob(n, 0.25f);
+            enaga_oscillator_sync_add(&a, &ca, &m, dt_m, 1.0f / dt_m, oa.data(), n, ENAGA_WAVE_SINE, dt, 1.0f / dt, 0.7f, 0.5f);
+            sync_sine_reference(&b, &cb, &m, dt_m, 1.0f / dt_m, ob.data(), n, dt, 1.0f / dt, 0.7f);
+            if (std::memcmp(oa.data(), ob.data(), n * sizeof(float)) || a.phase != b.phase ||
+                std::memcmp(&ca, &cb, sizeof ca))
+                bad++;
+            enaga_oscillator_advance(&m, n, dt_m);
+        }
+    }
+    check(!bad, "synced sine = the one-loop reference", bad, 0);
+}
+
+// The sample player as it was written frame by frame (before the run of plain frames), as the reference.
+namespace player_reference {
+constexpr int64_t kFrame = int64_t(1) << 32;
+static float cubic(float xm1, float x0, float x1, float x2, float t) {
+    float c1 = 0.5f * (x1 - xm1);
+    float c2 = xm1 - 2.5f * x0 + 2.0f * x1 - 0.5f * x2;
+    float c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
+    return ((c3 * t + c2) * t + c1) * t + x0;
+}
+static int64_t modulo(int64_t x, int64_t m) {
+    int64_t d = m;
+    while (d <= x >> 1) d <<= 1;
+    for (; d >= m; d >>= 1)
+        if (x >= d) x -= d;
+    return x;
+}
+static void advance(enaga_sample_player *p, int64_t step) {
+    int64_t before = p->position, at = p->direction > 0 ? before + step : before - step;
+    int64_t ls = (int64_t)p->loop_start << 32, le = (int64_t)p->loop_end << 32;
+    if (p->loop != ENAGA_LOOP_OFF && p->loop_end > p->loop_start) {
+        int64_t last = le - kFrame, length = le - ls, u;
+        if (p->loop == ENAGA_LOOP_FORWARD) {
+            if (p->direction > 0 && before < le && at >= le) at = ls + modulo(at - ls, length);
+            if (p->direction < 0 && before >= ls && at < ls) {
+                u = modulo(ls - at, length);
+                at = u ? le - u : ls;
+            }
+        } else if (p->direction > 0 ? before <= last && at > last : before >= ls && at < ls) {
+            int64_t half = last - ls;
+            u = half > 0 ? modulo(p->direction > 0 ? at - ls : ls - at, 2 * half) : 0;
+            p->direction = u <= half ? 1 : -1;
+            at = u <= half ? ls + u : ls + 2 * half - u;
+        }
+    }
+    p->position = at;
+    if (p->direction > 0 ? at >= (int64_t)p->end << 32 : at < (int64_t)p->start << 32) p->active = 0;
+}
+static int render(enaga_sample_player *p, float *left, float *right, int n, float rate) {
+    const enaga_sample *s = p->sample;
+    const float *d = s->data;
+    int last = (int)s->frames - 1, stereo = s->channels == 2, i, made = 0;
+    int ls = (int)p->loop_start, le = (int)p->loop_end, forward = p->loop == ENAGA_LOOP_FORWARD && le > ls;
+    rate = enaga_clamp(rate, 0.0f, 1048576.0f);
+    uint32_t whole = (uint32_t)rate;
+    int64_t step = (int64_t)whole << 32 | (uint32_t)((rate - (float)whole) * 2147483648.0f) << 1;
+    for (i = 0; i < n && p->active; i++) {
+        int x = (int)(p->position >> 32), a = x - 1, b = x, c = x + 1, e = x + 2;
+        if (forward && x >= ls && x < le) {
+            if (a < ls) a += le - ls;
+            while (c >= le) c -= le - ls;
+            while (e >= le) e -= le - ls;
+        }
+        a = a < 0 ? 0 : a > last ? last : a;
+        b = b < 0 ? 0 : b > last ? last : b;
+        c = c < 0 ? 0 : c > last ? last : c;
+        e = e < 0 ? 0 : e > last ? last : e;
+        float t = (float)((uint32_t)p->position >> 8) * (1.0f / 16777216.0f);
+        if (stereo) {
+            left[i] = cubic(d[2 * a], d[2 * b], d[2 * c], d[2 * e], t);
+            right[i] = cubic(d[2 * a + 1], d[2 * b + 1], d[2 * c + 1], d[2 * e + 1], t);
+        } else {
+            left[i] = cubic(d[a], d[b], d[c], d[e], t);
+        }
+        advance(p, step);
+        made++;
+    }
+    for (; i < n; i++) {
+        left[i] = 0.0f;
+        if (stereo) right[i] = 0.0f;
+    }
+    return made;
+}
+}  // namespace player_reference
+
+// The sample player against the frame-by-frame reference, bit for bit and state for state: random samples, ends,
+// loops of both kinds (and empty ones), both directions, rates from 0 to past the sample's length, uneven blocks,
+// and the loop switched off or the rate changed between blocks.
+static void player_against_reference() {
+    uint32_t seed = 2024;
+    auto next = [&] { return enaga_xorshift(&seed); };
+    auto pick = [&](uint32_t n) { return n ? next() % n : 0u; };
+    static const float rates[] = {0.0f, 0.001f, 0.37f, 0.5f, 1.0f, 1.0f, 1.2345f, 2.0f, 2.9f, 17.3f, 250.0f, 1e6f};
+    int bad = 0, cases = 0;
+    for (int trial = 0; trial < 3000 && !bad; trial++) {
+        uint32_t frames = 1 + pick(trial % 3 ? 300 : 8), channels = 1 + pick(2);
+        std::vector<float> data(frames * channels);
+        for (float &v : data) v = enaga_bipolar(next());
+        enaga_sample s = {data.data(), frames, channels, 48000};
+        enaga_sample_player a, b;
+        uint32_t start = pick(frames + 2), end = pick(4) ? pick(frames + 3) : 0;
+        enaga_sample_player_start(&a, &s, start, end, pick(3) == 0);
+        a.loop = int32_t(pick(3));
+        a.loop_start = pick(frames + 1);
+        a.loop_end = pick(5) ? a.loop_start + pick(frames + 2 - a.loop_start) : pick(frames + 1);
+        if (pick(4) == 0) a.position += int64_t(next());       // between frames
+        b = a;
+        float rate = rates[pick(sizeof rates / sizeof rates[0])];
+        if (pick(3) == 0) rate = enaga_unipolar(next()) * 4.0f;
+        for (int call = 0; call < 40 && !bad; call++) {
+            int n = 1 + int(pick(64));
+            std::vector<float> la(64, 7.0f), ra(64, 7.0f), lb(64, 7.0f), rb(64, 7.0f);
+            int ma = enaga_sample_player_render(&a, la.data(), channels == 2 ? ra.data() : nullptr, n, rate);
+            int mb = player_reference::render(&b, lb.data(), channels == 2 ? rb.data() : nullptr, n, rate);
+            cases++;
+            if (ma != mb || std::memcmp(la.data(), lb.data(), 64 * sizeof(float)) ||
+                std::memcmp(ra.data(), rb.data(), 64 * sizeof(float)) || a.position != b.position ||
+                a.direction != b.direction || a.active != b.active) {
+                std::printf("player trial %d call %d: frames %u ch %u start %u end %u loop %d %u-%u rate %g n %d\n",
+                            trial, call, frames, channels, a.start, a.end, a.loop, a.loop_start, a.loop_end, rate, n);
+                bad++;
+            }
+            if (pick(10) == 0) a.loop = b.loop = ENAGA_LOOP_OFF;
+            if (pick(10) == 0) rate = rates[pick(sizeof rates / sizeof rates[0])];
+        }
+    }
+    check(!bad, "sample player = the frame-by-frame reference", bad, 0);
+    check(cases > 50000, "sample player cases run", cases, 50000);
+}
+
 // The sample player against what it should play.
 static void sample_player() {
     Sample mono;
@@ -1167,6 +1368,40 @@ static void sample_player() {
     exact = true;
     for (int i = 0; i < 24; i++) exact = exact && l[i] == bounce[i];
     check(exact, "ping-pong between 40 and 44", l[16], 42);
+
+    for (float rate : {3.0f, 11.0f}) {                  // steps that cross the loop's ends once or more
+        p.start(mono, 40, 0);
+        p.set_loop(SamplePlayer::ping_pong, 40, 45);    // frames 40-44: a fold every 4, a period of 8
+        p.render(l.data(), nullptr, 64, rate);
+        exact = true;
+        for (int i = 0; i < 64; i++) {
+            int u = int(rate) * i % 8;
+            exact = exact && l[i] == float(40 + (u <= 4 ? u : 8 - u));
+        }
+        check(exact, "ping-pong with a step longer than the loop", rate, 0);
+    }
+    p.start(mono, 40, 0);
+    p.set_loop(SamplePlayer::ping_pong, 40, 42);        // two frames at twice the rate: always the first
+    p.render(l.data(), nullptr, 16, 2.0f);
+    check(std::count(l.begin(), l.begin() + 16, 40.0f) == 16, "ping-pong over two frames at rate 2", l[1], 40);
+    p.start(mono, 0, 100, true);
+    p.set_loop(SamplePlayer::forward, 40, 50);
+    p.render(l.data(), nullptr, 8, 23.0f);
+    const float wrapped[] = {99, 76, 53, 40, 47, 44, 41, 48};
+    exact = true;
+    for (int i = 0; i < 8; i++) exact = exact && l[i] == wrapped[i];
+    check(exact, "a reversed forward loop with a step longer than the loop", l[4], 47);
+
+    Sample cycle;                                       // one cycle of a sine, looped: seamless at any rate
+    cycle.allocate(64, 1, 48000);
+    for (int i = 0; i < 64; i++) cycle.data()[i] = float(std::sin(2 * M_PI * i / 64));
+    p.start(cycle);
+    p.set_loop(SamplePlayer::forward, 0, 64);
+    worst = 0;
+    std::vector<float> long_block(2000);
+    p.render(long_block.data(), nullptr, 2000, 0.37f);
+    for (int i = 0; i < 2000; i++) worst = std::fmax(worst, std::fabs(long_block[i] - std::sin(2 * M_PI * 0.37 * i / 64)));
+    near("a looped cycle at rate 0.37: no glitch at the join", worst, 0, 1e-4);
 
     Sample stereo;
     stereo.allocate(8, 2, 44100);
@@ -1309,6 +1544,20 @@ static void sequencing() {
     near("advance = a block of steps", c.advance(), b.value(), 1e-5);
     c.jump(0.25f);
     check(c.value() == 0.25f && c.settled(), "jump", c.value(), 0.25);
+    Smoothed d, e;                                      // long glides stall short of the target without a snap
+    d.init(0.05f, 48000.0f, 0.0f);
+    e.init(0.05f, 750.0f, 0.0f, 64);
+    d.set(1.0f);
+    e.set(1.0f);
+    for (int k = 0; k < 48000 && !d.settled(); k++) d.next();
+    for (int k = 0; k < 750 && !e.settled(); k++) e.advance();
+    check(d.settled() && e.settled(), "smoothed: a glide settles", d.value(), 1);
+    for (int k = 0; k < 48000; k++) d.next();
+    check(d.value() == 1.0f, "smoothed: and lands on the target", d.value(), 1);
+    d.set(0.3f);
+    std::vector<float> glide(48000);
+    d.render(glide.data(), 48000);
+    check(d.value() == 0.3f, "smoothed: render lands on the target too", d.value(), 0.3);
 }
 
 static void dynamics() {
@@ -1523,6 +1772,8 @@ int main() {
     dynamics();
     sequencing();
     sample_player();
+    player_against_reference();
+    sync_sine_against_reference();
     polyphony();
     libm();
     samples();

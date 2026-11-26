@@ -1,6 +1,6 @@
 #include "kernel.h"
 
-/* The watchdog. TIMER64P0's period interrupt (every 10 ms, CPU interrupt 4: timer.c, irq.c) checks two things:
+/* The watchdog. TIMER64P0's period interrupt (every 10 ms, CPU interrupt 4: timer.c, irq.c) checks three things:
  *
  *   - the app's audio callback has not been running for WATCHDOG_AUDIO_MS. The callback runs with this
  *     interrupt allowed to nest (audio.c), so a callback that never returns is seen;
@@ -9,7 +9,7 @@
  *
  * A hang while an app is loaded, starting or stopping is the app's: it is dropped as with fatal() and the
  * kernel loop continues. With no app it is Enaga's own: the kernel crash screen. Times come from the
- * time-stamp counter (32 bits, 11.5 s; timer_ms belongs to the main context).
+ * time-stamp counter (32 bits, 11.5 s).
  *
  * Not covered: code that hangs with interrupts disabled (a kernel handler, or an app that clears GIE). That
  * needs the C6748's hardware watchdog (TIMER64P1 in watchdog mode), which resets the chip. */

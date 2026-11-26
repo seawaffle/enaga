@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Talk to a unit's debug port over USB: Enaga's log as it happens, its state, the screen, and words of memory,
-instead of photographing the STATUS page. The debug port is the unit's second USB MIDI port ("Enaga Debug"; on
+"""Talk to a unit's debug port over USB: Enaga's log as it happens, its state, the screen, words of memory, and
+its keys, knobs and pads (docs/usb-debug.md is the guide). The debug port is the unit's second USB MIDI port ("Enaga Debug"; on
 Windows' older MIDI stack "MIDIIN2 (Enaga SmplTrek)" and "MIDIOUT2 (...)"); the protocol is in
 firmware/usb/usb_debug.c.
 
@@ -41,6 +41,7 @@ KEYS = {"PUSH_B": 0, "PUSH_A": 1, "PUSH_C": 2, "PUSH_D": 3, "PUSH_VALUE": 4, "SE
         **{f"STEP{n}": 31 + n for n in range(1, 17)}}
 ENCODERS = {"A": 0, "B": 1, "C": 2, "D": 3, "VALUE": 4}
 HEADER = bytes([0xF0, 0x7D, 0x45])
+PEEK_MAX = 32                                  # words a PEEK may ask for (firmware/usb/usb_debug.c)
 
 
 # ---- The protocol ----------------------------------------------------------------------------------------------
@@ -78,11 +79,9 @@ class Client:
         self.waiting = []                      # messages received but not yet asked for
 
     def messages(self, timeout):
-        """The next messages, waiting up to timeout seconds for the first."""
-        if self.waiting:
-            out, self.waiting = self.waiting, []
-            return out
-        return [m for m in (decode(s) for s in self.transport.receive(timeout)) if m]
+        """The next messages: those kept aside, then the port's (waiting up to timeout seconds if none were)."""
+        out, self.waiting = self.waiting, []
+        return out + [m for m in (decode(s) for s in self.transport.receive(0 if out else timeout)) if m]
 
     def ask(self, command, data=b""):
         self.transport.send(request(command, data))
@@ -126,8 +125,15 @@ class Client:
         return frame
 
     def peek(self, address, words=1):
+        """1-32 words from address."""
+        if not 0 <= address <= 0xFFFFFFFF:
+            raise ValueError(f"peek: address {address:#x} is not a 32-bit address")
+        if not 1 <= words <= PEEK_MAX:
+            raise ValueError(f"peek: 1 to {PEEK_MAX} words, not {words}")
         self.ask(PEEK, number(address, 5) + bytes([words]))
         data = self.answer(PEEK, lambda got: got)[0]
+        if len(data) < 5 + 5 * words:
+            raise RuntimeError(f"peek: the answer holds {max(0, (len(data) - 5) // 5)} of the {words} words asked for")
         return [unnumber(data[5 + 5 * i:10 + 5 * i]) for i in range(words)]
 
     # ---- Remote input: each call returns once the unit has drawn a frame after it ----
@@ -164,6 +170,8 @@ class Client:
     def turn(self, encoder, detents):
         """A knob (A-D, VALUE, or 0-4) turned by detents (-8192 to 8191)."""
         encoder = ENCODERS[encoder.upper()] if isinstance(encoder, str) else encoder
+        if not -8192 <= detents <= 8191:
+            raise ValueError(f"turn: -8192 to 8191 detents at a time, not {detents}")
         self._input(TURN, bytes([encoder]) + number(detents & 0x3FFF, 2))
 
     def pad(self, pad, velocity=100):
@@ -197,9 +205,13 @@ class Client:
 
 def key_number(key):
     if isinstance(key, int):
+        if not 0 <= key <= 127:
+            raise KeyError(f"{key}: not a key (numbers go up to 127)")
         return key
     name = key.upper()
     if name.isdigit():
+        if int(name) > 127:
+            raise KeyError(f"{key}: not a key (numbers go up to 127)")
         return int(name)
     if name not in KEYS:
         raise KeyError(f"{key}: not a key ({', '.join(KEYS)})")
@@ -403,7 +415,8 @@ def main(argv=None):
     client = open_port(args.port)
     try:
         return run(client, args)
-    except (RuntimeError, TimeoutError, KeyError, ConnectionError) as e:   # refused, no answer, unknown, unplugged
+    # refused, no answer, unknown, out of range, unplugged
+    except (RuntimeError, TimeoutError, KeyError, ValueError, ConnectionError) as e:
         print(f"usb_debug: {e.args[0] if isinstance(e, KeyError) and e.args else e}", file=sys.stderr)
         return 1
 

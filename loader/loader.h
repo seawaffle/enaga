@@ -32,4 +32,9 @@ enaga_load_status_t enaga_load_image(const uint8_t *package, uint32_t size, cons
                                      enaga_cache_sync_t cache_sync, const enaga_app_t **app);
 uint32_t enaga_crc32(const uint8_t *data, uint32_t bytes);
 
+/* Called every ENAGA_LOADER_STEP bytes of the CRC and .bss clearing when set (the firmware feeds its watchdog:
+ * a large package takes seconds). */
+#define ENAGA_LOADER_STEP 0x10000u
+extern void (*enaga_loader_progress)(void);
+
 #endif

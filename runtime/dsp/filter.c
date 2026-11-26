@@ -175,6 +175,10 @@ void enaga_fir_process(enaga_fir *f, const float *in, float *out, int n) {
     const float *restrict taps = f->taps;
     float *restrict h = f->history;
     const int length = f->length, keep = length - 1;
+    if (length < 1) {                                   /* no taps: silence (and no history to keep) */
+        while (n > 0) out[--n] = 0.0f;
+        return;
+    }
     while (n > 0) {
         const int m = n < ENAGA_FIR_CHUNK ? n : ENAGA_FIR_CHUNK;
         int i, k;

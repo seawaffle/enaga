@@ -51,7 +51,7 @@ void enaga_stereo_delay_init(enaga_stereo_delay *s, float *memory, float max_sec
     enaga_delay_init(&s->right, memory + size, size);
     s->damp_l.y = s->damp_r.y = 0.0f;
     s->rate = rate;
-    s->current = s->target = 0.25f * rate;
+    s->current = s->target = enaga_clamp(0.25f * rate, 16.0f, enaga_clamp(max_seconds * rate, 16.0f, (float)(size - 4)));
     s->feedback = 0.0f;
     s->tone = 1.0f;
     s->ping_pong = 0;
@@ -246,7 +246,9 @@ void enaga_reverb_process(enaga_reverb *r, const float *in_l, const float *in_r,
 
 #define CHORUS_CHUNK 64
 
-static uint32_t chorus_size(float rate) { return enaga_delay_size((uint32_t)(0.016f * rate) + 4); }
+/* 8 ms, but never under a chunk (and its read's one more): at low rates the depth then shrinks towards 0. */
+static float chorus_base(float rate) { return 0.008f * rate > CHORUS_CHUNK + 2 ? 0.008f * rate : CHORUS_CHUNK + 2; }
+static uint32_t chorus_size(float rate) { return enaga_delay_size((uint32_t)(2.0f * chorus_base(rate)) + 4); }
 
 uint32_t enaga_chorus_memory(float rate) { return 2 * chorus_size(rate); }
 
@@ -255,7 +257,7 @@ void enaga_chorus_init(enaga_chorus *c, float *memory, float rate) {
     enaga_delay_init(&c->left, memory, size);
     enaga_delay_init(&c->right, memory + size, size);
     c->phase = c->step = 0;
-    c->base = 0.008f * rate;
+    c->base = chorus_base(rate);
     c->depth = 0.0f;
     c->rate = rate;
 }

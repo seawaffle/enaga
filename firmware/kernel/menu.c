@@ -64,13 +64,16 @@ void menu_open(const char *why)
     menu_cursor = 0;
     for (i = 0; i < menu_count; i++) if (app_current && same(menu_names[i], app_folder)) menu_cursor = i;
     menu_top = menu_cursor >= MENU_ROWS ? menu_cursor - MENU_ROWS + 1 : 0;
+    if (menu_settings) settings_commit();
     menu_status = menu_settings = menu_drive = 0;
     menu_active = 1;
 }
 
 void menu_close(void)                         /* only over a running app */
 {
-    if (app_current) menu_active = menu_status = menu_settings = 0;
+    if (!app_current) return;
+    if (menu_settings) settings_commit();     /* F1+POWER leaves the page without OK */
+    menu_active = menu_status = menu_settings = 0;
 }
 
 static void move(int by)
@@ -111,6 +114,7 @@ static void drive_close(const char *why)
         log_line(line);
     }
     apps_mount();                             /* the card back, as at start-up */
+    settings_load();                          /* SETTINGS.TXT may have been edited on the computer */
     menu_open(why);                           /* rescanned: apps copied over are listed */
 }
 

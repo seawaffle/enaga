@@ -42,6 +42,9 @@ ENCODER_PINS = [((3, 14), (3, 15)), ((3, 12), (3, 10)), ((5, 2), (5, 0)), ((5, 5
 POWER_PIN = (3, 0)                         # the POWER key, low while pressed
 
 
+_packages = {}                                # output folder: (app, name, cl6x or not) built there last, package
+
+
 def turn(emu, encoder, detents, phase_ms=3):
     """Turns encoder 0-4 (A-D, VALUE) by `detents` (negative: anticlockwise), each detent four pin phases
     `phase_ms` apart, so 12 ms a detent: a quick turn. Runs the emulator meanwhile."""
@@ -78,7 +81,11 @@ class Emulation:
         if app_dir is not None:
             app_dir = Path(app_dir)
             name = (name or app_dir.name).upper()[:8]
-            package = build_app.build(app_dir, WORK / "apps" / app_dir.resolve().name, name)["package"]
+            out = WORK / "apps" / app_dir.resolve().name
+            key = (app_dir.resolve(), name, paths.ti_present())   # the DSP library's compiler changes the build
+            if _packages.get(out, (None,))[0] != key:   # once per process, as the firmware (firmware/build.py),
+                _packages[out] = (key, build_app.build(app_dir, out, name)["package"])   # unless the folder's
+            package = _packages[out][1]            # files (app.elf, which tests read) are now another build's
             local = WORK / "emulate" / f"{name}.ENA"
             local.parent.mkdir(parents=True, exist_ok=True)
             local.write_bytes(package)

@@ -71,10 +71,10 @@ static void sysex_flush(midi_port_t *p, int port, u32 flags)
     p->sysex_bytes = 0;
 }
 
-static void sysex_byte(midi_port_t *p, int port, u8 b)
-{
-    p->sysex[p->sysex_bytes++] = b;
+static void sysex_byte(midi_port_t *p, int port, u8 b)   /* a full chunk goes when the next byte comes, so the */
+{                                                         /* last chunk is never empty and ends with the F7 */
     if (p->sysex_bytes == ENAGA_SYSEX_CHUNK) sysex_flush(p, port, 0);
+    p->sysex[p->sysex_bytes++] = b;
 }
 
 static unsigned data_bytes(u8 status)
@@ -142,11 +142,7 @@ int midi_poll(u32 ms)                         /* main loop: returns the number o
 
 void midi_usb_byte(u8 b, u32 ms)              /* usb.c, main loop: one received USB MIDI byte */
 {
-    if (midi_in_setting & ENAGA_MIDI_USB) {   /* MIDI clock from USB, timed here (a main-loop pass late) */
-        u32 gie = irq_global_disable();
-        clock_midi_byte(b);
-        if (gie) irq_global_enable();
-    }
+    clock_usb_midi_byte(b);                   /* MIDI clock from USB, timed here (a main-loop pass late) */
     parse(&usb, ENAGA_MIDI_USB, b, ms);
 }
 

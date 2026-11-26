@@ -5,7 +5,8 @@
     BUILD      build output: $ENAGA_BUILD, or build/ (ignored by git)
     EMULATOR   the SmplTrek emulator directory, for tests and tools/emulate.py: $ENAGA_EMULATOR (optional)
     TI_CGT     TI's C6000 code generation tools, for apps' *.ti.c files: $ENAGA_TI_CGT, or the newest
-               ~/ti/ti-cgt-c6000_* (optional; ENAGA_TI_CGT=none builds those files with GCC instead)
+               ~/ti/ti-cgt-c6000_* (optional; ENAGA_TI_CGT=none builds those files with GCC instead, and the
+               DSP library too, never taking the SDK's prebuilt one: TI_DISABLED)
 """
 import os
 import re
@@ -33,6 +34,7 @@ def _ti_cgt():
 
 
 TI_CGT = _ti_cgt()
+TI_DISABLED = os.environ.get("ENAGA_TI_CGT") == "none"
 
 
 def tool(name):

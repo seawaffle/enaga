@@ -340,7 +340,28 @@ static int in_buffer(u32 address, const u32 *buffer)
     return address - (u32)buffer < WORDS * 4;
 }
 
-void audio_isr(void)
+/* A sample to its transmit word: x * 2^31 truncated, +-1 and beyond (and infinities) clipped to full scale, NaN
+ * silent. Done on the float's bits with shifts and masks, no float instruction and no branch: the same words as
+ * the float form (checked on every 32-bit pattern), about a third of its time per block. */
+static inline u32 to_word(float x)
+{
+    union { float f; u32 u; } c;
+    u32 m, sign, big, nan, shift, v;
+    c.f = x;
+    m = c.u & 0x7FFFFFFFu;
+    sign = (u32)((int)c.u >> 31);                      /* all ones for negative */
+    big = 0u - ((0x3F7FFFFFu - m) >> 31);              /* all ones for |x| >= 1 */
+    nan = ((0x7F800000u - m) >> 31) - 1u;              /* all zeros for NaN */
+    shift = 126u - (m >> 23);                          /* below 1: 0-126, 126 for zero and denormals */
+    shift = (shift | (u32)((int)(31u - shift) >> 31)) & 31u;   /* past 31: 31, which leaves 0 */
+    v = (((m & 0x7FFFFFu) | 0x800000u) << 7) >> shift;  /* |x| * 2^31, truncated */
+    v = (v ^ sign) - sign;
+    return ((v & ~big) | ((0x7FFFFFFFu - sign) & big)) & nan;
+}
+
+/* Unrolled: GCC overlaps nothing between passes of a loop with float in it, but schedules unrolled passes
+ * together (the input conversion, about 14 cycles a sample to 3). */
+__attribute__((optimize("unroll-loops"))) void audio_isr(void)
 {
     u32 start = tsc_read(), pending = REG32(EDMA_S1_IPR), i, cycles;
     REG32(EDMA_S1_ICR) = pending & 3;
@@ -398,10 +419,7 @@ void audio_isr(void)
         tx = in_buffer(REG32(PARAM(1) + 0x04), tx_a) ? tx_b : tx_a;
         if (tx == tx_last) { audio_blocks++; audio_overruns++; }
         tx_last = tx;
-        for (i = 0; i < WORDS; i++) {
-            float v = out_block[i] * 2147483648.0f;
-            tx[i] = v >= 2147483647.0f ? 0x7FFFFFFFu : v <= -2147483648.0f ? 0x80000000u : (u32)(int)v;
-        }
+        for (i = 0; i < WORDS; i++) tx[i] = to_word(out_block[i]);
         cache_wbinv(tx, WORDS * 4);
         audio_blocks++;
     }

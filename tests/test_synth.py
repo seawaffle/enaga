@@ -27,7 +27,7 @@ CUTOFF, MIX_OSC1, MIX_OSC2, MIX_SUB, MIX_NOISE, OSC1_WAVE = 13, 8, 9, 10, 11, 0
 OSC2_WAVE, OSC2_SEMI, OSC2_FINE = 4, 6, 7
 FILTER_TYPE, RESONANCE, DRIVE, FILTER_ENV, MOD_FIRST, VOICE_MODE = 12, 14, 15, 16, 37, 70
 LFO1_SHAPE, LFO1_RATE, LFO1_SYNC = 31, 32, 33
-OSC2_SYNC, MIX_RING, LFO1_FADE, CHORUS_MIX, UNISON_VOICES, UNISON_DETUNE = 76, 77, 78, 82, 83, 84
+OSC2_SYNC, MIX_RING, LFO1_FADE, CHORUS_DEPTH, CHORUS_MIX, UNISON_VOICES, UNISON_DETUNE = 76, 77, 78, 81, 82, 83, 84
 
 
 def hz(note):
@@ -323,12 +323,14 @@ class Synth(unittest.TestCase):
         # The DSP library (runtime/dsp) is built by cl6x when it is installed, by GCC otherwise. Both do the same IEEE
         # operations in the same order (the C674x has no fused multiply-add), so the samples match exactly. When the
         # keys reach the engine depends on the main loop, which runs slower under a heavier audio load: compare
-        # from each capture's first sound.
+        # from each capture's first sound. The chorus runs at depth 0: its sweep runs from the app's start, so with
+        # depth its delay at the first sound would depend on that timing too.
         def play(ti):
             with mock.patch.object(paths, "TI_CGT", paths.TI_CGT if ti else None), self.start() as emu:
                 self.assertEqual("dsplib/cl6x/" in (WORK / "apps" / "synth" / "app.map").read_text(), ti)
                 self.set_values(emu, {OSC1_WAVE: 1, MIX_OSC2: 80, MIX_SUB: 60, FILTER_TYPE: 1, CUTOFF: 80,
-                                      RESONANCE: 50, DRIVE: 40, OSC2_SYNC: 1, MIX_RING: 40, CHORUS_MIX: 50})
+                                      RESONANCE: 50, DRIVE: 40, OSC2_SYNC: 1, MIX_RING: 40, CHORUS_MIX: 50,
+                                      CHORUS_DEPTH: 0})
                 for n in (0, 4, 7):
                     emu.key(STEP1 + n, True)
                 emu.run(250 * MS)

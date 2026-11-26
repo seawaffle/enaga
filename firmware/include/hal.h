@@ -45,6 +45,7 @@ void uart0_init(void);
 void uart0_isr(void);
 int  uart0_read(u8 *byte);            /* 1 and the next received byte, or 0 when none is waiting */
 u32  uart0_tx_free(void);             /* bytes the transmit queue can take */
+int  uart0_tx_empty(void);            /* the queue is empty (its last byte at least in the transmitter) */
 int  uart0_send(const u8 *data, u32 bytes);   /* all or nothing: 0, or -1 if the queue lacks room */
 int  uart0_send_realtime(u8 byte);    /* a real-time byte, ahead of the queue: 0, or -1 if its own queue is full */
 extern u32 uart0_rx_bytes, uart0_tx_bytes, uart0_overruns, uart0_ring_lost, uart0_line_errors;

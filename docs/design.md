@@ -102,7 +102,7 @@ changed.
 | Setting | Values (default) | Effect |
 |---|---|---|
 | VOLUME | 0-10 (10) | output gain in the audio engine, 3 dB a step, 0 silent; ramps like the fade |
-| BRIGHTNESS | 1-10 (10) | the display controller's contrast command (0x81), 55 to 255 |
+| BRIGHTNESS | 1-10 (10) | the display controller's contrast command (0x81), 30 to 255 |
 | PADS | LOW, MEDIUM, HIGH (MEDIUM) | pad sensitivity: a press from 1,600 / 1,000 / 600, released below 3/4 of that |
 | AUTO OFF | OFF, 5, 10, 30, 60 MIN (OFF) | switch off (stopping the app normally) after that long with no key, knob, pad press or POWER, unless the app has called `set_busy` |
 | SPEAKER | ON, OFF (ON) | the built-in speaker's mute, GP2[8], as the original firmware's SPEAKER MUTE |
@@ -503,6 +503,13 @@ Its card is staged by `tools/unit_card.py`.
 
 ## Open items
 
+- **From the code review (2026-11-25, log), left open:** a short SCSI answer stalled while its packet may still be in
+  the FIFO (`dcd_musb.c`, with the double-buffered FIFOs of `usb-drive-speed`; settle with a capture of one mount);
+  the SPLOOP flag in ITSR when an app is dropped inside an SPLOOP (`start.s`, unknown on the chip); `update(ms)` can
+  be given the pass's ms, from before an app's init() read `ms()`; the file service's `sd_wait_hook` feeding the
+  watchdog, so an app looping on card I/O in `update` is never dropped; apps beyond 24 left out of the menu
+  silently; SYNC IN with no minimum interval; three version numbers (build.py, kernel.h, usb.c) of which the
+  release workflow checks one; no CI on pull requests (the workflow builds and publishes without running tests).
 - Input gain ("1.0 addition: input gain"): one value or a left/right pair; build before or at the API review.
 - **Library additions before the API review (2026-11-24), one branch each:** (1) math: fast functions and libm
   (log, 2026-11-24); (2) a sample player with a WAV loader, a main-to-audio message queue, voice allocation (the
@@ -666,12 +673,22 @@ Its card is staged by `tools/unit_card.py`.
   calibration.
 - Synth on the unit: measured 8 % idle, 10 % one note, 24 % eight notes (INIT), 25 % SUPERSAW two notes (eight
   voices), no dropouts; the worst case (30 % on the emulator) not yet measured there.
-- DSP library: the SVF runs at 21 cycles a sample under cl6x (its recurrence), twice a biquad's 10; a faster
-  form is worth trying. The synth's modulation is 6.4 % of the budget with cl6x, most of it the scalar part
-  (matrix 1.5 %, LFOs 1.1 %, envelopes 0.7 %); GCC compiles the math-buffer loops poorly (about 80 cycles an
-  exp2, mostly NOPs and constants rebuilt per use), so the GCC-only build lost 3 points to the restructure. The library is built from source with each app for now; a
-  release SDK would ship it prebuilt. Before shipping cl6x-built code, check that it calls none of TI's run-time
-  library (the link would show it: apps link only libgcc) and TI's licence terms.
+- **DSP library speed (2026-11-26, log "The DSP library's speed"):**
+  - The SDK ships the library prebuilt by cl6x (owner's decision, 2026-11-26; log "The DSP library prebuilt by
+    cl6x"). Still open: the first tagged release that makes it on GitHub, and branch `ci-cl6x` (the trial
+    workflow), which can be deleted once that release has run.
+  - GCC 13's tic6x back end pipelines no loop with a float multiply (its SPLOOP pass gives up on them: "We don't
+    handle floating point multiplies yet"). Its selective scheduler crashes the compiler, and the list scheduler
+    does not overlap the unrolled copies, so each value waits for its whole chain. Inline math in an app's own
+    code is therefore slow whatever the library does (exp2 about 85 cycles a value, tanh 190). Fixing that means
+    patching the toolchain we build, a project of its own.
+  - The SVF runs at 21 cycles a sample under cl6x (its recurrence). Regrouping into a state-space form would cut
+    that to about 12, but it rounds the low-cutoff coefficients (1 - 2 g^2 near 1) far worse, so it was not taken.
+  - Not yet looked at closely: the resampler (180 cycles an output under cl6x, 128 multiply-adds), the
+    compressor, the limiter and the reverb, and libm's tanhf, which cl6x builds slower than GCC.
+  - Enaga's own share of a block (log "Enaga's own share of the audio block"): 7,027 to 2,644 cycles on the
+    emulator; the unit's figure (about 13,000 before) is to be measured. `memcpy` copies a byte at a time (in the
+    firmware and the app runtime), a 7x gain on aligned copies left for when an app needs it.
 - USB stack: the C6748's USB0 is a Mentor MUSB controller; a TinyUSB port (TinyUSB has a MUSB driver for
   other TI parts) is plausible and unverified.
 - A fault in Enaga code called by an app (a host function given a bad pointer) currently counts as a kernel
@@ -679,8 +696,6 @@ Its card is staged by `tools/unit_card.py`.
 - Hangs with interrupts disabled (in a kernel handler, or an app that clears GIE) escape the software
   watchdog; the C6748's hardware watchdog (TIMER64P1) would catch them by resetting the chip, which probably
   also drops the power hold. Whether a reset on the unit switches it off or restarts Enaga is to be checked.
-- Loading a very large app: the loader's CRC and bss clearing run without feeding the watchdog, so an image
-  that takes over a second to check would trip it. To be measured on the unit with caches on.
 - Interrupt stack gap (firmware/start.s): GCC code is held to 16 KiB frames by the build; libgcc (prebuilt, small
   frames) and cl6x-built code are not checked. cl6x is not known to release frames early. An app that needs a
   bigger local array puts it in a static or on the heap.
@@ -1928,7 +1943,7 @@ user's request: `usb_iso_stream_out` / `_in`, ISOUPDATE, SOF every millisecond).
   `dcd_sof_enable` was empty; it now sets the SOF interrupt enable (a marked local change).
 - **The app's side:** `ENAGA_INPUT_USB` (abi.h, value 5) makes the computer's audio the callback's `in`; the codec
   route is left alone. The callback's `out` goes to the computer before VOLUME, whatever the input.
-- **Clocks:** OUT is resampled (linear interpolation) by a ratio that keeps its ring at 144 frames, the ratio
+- **Clocks:** OUT is resampled (linear interpolation) by a ratio that keeps its ring at 176 frames (144 until the review of 2026-11-25 found the level's sign wrong), the ratio
   following the smoothed level (proportional, at most 2000 ppm); IN packets are 47, 48 or 49 frames to keep its ring
   at 128, on a level averaged over about 32 packets. Both levels are taken at a steady phase: the frames the other
   side made or used since its last packet or block are counted from the TSC, since 1 ms packets against 1.33 ms
@@ -2532,3 +2547,184 @@ per bulk endpoint, each packet's time from load to its TX interrupt, and the tim
   filled the ring and each one counted an overrun. The audio interrupt now trims the ring to its 3 ms target each
   block while USB input is unused (`usb_audio_unread`), so the counter means what it says and an app switching to
   USB input starts on recent audio (`test_audio_nobody_reads_does_not_pile_up`).
+
+### The debug port's guide (2026-11-25)
+
+`docs/usb-debug.md`, for app developers: setting up python-rtmidi, the commands, logging from an app, how input from
+the computer behaves (waiting for a frame, pads without raw readings, POWER with F1, the mark, taking over, the 5 s
+hold), scripting with `Client` (an example checked on the emulator), the status lines, peek, and the protocol for
+other languages. The SDK now ships it with `tools/usb_debug.py`, which needs nothing from the repository. Linked
+from getting-started's "Where next", `enaga::log` in api.md, the README and hardware.md.
+
+### The test suite side by side (2026-11-25)
+
+The serial suite had grown to about 16 minutes (162 tests on the drive branch). Two changes:
+- **Builds once per process.** Every emulator test started an emulation, and each one compiled the whole firmware
+  (3.4 s) and its app again: about half the suite's time. `firmware/build.py` now builds once per process for each
+  output folder, and `tools/emulate.py` keeps each app's package, rebuilding only when the DSP library's compiler
+  changes or another build has since gone into the same folder (the synth tests read symbols from the app's ELF
+  there, and its cl6x/GCC comparison builds the same app both ways).
+- **`tests/run.py`** runs each test file as its own process, as many at once as there are cores, with its own
+  `ENAGA_BUILD` under build/test-runs/ so that no two write the same firmware, app or card files (the approach of
+  the emulator's own verify.py). Logs go beside them; files start longest first from the last run's times. On the
+  16-core host: 83 s for all 27 files, against about 950 s, the longest file (test_sdk) setting the time.
+  `discover` still runs everything in one process.
+
+### FAT32's FSInfo signature (2026-11-25)
+
+A reviewer found FatFs's `FSI_TrailSig` at 498; Microsoft's FAT specification puts the FSInfo sector's trailing
+signature (0xAA550000) at 508. The vendored R0.15a has it so (and so does the emulator's copy). The effects:
+- **Reading:** a correct FSInfo sector never validated, so its free cluster count and next free cluster were
+  ignored and the first free-space query scanned the whole FAT.
+- **Writing:** FatFs rewrites the sector only while it knows the free count, which it learns from a valid sector
+  or a free-space query (`f_getfree`). The firmware never asks, so on a unit the sector was never rewritten: it
+  kept its signature and a free count that went stale whenever Enaga wrote files (on a card from mkfs.fat, 129,021
+  free still recorded after three clusters were taken), which other systems then trusted. After a query (the card
+  tool's `free`), the rewrite put the signature at 498 (bytes 500-501 = 55 AA, in the reserved area) and zeros at
+  508. With the fix the count is known from mount, so each sync after an allocation writes a correct sector: one
+  more sector written per sync.
+- **Fix:** 508 (ff.c, marked "Enaga:"). `tests/test_fsinfo.py` formats a FAT32 image with mkfs.fat, so FatFs is
+  not graded against itself: a free count only FSInfo knows is trusted, and after a write the sector has the
+  signature at 508, nothing in the reserved bytes, the count three clusters lower, and fsck.fat finds no fault. Both
+  tests failed before the change. The card tool rebuilds by itself (its folder is keyed on the sources' hash).
+- **Windows' mount:** it read 15,412 sectors (7.9 MB) each time on the 3.6 GiB card, about both FATs, which fits a
+  driver scanning for free space past an FSInfo it does not trust. Not established: Windows may scan anyway, and
+  the copies were made by Windows itself, which writes a correct sector. To check on the unit after Enaga has
+  written to the card with this build.
+
+### The code review's fixes (2026-11-25)
+
+Two reviews of the code at db18911 (`build/review/findings.md`, 14 findings with probes on the emulator, and
+`analysis.md`, a second pass over the whole tree: 33 more, suspicions, drift) were fixed on `review-fixes`, the
+firmware here and the SDK, DSP library and tools on `review-sdk`, merged into it. What changed for apps and users:
+- **The data folder is the package's folder** (`/ENAGA/DATA/<folder under /ENAGA/APPS>`), as api.md and
+  getting-started always said; the code used the display name. An app whose title differs from its folder finds
+  its old data under the title's name and must move it once.
+- **Starting:** set_busy and open_menu from init() stand; an init() that fails, or a constructor or init() that
+  faults, gives back what it took (files, input, clock, LEDs) and drops the app rather than the kernel; a large
+  package no longer trips the watchdog (the loader calls `enaga_loader_progress` every 64 KiB); the boot record
+  stays STARTING for 2 s after a start from the menu (the load ran inside the pass, and an unsigned difference
+  with the pass's earlier ms made it RUNNING at once; AUTO OFF had the same underflow with pad events, which could
+  switch the unit off at a pad press).
+- **Crashes** reset the input route and the clock in the next pass; transport events queued for a stopped app are
+  dropped; the exception record is per app; `fatal("")` still shows the crash page.
+- **Settings** are saved however their page is left (F1+POWER, power-off) and read again after USB DRIVE.
+- **Files:** paths of 256 bytes are refused (one byte too many reached the request); a save renames a NAME.TMP left
+  as the only copy before reusing the name; 8 files and 8 streams fit together (`FF_FS_LOCK` 24); unaligned
+  transfers bounce 16 sectors a command (a 46-byte WAV header made a stereo recording go one sector a command,
+  below its rate); removing the card unmounts before the callbacks; a card changed while USB DRIVE is open is
+  initialised for the computer and reported changed, never mounted by FatFs under it.
+- **MIDI clock:** DIN follows MIDI IN like USB; Song Position is parsed per port and only one port's clock is
+  followed at a time; a pause clears the last clock time (the 11.5 s counter wrapped into one bogus interval);
+  more than 32 ticks to catch up are given over the next blocks instead of lost to the app; after CONTINUE the
+  internal clock waits for FB to leave the DIN queue, since F8 jumps it. A SysEx whose F7 fills a chunk ends there.
+- **USB:** the OUT ring's level added where it subtracted (its saw-tooth doubled); the target went 144 -> 176 frames
+  to keep the old margin at 1000 ppm, which the test showed. The debug port answers a 32-word PEEK whole and keeps
+  four waiting requests. `timer_ms` masks interrupts itself.
+- **SDK, DSP and tools** (review-sdk's six commits): sample loops at any rate (ping-pong by modulo, forward loops'
+  cubic taps wrap), `Smoothed` settles, Inf/NaN in float WAVs read as 0 and NaN out of an app is silence, `wav`
+  parse bounds and an 8-192 kHz Loader, Settings out-of-range numbers and no save after a failed load, ui cursor
+  and INT_MIN edges, FileBrowser roots with a slash, the stand-in host's midi_send and clock, `usb_debug.py`'s
+  log reading and argument checks, the DSP library rebuilt on a new compiler, objects named by their whole file name.
+- **Tests:** `test_lifecycle.py` (11 cases, each failing on main and passing here), plus cases in test_midi,
+  test_usb_debug, test_dsp, test_ui, test_host_test, test_sampler and test_sdk.
+Left open, in Open items: the SCSI stall question (on usb-drive-speed), the SPLOOP flag, and the smaller items
+listed there. Not taken up: the reviews' suspicions without a trigger (C2-C14), and the release-process notes
+beyond what Open items records.
+
+### The DSP library's speed (2026-11-26)
+
+The owner asked for the libraries to be as fast as we can make them.
+- **`tools/bench.py`** and `tests/apps/bench`: every block function on 64-frame blocks, and the inline functions in
+  an app's own loop, timed with TSCL on the emulator. The library is built once by cl6x and once by GCC, and the
+  two columns are printed side by side. The emulator models no caches, so the figures compare with each other only.
+- **The sample player** (`runtime/dsp/sample.c`): it worked out every frame's loop wrap, tap clamping and end
+  check, which kept both compilers from pipelining it. That cost about 10,000 cycles a 64-frame block under either.
+  `player_run` now finds how many frames from the position need none of that and plays them in a loop that only
+  interpolates and steps; the frame at a boundary takes the old path. The output is the same bit for bit. A host test plays
+  3,000 random samples against the old code kept as a reference: loops of both kinds and empty ones, both
+  directions, rates from 0 to 10^6, uneven blocks, the loop switched off mid-way. Five of `player_run`'s bounds,
+  each loosened in turn, failed that test. `render_add` mixes each channel in a loop of its own.
+- **The hard-synced sine:** cl6x could not pipeline it (two sines a sample in the loop that follows the restarts).
+  Under cl6x it now runs in three passes: phases, both sines, then the corrections. GCC is faster with the one
+  loop and keeps it. `ENAGA_DSP_SELECTS` selects cl6x's branch-free forms under any compiler, and
+  `test_dsp.py` now runs the host checks in both forms, which until now GCC never compiled.
+- **A held envelope and a smoother at rest** fill the block. The envelope check sits outside the stepping loop's
+  function, because inside it GCC's code for the moving envelope lost 18 %.
+- **test_synth's cl6x / GCC comparison** now runs the chorus at depth 0. The chorus sweep runs from the app's
+  start, and the test lines the two captures up at their first sound. With the new code the cl6x build's first
+  sound came two blocks later, so its chorus was out of step and the samples differed in the last bits, though
+  neither changed path ran in that test. The two builds had been starting in the same block by luck.
+- **Tried and dropped:** GCC flags (the best set, `-fsched-pressure`, gains 2 %; dropping `-funroll-loops` loses
+  19 %). `-fmodulo-sched` gives no SPLOOP on float loops (see Open items), and the selective scheduler crashes
+  GCC. cl6x's `--opt_for_speed=5` changes nothing over `-O3`. Writing clamp and floor_int branch-free for GCC
+  leaves the iterations serial.
+
+Cycles for 64 frames, cl6x / GCC, before and after:
+
+| Item | Before | After |
+|---|---|---|
+| Sample player, mono, any rate | 9,896 / 10,767 | 950 / 3,397 |
+| Sample player, stereo | 13,608 / 13,967 | 1,212 / 6,075 |
+| `render_add`, stereo | 15,664 / 17,527 | 1,860 / 6,955 |
+| Synced sine | 7,220 / 7,179 | 2,203 / 7,179 |
+| Envelope, held | 1,134 / 1,874 | 112 / 133 |
+| Smoother, at rest | 917 / 930 | 96 / 111 |
+
+### Enaga's own share of the audio block (2026-11-26)
+
+On the unit, Enaga's share of every block was about 13,000 cycles, 3 % of the budget (first unit session); on the
+emulator, with an app that does nothing, it was 7,027. Timing the interrupt in parts showed that most of it was
+two loops: converting the received words to float (about 1,800 cycles) and converting the output back to words
+with clipping and the NaN check (about 4,800); the clock, the call into the app, USB audio, the level and the cache
+operations together took about 400.
+- **The output conversion** (`to_word` in `kernel/audio.c`) now works on the float's bits with shifts and masks:
+  no float instruction and no branch. It gives the same words as the float form for all 2^32 bit patterns (checked
+  on the host against the old expression), and `test_output_words_are_the_samples_clipped` checks the build on
+  the emulator with edge cases and random patterns (with the NaN mask removed, it fails).
+- **`audio_isr` is unrolled** (`optimize("unroll-loops")`). The firmware is built without `-funroll-loops`, unlike
+  apps, and GCC overlaps nothing between passes of a loop with float in it, so the input conversion took about
+  14 cycles a sample. Unrolled, it takes 3.
+- Result on the emulator: 7,027 to 2,644 cycles a block. Not yet measured on the unit.
+- **Also found, not changed:** the firmware's and the app runtime's `memcpy` copy a byte at a time (6 cycles a
+  byte). A word-wise version copies 512 aligned bytes in 451 cycles instead of 3,162. GCC turns some loops in app
+  code into `memcpy` and `memset` calls, including in the synth's audio path, but the synth's worst case stayed
+  at 29 % with the fast version, so its copies are small. The runtime's `memset` is already pipelined (about 1
+  cycle a byte).
+
+### The DSP library prebuilt by cl6x (2026-11-26)
+
+The owner asked whether the SDK could ship the DSP library compiled by cl6x, then to set it up. GCC's build of the
+block functions is 2-12 times slower than cl6x's (tools/bench.py), and most developers have only GCC.
+- **Linking:** the cl6x archive needs only `__c6xabi_fixfu` and `__c6xabi_llshl` from outside itself, and GCC's
+  libgcc defines both, so nothing of TI's run-time library is linked. Its relocations are absolute and
+  PC-relative only (no data page pointer, which apps do not set up); it has only code, constants and jump tables
+  (no writable data); every function of `dsp.h` takes pointers and scalars and returns `float`, `int`,
+  `uint32_t` or nothing. All 21 structs of `dsp.h` have the same size, alignment and field offsets under both
+  compilers: `test_dsp.Layout` asserts GCC's 158 numbers under cl6x (a wrong one fails).
+- **Licence:** the only TI headers the library includes are the stdint typedefs, so it holds no TI code. CGT
+  8.5.0's licence ("TI Text File" for the compiler, BSD-3-Clause for the RTS) grants rights over TI's software and
+  claims nothing over what it compiles; its narrowest condition, use only with TI devices, holds anyway (C6748).
+  The 8.3.x releases were under TI's TSPA instead, so the release pins 8.5.0.
+- **TI's download:** https://dr-download.ti.com/software-development/ide-configuration-compiler-or-debugger/
+  MD-vqU2jj6ibH/8.5.0.LTS/ti_cgt_c6000_8.5.0.LTS_linux-x64_installer.bin needs no login (43,933,713 bytes, SHA-256
+  772511aa92dc36bd32622aad754c08797cefd8973bfd6c7bc1ceeb784955b37c from TI's page) and installs with
+  `--mode unattended --prefix DIR` in 2 s. On GitHub's runners: branch `ci-cl6x` (from origin/main, pushed with the
+  owner's permission) ran `.github/workflows/dsp-cl6x.yml`, run 45879715154, which passed in under a minute. Its
+  objects had the same machine code as a local build and differed only in a tag cl6x makes up per compilation
+  (8-9 bytes of the symbol table).
+- **No debug information:** with it, the objects carry the build machine's paths (the owner's user name among
+  them). `--symdebug:none` drops it with the same code (TI's strip6x would drop the symbol table too).
+- **How it ships:** `build_app.prebuilt_dsp_library` compiles the library with `--symdebug:none` and archives it
+  with GNU ar (`D`, deterministic), refusing an archive that needs more than `__c6xabi_*` helpers or holds a path
+  of the machine; it writes `sources.txt`, the SHA-256 of each library source and header. `make_sdk.py` puts both
+  in `runtime/prebuilt/` when cl6x is installed, and `--prebuilt` (the release workflow) makes that required. The
+  release workflow installs CGT 8.5.0 from TI's download, pinned by its SHA-256 and cached.
+- **Which library an app links** (`build_app.dsp_choice`, said on the tool's last line): built by cl6x when cl6x
+  is installed; else the prebuilt archive, while the sources match `sources.txt`; else built by GCC (an edited
+  library). `ENAGA_TI_CGT=none` takes GCC, never the prebuilt archive (`paths.TI_DISABLED`).
+- **Tests:** `test_sdk_prebuilt.py`: the SDK's build tool without cl6x links the prebuilt
+  archive, and the synth and sampler packages are byte-identical to the repository's cl6x builds; with a library
+  source edited, the synth's is byte-identical to the GCC build. Both need cl6x on the machine running the tests;
+  CI runs no tests.
+

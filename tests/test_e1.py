@@ -186,6 +186,35 @@ class E1(unittest.TestCase):
                 self.assertEqual(set(runs[1:-1]), {128}, key)                       # every block one level
             self.assertGreaterEqual(emu.report()["audio_overruns"], 2)
 
+    def test_output_words_are_the_samples_clipped(self):
+        """Each sample goes out as x * 2^31 truncated, +-1 and past it (and infinities) at full scale, NaN as
+        silence: the clip app's edge cases and random bit patterns, word for word."""
+        edges = [0x00000000, 0x80000000, 0x3F800000, 0xBF800000, 0x3F7FFFFF, 0xBF7FFFFF, 0x3F800001, 0xBF800001,
+                 0x3F000000, 0xBF000000, 0x30000000, 0xB0000000, 0x30400000, 0x2FFFFFFF, 0x00000001, 0x807FFFFF,
+                 0x7F800000, 0xFF800000, 0x7FC00000, 0xFFC00000, 0x7F800001, 0x7F7FFFFF, 0xFF7FFFFF, 0x40000000]
+        patterns, s = [], 1
+        for i in range(128):
+            s = (s * 1664525 + 1013904223) & 0xFFFFFFFF
+            patterns.append(edges[i] if i < len(edges) else s)
+
+        def word(bits):
+            x = struct.unpack("<f", struct.pack("<I", bits))[0]
+            if math.isnan(x):
+                return 0
+            if x >= 1.0:
+                return 2 ** 31 - 1
+            if x <= -1.0:
+                return -2 ** 31
+            return int(x * 2 ** 31) if abs(x) >= 2 ** -126 else 0     # the C674x reads denormals as zero
+        want = [word(bits) for bits in patterns]
+        with Emulation(HERE / "apps" / "clip") as emu:
+            self.assertIsNone(emu.run(BOOT)["error"])
+            self.assertEqual(emu.report()["log"][-2], "clip ready")
+            got = samples(emu)[-4096:]
+            start = next((k for k in range(128) if list(got[k:k + 128]) == want), None)
+            self.assertIsNotNone(start, "no block of the expected words")
+            self.assertEqual(list(got[start:start + 3840]), want * 30)
+
     def test_interrupts_preserve_loop_state(self):
         # Regression: the ISR once saved ILC at *SP, which the C handler's prologue overwrote; an audio
         # interrupt between an inner loop's MVC to ILC and its SPLOOP then restored garbage into ILC.
