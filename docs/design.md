@@ -677,7 +677,11 @@ Its card is staged by `tools/unit_card.py`.
     ("TI Text File" for the compiler, BSD-3-Clause for the RTS) grants rights over TI's software and claims nothing
     over what it compiles; its narrowest condition, use only with TI devices, holds anyway (C6748). The objects
     carry debug info with the build machine's paths, so a shipped archive is built with `--strip-debug`. CI has
-    no cl6x: either the archive is built locally at release, or CI installs TI's public download.
+    no cl6x: either the archive is built locally at release, or CI installs TI's public download. That download
+    needs no login: https://dr-download.ti.com/software-development/ide-configuration-compiler-or-debugger/
+    MD-vqU2jj6ibH/8.5.0.LTS/ti_cgt_c6000_8.5.0.LTS_linux-x64_installer.bin answered a plain curl with HTTP 200 and
+    43,933,713 bytes (2026-11-26); TI's page gives its SHA-256 as 772511aa...b37c, and the installer has an
+    unattended mode (`--mode unattended --prefix DIR`). Not yet run from CI.
   - GCC 13's tic6x back end pipelines no loop with a float multiply (its SPLOOP pass gives up on them: "We don't
     handle floating point multiplies yet"). Its selective scheduler crashes the compiler, and the list scheduler
     does not overlap the unrolled copies, so each value waits for its whole chain. Inline math in an app's own
