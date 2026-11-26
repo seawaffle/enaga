@@ -162,7 +162,7 @@ static int32_t check_path(const char *path)
     if (!path || path[0] != '/') return ENAGA_FILE_BAD_PATH;
     if (path[1] == 0) return ENAGA_FILE_OK;
     for (i = 1; path[i]; i++) {
-        if (i > ENAGA_FILE_PATH_MAX) return ENAGA_FILE_BAD_PATH;
+        if (i >= ENAGA_FILE_PATH_MAX) return ENAGA_FILE_BAD_PATH;                    /* path[i] is byte i + 1 */
         if (path[i] == '\\' || path[i] == ':') return ENAGA_FILE_BAD_PATH;
         if (path[i] == '/') {
             if (i == part) return ENAGA_FILE_BAD_PATH;                              /* empty part */
@@ -176,14 +176,15 @@ static int32_t check_path(const char *path)
     return ENAGA_FILE_OK;
 }
 
-/* The app's own folder: /ENAGA/DATA/ and the package name, with characters FAT refuses replaced by '_'. */
+/* The app's own folder: /ENAGA/DATA/ and the package name (its folder under /ENAGA/APPS, not the display name,
+ * which can change between versions or be shared), with characters FAT refuses replaced by '_'. */
 static void data_folder(char out[48])
 {
     static const char base[] = "/ENAGA/DATA/";
     unsigned n = 0, i;
     for (i = 0; base[i]; i++) out[n++] = base[i];
-    for (i = 0; app_name[i] && n < 47; i++) {
-        u8 c = (u8)app_name[i];
+    for (i = 0; app_folder[i] && n < 47; i++) {
+        u8 c = (u8)app_folder[i];
         out[n++] = (c < 32 || c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' ||
                     c == '>' || c == '|') ? '_' : (char)c;
     }
@@ -341,9 +342,9 @@ static void card_removed(void)
     unsigned i;
     for (i = 0; i < ENAGA_FILES_OPEN; i++) if (handles[i].used) handles[i].dead = 1;
     for (i = 0; i < ENAGA_STREAMS; i++) if (streams[i].used && !streams[i].error) streams[i].error = ENAGA_FILE_NO_CARD;
-    drop_all(ENAGA_FILE_NO_CARD, 1);
     f_mount(0, "", 0);
-    mounted = 0;
+    mounted = 0;                              /* before the callbacks: one that queues again is refused */
+    drop_all(ENAGA_FILE_NO_CARD, 1);
     apps_card_status();
     send_card_event(0);
 }
@@ -363,6 +364,7 @@ static void card_watch(u32 ms)
     if (ms - card_change_ms < FILES_DETECT_MS) return;
     card_changing = 0;
     card_seen = present;
+    if (usb_drive_sharing()) { usb_drive_card_changed(present && sd_init() == 0); return; }   /* the computer's card */
     if (present) card_inserted(); else card_removed();
 }
 
@@ -623,6 +625,9 @@ int32_t files_save(const char *path, const void *data, uint32_t bytes)
     if (r || (r = check_write(path))) return r;
     if (with_suffix(tmp, path, ".TMP")) return ENAGA_FILE_BAD_PATH;
     make_parents(path);
+    if (f_stat(path, 0) == FR_NO_FILE && f_stat(tmp, 0) == FR_OK)   /* the copy a cut-short save left (open_read):
+                                                                       NAME again before NAME.TMP is reused */
+        if ((f = f_rename(tmp, path)) != FR_OK) return map(f);
     if ((f = f_open(&fil, tmp, FA_WRITE | FA_CREATE_ALWAYS)) != FR_OK) return map(f);
     while (done < bytes) {
         UINT put;

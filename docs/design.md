@@ -102,7 +102,7 @@ changed.
 | Setting | Values (default) | Effect |
 |---|---|---|
 | VOLUME | 0-10 (10) | output gain in the audio engine, 3 dB a step, 0 silent; ramps like the fade |
-| BRIGHTNESS | 1-10 (10) | the display controller's contrast command (0x81), 55 to 255 |
+| BRIGHTNESS | 1-10 (10) | the display controller's contrast command (0x81), 30 to 255 |
 | PADS | LOW, MEDIUM, HIGH (MEDIUM) | pad sensitivity: a press from 1,600 / 1,000 / 600, released below 3/4 of that |
 | AUTO OFF | OFF, 5, 10, 30, 60 MIN (OFF) | switch off (stopping the app normally) after that long with no key, knob, pad press or POWER, unless the app has called `set_busy` |
 | SPEAKER | ON, OFF (ON) | the built-in speaker's mute, GP2[8], as the original firmware's SPEAKER MUTE |

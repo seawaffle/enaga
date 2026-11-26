@@ -4,6 +4,7 @@ emulator's USB host, while cable 0 stays the app's MIDI, intact; and keys, knobs
 
     ENAGA_EMULATOR=/path/to/emulator python3 -B -m unittest tests.test_usb_debug
 """
+import struct
 import sys
 import unittest
 from pathlib import Path
@@ -159,6 +160,9 @@ class UsbDebug(Emulated):
         self.assertEqual(self.client.peek(address), [self.emu.word("log_count")])
         words = self.client.peek(address, 3)
         self.assertEqual(len(words), 3)
+        expected = [0x55550000 + i for i in range(32)]                   # the most one PEEK may ask for
+        self.emu.cpu.write(0xC7000000, struct.pack("<32I", *expected))
+        self.assertEqual(self.client.peek(0xC7000000, 32), expected)
         with self.assertRaisesRegex(RuntimeError, "NOT ALLOWED"):
             self.client.peek(0x01E00400)                                 # the USB core: reads clear its interrupts
         with self.assertRaisesRegex(RuntimeError, "UNKNOWN"):

@@ -21,7 +21,7 @@ public:
         if (key == ENAGA_KEY_STEP1 + 3) enaga::system::speaker(false);
     }
     void stop() override {
-        while (slow_stop_) enaga::files::save("/ENAGA/DATA/MENU-TEST/SPIN.TXT", "x", 1);
+        while (slow_stop_) enaga::files::save("/RECORD/SPIN.TXT", "x", 1);
     }
     void audio(const float *, float *out, uint32_t frames) override {
         for (uint32_t i = 0; i < 2 * frames; i++) out[i] = 0.25f;

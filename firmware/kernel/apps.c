@@ -25,12 +25,7 @@ static void copy_text(char *dst, unsigned size, const char *src)
 static void set_status(const char *s) { copy_text(app_status, sizeof app_status, s); }
 
 static void host_log(const char *text) { log_line(text); }
-static uint32_t host_ms(void)
-{
-    u32 gie = irq_global_disable(), ms = timer_ms();   /* timer_ms keeps state: one context at a time */
-    if (gie) irq_global_enable();
-    return ms;
-}
+static uint32_t host_ms(void) { return timer_ms(); }
 static void host_fatal(const char *reason) { apps_fatal(reason); }
 static void host_text(u8 *target, int x, int y, const char *text, u8 grey)
 {
@@ -74,6 +69,18 @@ static void cache_sync(uint32_t address, uint32_t bytes)   /* the loader calls t
 
 static int mount_result;
 
+static void release_app_state(void)          /* main context: what the kernel holds for an app, back to defaults */
+{
+    app_keep_on = 0;
+    app_menu_request = 0;
+    audio_speaker_app = 1;                    /* the next app starts with the speaker as the setting says */
+    audio_speaker_apply();
+    audio_input_reset();
+    clock_app_stopped();
+    files_app_stopped();
+    leds_off();
+}
+
 void apps_card_status(void)                   /* the app's own status stays while it runs */
 {
     if (app_current) return;
@@ -110,7 +117,7 @@ static int load_path(const char *path)
     UINT got;
     enaga_package_header_t header;
     const enaga_app_t *loaded = 0;
-    int status;
+    int status, init_failed;
     u32 done;
     if (f_open(&file, path, FA_READ) != FR_OK) { set_status("APP OPEN FAILED"); return -1; }
     if (f_read(&file, &header, sizeof header, &got) != FR_OK || got != sizeof header) {
@@ -128,17 +135,23 @@ static int load_path(const char *path)
     f_close(&file);
     copy_text(app_name, sizeof app_name, header.name);
     crash_reason[0] = 0;
+    crash_pc = crash_efr = crash_ierr = 0;
     {
         u32 heap = (header.load_address + header.load_size + header.bss_size + 4095u) & ~4095u;
         app_host.heap = (void *)heap;
         app_host.heap_size = heap < ENAGA_APP_LIMIT ? ENAGA_APP_LIMIT - heap : 0;
     }
-    status = enaga_package_start(&header, &app_host, cache_sync, &loaded);   /* runs the app's constructors */
-    if (status != ENAGA_LOAD_OK) { app_busy = 0; set_status(load_error(status)); return -1; }
-    if (loaded->init && loaded->init(loaded->context) != 0) { app_busy = 0; set_status("APP INIT FAILED"); return -1; }
-    app_busy = 0;
-    app_menu_request = 0;
+    app_menu_request = 0;                     /* before the app runs: init() may ask for the menu or stay awake */
     app_keep_on = 0;
+    enaga_loader_progress = watchdog_feed;    /* the CRC and .bss of a large package take seconds */
+    status = enaga_package_start(&header, &app_host, cache_sync, &loaded);   /* runs the app's constructors */
+    init_failed = status == ENAGA_LOAD_OK && loaded->init && loaded->init(loaded->context) != 0;
+    app_busy = 0;
+    if (status != ENAGA_LOAD_OK || init_failed) {   /* files, input, clock and LEDs the app took while starting */
+        release_app_state();
+        set_status(init_failed ? "APP INIT FAILED" : load_error(status));
+        return -1;
+    }
     app_current = loaded;
     audio_set_callback(loaded->audio, loaded->context);
     set_status("APP RUNNING");
@@ -268,16 +281,24 @@ int apps_start(const char *folder)
     return 0;
 }
 
+static volatile int drop_cleanup;            /* set by apps_drop: the input route and clock wait for the main loop */
+
 void apps_service(u32 ms)                     /* each pass: a switch to finish; the boot record once settled */
 {
     if (!app_current && !audio_speaker_app) { audio_speaker_app = 1; audio_speaker_apply(); }   /* after a drop */
+    if (drop_cleanup) {                       /* files, LEDs and the speaker have their own paths after a drop */
+        drop_cleanup = 0;
+        audio_input_reset();
+        clock_app_stopped();
+    }
     if (apps_next[0] && !app_current && !files_reset_pending) {
         char folder[APPS_FOLDER];
         copy_text(folder, sizeof folder, apps_next);
         apps_next[0] = 0;
         if (apps_start(folder) != 0) menu_open(app_status);
     }
-    if (app_current && !settled && ms - started_ms >= APPS_SETTLED_MS) {
+    if (app_current && !settled && (int32_t)(ms - started_ms) >= (int32_t)APPS_SETTLED_MS) {   /* started_ms can be
+                                                 later than this pass's ms: the load ran inside the pass */
         settled = 1;
         record(app_folder, "RUNNING");
     }
@@ -333,13 +354,7 @@ void apps_unload(void)
         app_busy = 0;
         app_current = 0;
     }
-    app_keep_on = 0;
-    audio_speaker_app = 1;                    /* the next app starts with the speaker as the setting says */
-    audio_speaker_apply();
-    audio_input_reset();
-    clock_app_stopped();
-    files_app_stopped();
-    leds_off();
+    release_app_state();
 }
 
 void apps_event(const enaga_event_t *event)
@@ -366,8 +381,9 @@ void apps_drop(const char *reason)           /* the app failed: forget it withou
     app_stopping = 0;
     app_keep_on = 0;
     files_reset_pending = 1;                  /* the main loop drops its files and remounts (files.c) */
+    drop_cleanup = 1;
     if (gie) irq_global_enable();
-    copy_text(crash_reason, sizeof crash_reason, reason);
+    copy_text(crash_reason, sizeof crash_reason, reason[0] ? reason : "NO REASON");   /* fatal(""): still a crash */
     set_status("APP STOPPED");
     log_line("FATAL");
     log_line(reason);

@@ -48,6 +48,7 @@ int clock_out_setting, sync_out_setting = 1;
 int sync_in_polarity_setting, sync_out_polarity_setting;   /* POL IN / POL OUT: 0 RISE, 1 FALL */
 
 static volatile u8 running, waiting;                    /* waiting: started by MIDI, no clock yet */
+static volatile u8 continuing;                          /* INT: CONTINUE sent, running once DIN has sent it */
 static volatile u32 whole;                              /* position: whole + frac ticks */
 static volatile float frac;
 static volatile u32 next_tick;                          /* the first tick not yet given out */
@@ -59,9 +60,12 @@ static enaga_clock_tick_t block_ticks[BLOCK_TICKS];
 static volatile u32 block_count;
 
 /* Outside clock measurements, written in the UART0 and GPIO interrupts, read in the audio interrupt. */
-static u32 midi_intervals[MIDI_MEAN], midi_interval_count, midi_last_cycle;
+static u32 midi_intervals[MIDI_MEAN], midi_interval_count;
+static volatile u32 midi_last_cycle;
 static volatile u32 midi_clocks;                         /* F8s since START / CONTINUE */
-static u8 spp_need, spp_low;
+static u8 spp_need[3], spp_low[3];                       /* per port (ENAGA_MIDI_DIN, _USB): a message is one port's */
+static volatile int clock_port;                          /* the port the clock follows while both send it */
+static volatile u32 clock_port_cycle;
 static volatile u32 spp_ticks;
 static u32 pulse_intervals[PULSE_MEAN], pulse_interval_count;
 static volatile u32 pulse_edges, pulse_last_cycle;
@@ -131,8 +135,8 @@ void clock_init(void)
 static void stop_now(void)
 {
     u8 fc = 0xFC;
-    if (!running && !waiting) return;
-    running = 0; waiting = 0;
+    if (!running && !waiting && !continuing) return;
+    running = 0; waiting = 0; continuing = 0;
     midi_out(&fc, 1);
     event(ENAGA_TRANSPORT_STOP, whole);
 }
@@ -151,26 +155,33 @@ void clock_gpio_isr(void)                               /* GPIO bank 7: a SYNC I
     pulse_edges++;
 }
 
-void clock_midi_byte(u8 b)                              /* UART0's interrupt, every received byte in order */
+static void midi_byte(int port, u8 b)                   /* interrupts off; every byte of one port in order */
 {
     u32 now;
-    if (clock_source_setting != ENAGA_CLOCK_MIDI) return;
+    if (clock_source_setting != ENAGA_CLOCK_MIDI || !(midi_in_setting & port)) return;
     if (b < 0x80) {
-        if (spp_need == 2) { spp_low = b; spp_need = 1; }
-        else if (spp_need == 1) {
-            spp_need = 0;
+        if (spp_need[port] == 2) { spp_low[port] = b; spp_need[port] = 1; }
+        else if (spp_need[port] == 1) {
+            spp_need[port] = 0;
             if (!running && !waiting) {
-                spp_ticks = ((u32)spp_low | (u32)b << 7) * 24u;
+                spp_ticks = ((u32)spp_low[port] | (u32)b << 7) * 24u;
                 whole = spp_ticks; frac = 0.0f; next_tick = whole;
                 event(ENAGA_TRANSPORT_LOCATE, whole);
             }
         }
         return;
     }
-    if (b < 0xF8) { spp_need = b == 0xF2 ? 2 : 0; return; }
+    if (b < 0xF8) { spp_need[port] = b == 0xF2 ? 2 : 0; return; }
+    if (b != 0xF8 && b != 0xFA && b != 0xFB && b != 0xFC) return;
+    now = tsc_read();
+    if (clock_port != port) {                           /* the other port's clock, while this one's is live, */
+        if (clock_port && now - clock_port_cycle < 1000u * TICKS_PER_MS) return;   /* would double the rate */
+        clock_port = port;
+        midi_last_cycle = 0;                            /* no interval across ports */
+    }
+    clock_port_cycle = now;
     switch (b) {
     case 0xF8:                                          /* intervals count while stopped too, if steady */
-        now = tsc_read();
         if (midi_last_cycle && now - midi_last_cycle < 1000u * TICKS_PER_MS)
             midi_intervals[midi_interval_count++ % MIDI_MEAN] = now - midi_last_cycle;
         midi_last_cycle = now ? now : 1;
@@ -195,6 +206,15 @@ void clock_midi_byte(u8 b)                              /* UART0's interrupt, ev
     default:
         break;
     }
+}
+
+void clock_midi_byte(u8 b) { midi_byte(ENAGA_MIDI_DIN, b); }   /* UART0's interrupt */
+
+void clock_usb_midi_byte(u8 b)                          /* the main loop's USB MIDI bytes */
+{
+    u32 gie = irq_global_disable();
+    midi_byte(ENAGA_MIDI_USB, b);
+    if (gie) irq_global_enable();
 }
 
 static float mean(const u32 *intervals, u32 count, u32 size)
@@ -262,11 +282,21 @@ void clock_block(void)
             }
         }
     } else if (clock_source_setting == ENAGA_CLOCK_MIDI) {
-        float interval = mean(midi_intervals, midi_interval_count, MIDI_MEAN);
+        float interval;
+        u32 gie = irq_global_disable();               /* UART0's interrupt may nest here */
+        if (midi_last_cycle && tsc_read() - midi_last_cycle >= 1000u * TICKS_PER_MS)
+            midi_last_cycle = 0;                        /* a pause: the next clock starts afresh, not an interval
+                                                           that has wrapped the 11.5 s counter */
+        if (gie) irq_global_enable();
+        interval = mean(midi_intervals, midi_interval_count, MIDI_MEAN);
         if (interval > 0.0f) {
             tempo = 60.0f * (float)TICKS_PER_MS * 1000.0f / (interval * 24.0f);
             rate = (float)TICKS_PER_CLOCK * (float)CYCLES_PER_FRAME / interval;
         }
+    }
+    if (continuing && (!clock_out_setting || !(midi_out_setting & ENAGA_MIDI_DIN) || uart0_tx_empty())) {
+        continuing = 0;                                 /* FB has left the DIN queue: F8 cannot overtake it */
+        running = 1;
     }
     if (!running) return;
 
@@ -275,7 +305,7 @@ void clock_block(void)
     {
         u32 unit = clock_source_setting == ENAGA_CLOCK_SYNC ? TICKS_PER_PULSE : TICKS_PER_CLOCK;
         if (external && cap > next_tick && cap - next_tick > unit) {   /* over one clock or pulse behind: catch up */
-            while (cap - next_tick > unit) give(next_tick++, 0.0f);
+            while (cap - next_tick > unit && block_count < BLOCK_TICKS) give(next_tick++, 0.0f);   /* the rest next block */
             if ((float)whole + frac < (float)next_tick) { whole = next_tick; frac = 0.0f; }
         }
     }
@@ -284,7 +314,7 @@ void clock_block(void)
         float room = cap > whole ? (float)(cap - whole) - frac : 0.0f;
         if (avail >= room) {
             avail = room > 0.0f ? room : 0.0f;
-            while (next_tick < cap) {                   /* the ticks up to it, then sit exactly on it */
+            while (next_tick < cap && block_count < BLOCK_TICKS) {   /* the ticks up to it, then sit exactly on it */
                 d = (float)next_tick - ((float)whole + frac);
                 give(next_tick++, d > 0.0f ? d / per_frame : 0.0f);
             }
@@ -294,7 +324,7 @@ void clock_block(void)
     }
     for (;;) {
         d = (float)next_tick - ((float)whole + frac);
-        if (d >= avail) break;
+        if (d >= avail || block_count >= BLOCK_TICKS) break;   /* ticks left over come first in the next block */
         give(next_tick++, d > 0.0f ? d / per_frame : 0.0f);
     }
     frac += avail;
@@ -338,11 +368,11 @@ int clock_control(u32 command, int value)               /* main context */
         stop_now();
         break;
     case ENAGA_CLOCK_CONTINUE:
-        if (running) break;
+        if (running || continuing) break;
         whole = next_tick; frac = 0.0f;                 /* resume on the next whole tick */
         { u8 c[4] = { 0xF2, (u8)((whole / 24u) & 0x7F), (u8)((whole / 24u >> 7) & 0x7F), 0xFB };
           midi_out(c, 4); }
-        running = 1;
+        continuing = 1;                                 /* clock_block starts it once FB is out (F8 jumps the queue) */
         event(ENAGA_TRANSPORT_CONTINUE, whole);
         break;
     case ENAGA_CLOCK_LOCATE:
@@ -379,11 +409,10 @@ void clock_source_changed(void)                          /* the setting moved: s
 
 void clock_app_stopped(void)                             /* an internal clock the app ran stops with it */
 {
-    if (clock_source_setting == ENAGA_CLOCK_INTERNAL) {
-        u32 gie = irq_global_disable();
-        stop_now();
-        if (gie) irq_global_enable();
-    }
+    u32 gie = irq_global_disable();
+    if (clock_source_setting == ENAGA_CLOCK_INTERNAL) stop_now();
+    events_tail = events_head;                           /* the next app gets no transport events meant for this one */
+    if (gie) irq_global_enable();
 }
 
 int clock_poll(void)                                     /* main loop: transport events to the app */

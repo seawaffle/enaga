@@ -79,6 +79,8 @@ class Midi(unittest.TestCase):
         self.assertEqual(self.new_lines(), ["S3 7", "M90 3C 64"])
         self.receive([0xF7, 0x3C, 0x00])                                # a stray F7 clears running status
         self.assertEqual(self.new_lines(), [])
+        self.receive([0xF0] + body[:254] + [0xF7])                       # the F7 fills the chunk: it ends it
+        self.assertEqual(self.new_lines(), ["S256 3"])
 
     def test_active_sensing_timeout_sends_all_notes_off(self):
         self.new_lines()

@@ -345,6 +345,7 @@ static void shutdown_with(const char *text)
     int n = 0;
     while (text[n]) n++;
     powering_off = 1;
+    settings_commit();                        /* a change on the settings page not yet left */
     apps_unload();
     gfx_clear(0);
     gfx_text(64 - 3 * n, 60, text, 15);       /* centred: 6 px a character */
@@ -354,6 +355,7 @@ static void shutdown_with(const char *text)
     uart1_send(0xC2);
     delay_us(50000);
     power_off();
+    irq_global_disable();                     /* if the rail stays up, the watchdog would replace BYE with a crash */
     for (;;)
         ;
 }
@@ -465,7 +467,8 @@ void kernel_loop(void)
         filing = files_service(ms);                 /* the card-detect pin, then queued file work (files.c) */
         kernel_stage = 3;
         poll_power(ms);
-        if (settings_auto_off_ms && !app_keep_on && !menu_drive && ms - last_input >= settings_auto_off_ms) shutdown();
+        if (settings_auto_off_ms && !app_keep_on && !menu_drive && (int32_t)(ms - last_input) >= (int32_t)settings_auto_off_ms)
+            shutdown();                             /* signed: events stamped since this pass's ms are newer than it */
         if (battery_poll(ms)) shutdown_with("BATTERY EMPTY");
         kernel_stage = 4;
         busy = display_dma ? oled_dma_poll() : 0;   /* also releases the chip select after a frame */

@@ -56,6 +56,7 @@ void clock_init(void);                        /* SYNC pins and the bank 7 interr
 void clock_block(void);                       /* audio interrupt, before the app's callback */
 void clock_gpio_isr(void);
 void clock_midi_byte(u8 byte);                /* UART0's interrupt, every received byte */
+void clock_usb_midi_byte(u8 byte);            /* main loop: every received USB MIDI byte */
 int  clock_poll(void);                        /* main loop: transport events to the app */
 int  clock_control(u32 command, int value);
 void clock_state(enaga_clock_state_t *state);
@@ -84,6 +85,8 @@ extern u32 usb_audio_out_packets, usb_audio_out_overruns, usb_audio_out_underrun
 extern u32 usb_audio_in_packets, usb_audio_in_late, usb_audio_in_underruns;
 extern float usb_audio_out_ratio;
 void usb_drive_share(int on);                 /* USB DRIVE: the SD card shown to the computer, or not */
+int  usb_drive_sharing(void);
+void usb_drive_card_changed(int ready);       /* while shared: a card left (0) or arrived initialised (1) */
 int  usb_drive_ejected(void);                 /* the computer ejected it */
 extern u32 usb_drive_read_sectors, usb_drive_written_sectors, usb_drive_errors;
 extern volatile uint32_t enaga_musb_tx_busy;   /* dcd_musb.c: TX interrupts that found the FIFO still full */
@@ -155,6 +158,7 @@ extern u32 battery_sample_ms, battery_empty_ms, battery_average;
 void settings_load(void);                     /* read and apply (defaults without a card or file) */
 void settings_open(void);
 int  settings_event(const enaga_event_t *event);   /* 1: the page closed (saved if changed) */
+void settings_commit(void);                   /* save if anything changed since the last save */
 void settings_draw(void);
 extern u32 pad_press_level, pad_release_level;    /* the PADS setting */
 extern u32 settings_auto_off_ms;              /* the AUTO OFF setting; 0 = never */
