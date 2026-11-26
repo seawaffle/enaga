@@ -619,7 +619,8 @@ Its card is staged by `tools/unit_card.py`.
   waits"): 0.20 MiB/s writing, 0.24 reading, and the computer is the slower side both ways (one packet per two
   microframes). By port (log, "By port and with audio off"): on the CPU's controller with the unit's audio off,
   0.67 MiB/s writing, 0.92 reading; the front port's chipset controller was the slowness. The SD card now overlaps
-  the USB transfer (log, "The card beside the packets"), awaiting the unit; after that, high speed (step 3).
+  the USB transfer (log, "The card beside the packets"): on the unit 0.92 MiB/s writing and 1.02 reading (audio
+  off), 0.80 and 0.84 (on), near full speed's ceiling. Full speed is done; more needs high speed (step 3).
   - Earlier plan: the user started a Claude session on the Windows PC with a read-only brief: raw sectors 0-63 and
     the partition start over USB vs a card reader, a USBPcap capture of drive mount / playback / recording, and
     scripted play / record tests. Debug from its evidence. Also ask whether STATUS showed a crash row.
@@ -687,7 +688,8 @@ Its card is staged by `tools/unit_card.py`.
   - Not yet looked at closely: the resampler (180 cycles an output under cl6x, 128 multiply-adds), the
     compressor, the limiter and the reverb, and libm's tanhf, which cl6x builds slower than GCC.
   - Enaga's own share of a block (log "Enaga's own share of the audio block"): 7,027 to 2,644 cycles on the
-    emulator; the unit's figure (about 13,000 before) is to be measured. `memcpy` copies a byte at a time (in the
+    emulator; on the unit about 5,800 with the app stopped (USB DRIVE open), from about 13,000, and about 9,600
+    while Windows streams USB audio (log, "Enaga's own share of the audio block"). `memcpy` copies a byte at a time (in the
     firmware and the app runtime), a 7x gain on aligned copies left for when an app needs it.
 - USB stack: the C6748's USB0 is a Mentor MUSB controller; a TinyUSB port (TinyUSB has a MUSB driver for
   other TI parts) is plausible and unverified.
@@ -2502,6 +2504,9 @@ per bulk endpoint, each packet's time from load to its TX interrupt, and the tim
   comparison: they run at high speed or faster. To try: a port on the other controller, the unit's audio devices
   disabled in Windows, and a USB 2.0 hub. Double buffering stays: it removed the NAKs and is the 1.3-1.7 times
   already measured.
+  - After the last eject (a file deleted, then Eject), `USB_DRIVE ERRORS` went to 1 with `DRV R RANGE`: Windows
+    read once after its STOP UNIT, which `drive_range` refuses (the drive is no longer ready). The writes before
+    the STOP had all landed; nothing was lost. Only once in three ejects.
 - **By port and with audio off** (2026-11-26, same build and PC; `~/smpltrek-debug/drive-waits/
   FINDINGS-drive-ports.md`). Mostly the controller, partly the audio streams:
 
@@ -2534,15 +2539,28 @@ per bulk endpoint, each packet's time from load to its TX interrupt, and the tim
   is read into the buffer while this one goes out, and copied in when asked for; any write, and sharing or taking
   back the card, drops it. TinyUSB's MSC driver gained `tud_msc_data_left` (Enaga's patch) to say whether a chunk
   is its command's last. STATUS `USB_DRIVE_TIME` ends `AHEAD` (chunks read ahead) and `BEHIND` (written behind).
-  Expected on the good port: writing about 0.9 MiB/s, reading about 1 MiB/s; to measure on the unit. The emulator
+  The emulator
   test checks a 64 KiB write is on the card at its status, seven of its eight chunks written behind, the read-back
   seven chunks ahead, and a write dropping what was read ahead. The write-behind failure path is untested (the
   emulator cannot fail the card).
 - **Reads and writes after the eject** are NOT READY, MEDIUM NOT PRESENT, as TEST UNIT READY already said, and no
   longer counted or logged as card errors (`DRV R RANGE` was Windows' read after STOP UNIT).
-  - After the last eject (a file deleted, then Eject), `USB_DRIVE ERRORS` went to 1 with `DRV R RANGE`: Windows
-    read once after its STOP UNIT, which `drive_range` refuses (the drive is no longer ready). The writes before
-    the STOP had all landed; nothing was lost. Only once in three ejects.
+- **On the unit with the overlap** (2026-11-26, build 9cc86011, the rear port on the CPU's xHCI;
+  `~/smpltrek-debug/drive-overlap/FINDINGS-drive-overlap.md`), the 20 MiB file as before, both read-backs matching:
+
+  | Audio | Write | Read | Mount | Before (b9811df8): write, read |
+  |---|---|---|---|---|
+  | off | 21.7 s, 0.92 MiB/s | 19.7 s, 1.02 MiB/s | 8.1 s | 0.67, 0.92 MiB/s |
+  | on | 25.1 s, 0.80 MiB/s | 23.8 s, 0.84 MiB/s | 9.5 s | 0.61, 0.78 MiB/s |
+
+  Writing gained 31-37 %, reading 8-10 %. `BEHIND` 2,240 of 2,586 write chunks (seven of each 64 KiB command's
+  eight), `AHEAD` 2,240 of 2,560 read chunks. `OUT_BACKLOG` fell from 2,550 to 234 (170 with audio): packets no
+  longer pile up while the card writes. Reading kept its 0.057 ms a packet, so the gain there is the card's 2.4 s
+  hidden; writing's packets came every 0.062 ms. Both directions are now near full speed's 1.16 MiB/s, and past the
+  700 KiB/s target with the audio on too. `ERRORS 0` after all four ejects (the rear port never showed the read
+  after STOP; the emulator test covers it). `SD SLOW 60 MS` and `373 MS` in the log, as in earlier sessions: the
+  card's own pauses. `USB_AUDIO_OUT` counted 1,750 packets at each eject with audio on: Windows' removal sound,
+  played on the unit as its default output, most likely.
 - **USB audio nobody reads** (the first debug-port session): with no app on USB input, the computer's packets
   filled the ring and each one counted an overrun. The audio interrupt now trims the ring to its 3 ms target each
   block while USB input is unused (`usb_audio_unread`), so the counter means what it says and an app switching to
@@ -2691,6 +2709,11 @@ operations together took about 400.
   code into `memcpy` and `memset` calls, including in the synth's audio path, but the synth's worst case stayed
   at 29 % with the fast version, so its copies are small. The runtime's `memset` is already pipelined (about 1
   cycle a byte).
+- **On the unit** (2026-11-26, build 9cc86011, `~/smpltrek-debug/drive-overlap`): `audio_cycles_last` read ten times
+  with USB DRIVE open, so no app: 5,774-5,905 cycles (most 5,780) with the unit's audio disabled in Windows, and
+  9,620-9,773 with Windows streaming to and from it (USB audio's share, about 3,850). The first unit session's
+  13,000 had no USB audio and was worked out from the CHECK load page, so the comparison is rough: 2.2 times less,
+  against the emulator's 2.7. `audio_cycles_peak` read 16,501 and 23,019 (since start-up, transients included).
 
 ### The DSP library prebuilt by cl6x (2026-11-26)
 
