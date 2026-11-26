@@ -173,7 +173,8 @@ static int status_line(u32 step)
     case 16: add_text("USB_DRIVE_TIME R "); add_dec(usb_drive_calls[0]); add_text(" SD_MS ");
              add_dec(usb_drive_sd_us[0] / 1000u); add_text(" GAP_MS "); add_dec(usb_drive_gap_us[0] / 1000u);
              add_text(" W "); add_dec(usb_drive_calls[1]); add_text(" SD_MS "); add_dec(usb_drive_sd_us[1] / 1000u);
-             add_text(" GAP_MS "); add_dec(usb_drive_gap_us[1] / 1000u); break;
+             add_text(" GAP_MS "); add_dec(usb_drive_gap_us[1] / 1000u); add_text(" AHEAD ");
+             add_dec(usb_drive_ahead[0]); add_text(" BEHIND "); add_dec(usb_drive_ahead[1]); break;
     case 17: add_text("USB_DRIVE_PACKETS IN "); add_dec(enaga_musb_in_packets[2]); add_text(" WAIT_MS ");
              add_dec(enaga_musb_in_wait_us[2] / 1000u); add_text(" OUT "); add_dec(enaga_musb_out_packets[2]);
              add_text(" GAP_MS "); add_dec(enaga_musb_out_gap_us[2] / 1000u); break;

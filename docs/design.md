@@ -611,8 +611,8 @@ Its card is staged by `tools/unit_card.py`.
   the packets, both ways; double buffering is on branch usb-drive-speed. On the unit (2026-11-26, log "Which side
   waits"): 0.20 MiB/s writing, 0.24 reading, and the computer is the slower side both ways (one packet per two
   microframes). By port (log, "By port and with audio off"): on the CPU's controller with the unit's audio off,
-  0.67 MiB/s writing, 0.92 reading; the front port's chipset controller was the slowness. Left: overlapping the SD
-  card with the USB transfer (writing could reach about 0.9 MiB/s), and high speed (step 3).
+  0.67 MiB/s writing, 0.92 reading; the front port's chipset controller was the slowness. The SD card now overlaps
+  the USB transfer (log, "The card beside the packets"), awaiting the unit; after that, high speed (step 3).
   - Earlier plan: the user started a Claude session on the Windows PC with a read-only brief: raw sectors 0-63 and
     the partition start over USB vs a card reader, a USBPcap capture of drive mount / playback / recording, and
     scripted play / record tests. Debug from its evidence. Also ask whether STATUS showed a crash row.
@@ -2511,6 +2511,20 @@ per bulk endpoint, each packet's time from load to its TX interrupt, and the tim
     rear): one read after STOP UNIT, refused. Harmless. Once in set-up B, Explorer's first Eject did nothing (D:
     stayed ready, a few sectors read and written meanwhile); the second, 17 s later, worked: Windows still using
     the volume, most likely, since the unit saw no STOP.
+- **The card beside the packets** (2026-11-26, usb.c): a second 8 KiB buffer. Writing, each chunk of a command
+  but the last is copied aside and acknowledged, and written to the card in usb_poll while the USB interrupt takes
+  the next chunk's packets; the last is written before its callback returns, so a command's status still comes only
+  once all of it is on the card, and a SYNCHRONIZE CACHE or STOP after it finds nothing pending. A chunk written
+  behind that fails fails its command at the next chunk (`side_failed_next`). Reading, the next chunk of the command
+  is read into the buffer while this one goes out, and copied in when asked for; any write, and sharing or taking
+  back the card, drops it. TinyUSB's MSC driver gained `tud_msc_data_left` (Enaga's patch) to say whether a chunk
+  is its command's last. STATUS `USB_DRIVE_TIME` ends `AHEAD` (chunks read ahead) and `BEHIND` (written behind).
+  Expected on the good port: writing about 0.9 MiB/s, reading about 1 MiB/s; to measure on the unit. The emulator
+  test checks a 64 KiB write is on the card at its status, seven of its eight chunks written behind, the read-back
+  seven chunks ahead, and a write dropping what was read ahead. The write-behind failure path is untested (the
+  emulator cannot fail the card).
+- **Reads and writes after the eject** are NOT READY, MEDIUM NOT PRESENT, as TEST UNIT READY already said, and no
+  longer counted or logged as card errors (`DRV R RANGE` was Windows' read after STOP UNIT).
   - After the last eject (a file deleted, then Eject), `USB_DRIVE ERRORS` went to 1 with `DRV R RANGE`: Windows
     read once after its STOP UNIT, which `drive_range` refuses (the drive is no longer ready). The writes before
     the STOP had all landed; nothing was lost. Only once in three ejects.

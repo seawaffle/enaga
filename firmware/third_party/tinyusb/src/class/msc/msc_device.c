@@ -311,6 +311,14 @@ bool tud_msc_set_sense(uint8_t lun, uint8_t sense_key, uint8_t add_sense_code, u
   return true;
 }
 
+// Enaga: bytes of the READ (10) or WRITE (10) in progress not yet counted as transferred; in tud_msc_read10_cb or
+// tud_msc_write10_cb, the chunk being handled included (firmware/usb/usb.c: is it the command's last, and what to
+// read ahead).
+uint32_t tud_msc_data_left(uint8_t lun) {
+  (void) lun;
+  return _mscd_itf.cbw.total_bytes - _mscd_itf.xferred_len;
+}
+
 TU_ATTR_ALWAYS_INLINE static inline void set_sense_medium_not_present(uint8_t lun) {
   // default sense is NOT READY, MEDIUM NOT PRESENT
   (void) tud_msc_set_sense(lun, SCSI_SENSE_NOT_READY, 0x3A, 0x00);

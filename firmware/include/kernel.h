@@ -88,6 +88,7 @@ void usb_drive_share(int on);                 /* USB DRIVE: the SD card shown to
 int  usb_drive_ejected(void);                 /* the computer ejected it */
 extern u32 usb_drive_read_sectors, usb_drive_written_sectors, usb_drive_errors;
 extern u32 usb_drive_calls[2], usb_drive_sd_us[2], usb_drive_gap_us[2];   /* where a copy's time goes (usb.c) */
+extern u32 usb_drive_ahead[2];                /* chunks read ahead [0], written behind [1] (usb.c) */
 extern volatile uint32_t enaga_musb_in_packets[5], enaga_musb_in_wait_us[5];   /* per endpoint (musb_enaga.h) */
 extern volatile uint32_t enaga_musb_out_packets[5], enaga_musb_out_gap_us[5];
 extern volatile uint32_t enaga_musb_in_empty[5], enaga_musb_in_queued[5], enaga_musb_out_backlog[5], enaga_musb_out_alone[5];

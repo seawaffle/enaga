@@ -111,21 +111,64 @@ u32 usb_drive_read_sectors, usb_drive_written_sectors, usb_drive_errors;
 u32 usb_drive_calls[2], usb_drive_sd_us[2], usb_drive_gap_us[2];
 static u32 drive_call_end;
 
-static void drive_call(int write, u32 start)
+static void drive_call(int write, u32 start)   /* a callback's end: the gap before it */
 {
-    u32 end = tsc_read();
     if (drive_call_end && start - drive_call_end < DRIVE_GAP_MS * TICKS_PER_MS)
         usb_drive_gap_us[write] += (start - drive_call_end) / 372u;
-    usb_drive_sd_us[write] += (end - start) / 372u;
     usb_drive_calls[write]++;
-    drive_call_end = end | 1;
+    drive_call_end = tsc_read() | 1;
+}
+
+/* The SD card beside the USB transfer (2026-11-26): the card's time was in series with the packets, a quarter of a
+ * write on a good port. A command's chunks (TinyUSB's 8 KiB buffer) now overlap the card through a second buffer,
+ * worked in usb_poll after TinyUSB's task while the USB interrupt moves the next chunk's packets:
+ *   - writing, every chunk but the command's last is copied aside and acknowledged, so TinyUSB takes the next one
+ *     while the card writes this one. The last is written before the callback returns, so the command's status
+ *     (and a SYNCHRONIZE CACHE or STOP after it) comes only once every sector is on the card. A chunk written
+ *     behind that fails fails the command at its next chunk (there is always one).
+ *   - reading, the command's next chunk is read ahead while this one goes out; a read ahead that failed, or does
+ *     not match, is read again in the callback, which reports any error.
+ * Read-ahead data is dropped by any write and when the card is shared or taken back, so it is always the card's.
+ * usb_drive_ahead counts the chunks served from a read ahead [0] and written behind [1]. */
+enum { SIDE_EMPTY, SIDE_WRITE, SIDE_READ_WANTED, SIDE_READ };
+static u32 drive_side[CFG_TUD_MSC_EP_BUFSIZE / 4u];
+static int side_state, side_failed;
+static u32 side_lba, side_count, side_failed_next;   /* after a failure: the lba its command goes on at */
+u32 usb_drive_ahead[2];
+
+static int drive_sd(int write, void *buffer, u32 lba, u32 count)    /* the SD driver, timed */
+{
+    u32 start = tsc_read();
+    int r = write ? sd_write(buffer, lba, count) : sd_read(buffer, lba, count);
+    usb_drive_sd_us[write] += (tsc_read() - start) / 372u;
+    return r;
+}
+
+static void drive_copy(u32 *to, const u32 *from, u32 bytes)
+{
+    u32 i;
+    for (i = 0; i < bytes / 4u; i++) to[i] = from[i];
+}
+
+static void drive_failed(char what, int sd_code);
+
+static void side_write(void)                   /* the chunk waiting aside, to the card */
+{
+    int r = drive_sd(1, drive_side, side_lba, side_count);
+    side_state = SIDE_EMPTY;
+    if (r != 0) { drive_failed('W', r); side_failed = 1; side_failed_next = side_lba + side_count; return; }
+    usb_drive_written_sectors += side_count;
+    usb_drive_ahead[1]++;
 }
 
 void usb_drive_share(int on)
 {
+    if (side_state == SIDE_WRITE && drive_shared) side_write();    /* usb_poll leaves none; but never lose one */
+    side_state = SIDE_EMPTY;
+    side_failed = 0;
     if (on) {                                  /* the counters start with the page */
         u32 i;
-        for (i = 0; i < 2; i++) usb_drive_calls[i] = usb_drive_sd_us[i] = usb_drive_gap_us[i] = 0;
+        for (i = 0; i < 2; i++) usb_drive_calls[i] = usb_drive_sd_us[i] = usb_drive_gap_us[i] = usb_drive_ahead[i] = 0;
         drive_call_end = 0;
         i = tu_edpt_number(EP_DRIVE_IN);
         enaga_musb_in_packets[i] = enaga_musb_in_wait_us[i] = 0;
@@ -212,36 +255,82 @@ static void drive_failed(char what, int sd_code)
     log_line(line);
 }
 
+/* A read or write while the drive is not ready (not shared, or after the computer's STOP: Windows sometimes reads
+ * once more after ejecting) fails as NOT READY, MEDIUM NOT PRESENT, as TEST UNIT READY says; not a card error. */
+static int drive_not_ready(void)
+{
+    if (drive_ready()) return 0;
+    tud_msc_set_sense(0, SCSI_SENSE_NOT_READY, 0x3A, 0x00);
+    return 1;
+}
+
 int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void *buffer, uint32_t bufsize)
 {
-    int r;
-    u32 start = tsc_read();
-    (void)lun;
+    int r = 0;
+    u32 start = tsc_read(), count = bufsize / 512u, left;
+    if (drive_not_ready()) return TUD_MSC_RET_ERROR;
     if (!drive_range(lba, offset, bufsize) || ((u32)buffer & 3)) { drive_failed('R', 0); return TUD_MSC_RET_ERROR; }
-    r = sd_read(buffer, lba, bufsize / 512u);
+    if (side_state == SIDE_WRITE) side_write();
+    if (side_state == SIDE_READ && side_lba == lba && side_count == count) {
+        drive_copy(buffer, drive_side, bufsize);
+        usb_drive_ahead[0]++;
+    } else {
+        r = drive_sd(0, buffer, lba, count);
+    }
+    side_state = SIDE_EMPTY;
+    left = tud_msc_data_left(lun) - bufsize;
+    if (r == 0 && left >= 512u) {              /* the command goes on: its next chunk, in usb_poll */
+        side_lba = lba + count;
+        side_count = (left < CFG_TUD_MSC_EP_BUFSIZE ? left : CFG_TUD_MSC_EP_BUFSIZE) / 512u;
+        side_state = SIDE_READ_WANTED;
+    }
     drive_call(0, start);
     if (r != 0) {
         drive_failed('R', r);
         return TUD_MSC_RET_ERROR;
     }
-    usb_drive_read_sectors += bufsize / 512u;
+    usb_drive_read_sectors += count;
     return (int32_t)bufsize;
 }
 
 int32_t tud_msc_write10_cb(uint8_t lun, uint32_t lba, uint32_t offset, uint8_t *buffer, uint32_t bufsize)
 {
     int r;
-    u32 start = tsc_read();
-    (void)lun;
+    u32 start = tsc_read(), count = bufsize / 512u;
+    if (drive_not_ready()) return TUD_MSC_RET_ERROR;
     if (!drive_range(lba, offset, bufsize) || ((u32)buffer & 3)) { drive_failed('W', 0); return TUD_MSC_RET_ERROR; }
-    r = sd_write(buffer, lba, bufsize / 512u);
+    if (side_state == SIDE_WRITE) side_write();
+    side_state = SIDE_EMPTY;                   /* a read ahead is stale now */
+    if (side_failed) {                         /* a chunk written behind failed (logged then): if this is the */
+        side_failed = 0;                       /* same command's next chunk, the command fails */
+        if (lba == side_failed_next) { drive_call(1, start); return TUD_MSC_RET_ERROR; }
+    }
+    if (tud_msc_data_left(lun) > bufsize) {    /* not the last: aside, written in usb_poll */
+        drive_copy(drive_side, (const u32 *)buffer, bufsize);
+        side_lba = lba;
+        side_count = count;
+        side_state = SIDE_WRITE;
+        drive_call(1, start);
+        return (int32_t)bufsize;
+    }
+    r = drive_sd(1, buffer, lba, count);
     drive_call(1, start);
     if (r != 0) {
         drive_failed('W', r);
         return TUD_MSC_RET_ERROR;
     }
-    usb_drive_written_sectors += bufsize / 512u;
+    usb_drive_written_sectors += count;
     return (int32_t)bufsize;
+}
+
+static void drive_work(void)                   /* usb_poll, after TinyUSB's task: the card beside the packets */
+{
+    if (side_state == SIDE_WRITE) {
+        side_write();
+    } else if (side_state == SIDE_READ_WANTED) {
+        side_state = drive_range(side_lba, 0, side_count * 512u)
+                     && drive_sd(0, drive_side, side_lba, side_count) == 0 ? SIDE_READ : SIDE_EMPTY;
+    }
 }
 
 int32_t tud_msc_scsi_cb(uint8_t lun, uint8_t const scsi_cmd[16], void *buffer, uint16_t bufsize)
@@ -280,6 +369,7 @@ int usb_poll(u32 ms)                           /* main loop: returns the MIDI by
     u8 buffer[64], cable;
     u32 n, i, got = 0;
     tud_task_ext(0, false);
+    drive_work();
     while ((n = tud_midi_n_demux_stream_read(0, &cable, buffer, sizeof buffer)) > 0) {
         if (cable == 1) {
             for (i = 0; i < n; i++) usb_debug_byte(buffer[i]);

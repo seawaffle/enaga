@@ -180,6 +180,39 @@ class UsbDrive(unittest.TestCase):
             self.assertEqual(data, image[lba * SECTOR:(lba + 128) * SECTOR], lba)
         self.assertEqual(self.emu.word("usb_drive_errors"), 0)
 
+    def test_the_card_beside_the_packets(self):
+        """A command's chunks overlap the SD card: writing, each chunk but the last is written while the next
+        arrives, and the last before the status, so the whole command is on the card when the status comes; reading,
+        the next chunk is read while this one goes out. Both give the card's bytes."""
+        self.open_drive()
+        self.assertIs(self.ready() == (6, 0x28) and self.ready(), True)
+        data = bytes((i * 7919 + (i >> 9) * 31) & 255 for i in range(128 * SECTOR))   # 64 KiB: eight chunks
+        self.write(2000, data)
+        self.assertEqual(self.emu.cpu.sd_read(2000 * SECTOR, len(data)), data)          # all there at the status
+        self.assertEqual(self.words("usb_drive_ahead", 2)[1], 7)                         # seven written behind
+        self.assertEqual(self.emu.word("usb_drive_written_sectors"), 128)
+        self.assertEqual(self.read(2000, 128), data)
+        self.assertEqual(self.words("usb_drive_ahead", 2)[0], 7)                         # seven read ahead
+        self.write(2008, bytes(16 * SECTOR))                                             # a write drops what was read
+        self.assertEqual(self.read(2000, 32), data[:8 * SECTOR] + bytes(16 * SECTOR) + data[24 * SECTOR:32 * SECTOR])
+        self.assertEqual(self.emu.word("usb_drive_errors"), 0)
+
+    def test_reads_after_the_eject_are_not_card_errors(self):
+        """Windows sometimes reads once more after its STOP UNIT (the unit, 2026-11-26): NOT READY, as for no medium,
+        and neither counted nor logged as a card error."""
+        self.open_drive()
+        self.assertIs(self.ready() == (6, 0x28) and self.ready(), True)
+        self.assertEqual(self.scsi([0x1B, 0, 0, 0, 0x02, 0])[0], 0)                    # eject
+        self.assertEqual(self.scsi([0x28, 0, 0, 0, 0, 0, 0, 0, 1, 0], SECTOR)[0], 1)    # at once, before the menu
+        self.assertEqual(self.sense(), (2, 0x3A))
+        self.run_ms(100)
+        self.assertEqual(self.emu.word("menu_drive"), 0)
+        self.assertEqual(self.scsi([0x2A, 0, 0, 0, 0, 0, 0, 0, 1, 0], data_out=bytes(SECTOR))[0], 1)
+        self.emu.cpu.usb_control((0x02, 1, 0, EP_OUT), 0)                              # the host clears the stall
+        self.assertEqual(self.sense(), (2, 0x3A))
+        self.assertEqual(self.emu.word("usb_drive_errors"), 0)
+        self.assertNotIn("DRV", " ".join(self.emu.report()["log"]))
+
     def words(self, name, count):
         data = self.emu.cpu.read(self.emu.names[name], 4 * count)
         return list(struct.unpack(f"<{count}I", data))

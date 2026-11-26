@@ -64,6 +64,9 @@ TU_VERIFY_STATIC(CFG_TUD_MSC_EP_BUFSIZE < UINT16_MAX, "Size is not correct");
 // Set SCSI sense response
 bool tud_msc_set_sense(uint8_t lun, uint8_t sense_key, uint8_t add_sense_code, uint8_t add_sense_qualifier);
 
+// Enaga: bytes of the READ/WRITE (10) in progress not yet transferred, the callback's own chunk included
+uint32_t tud_msc_data_left(uint8_t lun);
+
 // Called by Application once asynchronous I/O operation is done
 // bytes_io is number of bytes in I/O op, typically the bufsize in read/write_cb() or
 // TUD_MSC_RET_ERROR (-1) for error. Note TUD_MSC_RET_BUSY (0) will be treated as error as well.
