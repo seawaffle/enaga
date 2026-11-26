@@ -175,6 +175,10 @@ public:
         time("envelope", [] { enaga_envelope_render(&env, &shape, c, N); });
         static enaga_smoother sm = {0.0f, 1.0f, 0.001f};
         time("smoother", [] { enaga_smoother_render(&sm, c, N); });
+        static enaga_envelope held = {ENAGA_ENV_SUSTAIN, 0.5f};
+        time("envelope_held", [] { enaga_envelope_render(&held, &shape, c, N); });
+        static enaga_smoother rest = {0.25f, 0.25f, 0.001f};
+        time("smoother_rest", [] { enaga_smoother_render(&rest, c, N); });
 
         // Sample formats
         for (int i = 0; i < 2 * N; i++) pcm16[i] = int16_t(i * 300);
