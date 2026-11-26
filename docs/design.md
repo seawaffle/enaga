@@ -668,12 +668,22 @@ Its card is staged by `tools/unit_card.py`.
   calibration.
 - Synth on the unit: measured 8 % idle, 10 % one note, 24 % eight notes (INIT), 25 % SUPERSAW two notes (eight
   voices), no dropouts; the worst case (30 % on the emulator) not yet measured there.
-- DSP library: the SVF runs at 21 cycles a sample under cl6x (its recurrence), twice a biquad's 10; a faster
-  form is worth trying. The synth's modulation is 6.4 % of the budget with cl6x, most of it the scalar part
-  (matrix 1.5 %, LFOs 1.1 %, envelopes 0.7 %); GCC compiles the math-buffer loops poorly (about 80 cycles an
-  exp2, mostly NOPs and constants rebuilt per use), so the GCC-only build lost 3 points to the restructure. The library is built from source with each app for now; a
-  release SDK would ship it prebuilt. Before shipping cl6x-built code, check that it calls none of TI's run-time
-  library (the link would show it: apps link only libgcc) and TI's licence terms.
+- **DSP library speed (2026-11-26, log "The DSP library's speed"):**
+  - The SDK ships the library prebuilt by cl6x (owner's decision, 2026-11-26; log "The DSP library prebuilt by
+    cl6x"). Still open: the first tagged release that makes it on GitHub, and branch `ci-cl6x` (the trial
+    workflow), which can be deleted once that release has run.
+  - GCC 13's tic6x back end pipelines no loop with a float multiply (its SPLOOP pass gives up on them: "We don't
+    handle floating point multiplies yet"). Its selective scheduler crashes the compiler, and the list scheduler
+    does not overlap the unrolled copies, so each value waits for its whole chain. Inline math in an app's own
+    code is therefore slow whatever the library does (exp2 about 85 cycles a value, tanh 190). Fixing that means
+    patching the toolchain we build, a project of its own.
+  - The SVF runs at 21 cycles a sample under cl6x (its recurrence). Regrouping into a state-space form would cut
+    that to about 12, but it rounds the low-cutoff coefficients (1 - 2 g^2 near 1) far worse, so it was not taken.
+  - Not yet looked at closely: the resampler (180 cycles an output under cl6x, 128 multiply-adds), the
+    compressor, the limiter and the reverb, and libm's tanhf, which cl6x builds slower than GCC.
+  - Enaga's own share of a block (log "Enaga's own share of the audio block"): 7,027 to 2,644 cycles on the
+    emulator; the unit's figure (about 13,000 before) is to be measured. `memcpy` copies a byte at a time (in the
+    firmware and the app runtime), a 7x gain on aligned copies left for when an app needs it.
 - USB stack: the C6748's USB0 is a Mentor MUSB controller; a TinyUSB port (TinyUSB has a MUSB driver for
   other TI parts) is plausible and unverified.
 - A fault in Enaga code called by an app (a host function given a bad pointer) currently counts as a kernel
@@ -2504,4 +2514,100 @@ firmware here and the SDK, DSP library and tools on `review-sdk`, merged into it
 Left open, in Open items: the SCSI stall question (on usb-drive-speed), the SPLOOP flag, and the smaller items
 listed there. Not taken up: the reviews' suspicions without a trigger (C2-C14), and the release-process notes
 beyond what Open items records.
+
+### The DSP library's speed (2026-11-26)
+
+The owner asked for the libraries to be as fast as we can make them.
+- **`tools/bench.py`** and `tests/apps/bench`: every block function on 64-frame blocks, and the inline functions in
+  an app's own loop, timed with TSCL on the emulator. The library is built once by cl6x and once by GCC, and the
+  two columns are printed side by side. The emulator models no caches, so the figures compare with each other only.
+- **The sample player** (`runtime/dsp/sample.c`): it worked out every frame's loop wrap, tap clamping and end
+  check, which kept both compilers from pipelining it. That cost about 10,000 cycles a 64-frame block under either.
+  `player_run` now finds how many frames from the position need none of that and plays them in a loop that only
+  interpolates and steps; the frame at a boundary takes the old path. The output is the same bit for bit. A host test plays
+  3,000 random samples against the old code kept as a reference: loops of both kinds and empty ones, both
+  directions, rates from 0 to 10^6, uneven blocks, the loop switched off mid-way. Five of `player_run`'s bounds,
+  each loosened in turn, failed that test. `render_add` mixes each channel in a loop of its own.
+- **The hard-synced sine:** cl6x could not pipeline it (two sines a sample in the loop that follows the restarts).
+  Under cl6x it now runs in three passes: phases, both sines, then the corrections. GCC is faster with the one
+  loop and keeps it. `ENAGA_DSP_SELECTS` selects cl6x's branch-free forms under any compiler, and
+  `test_dsp.py` now runs the host checks in both forms, which until now GCC never compiled.
+- **A held envelope and a smoother at rest** fill the block. The envelope check sits outside the stepping loop's
+  function, because inside it GCC's code for the moving envelope lost 18 %.
+- **test_synth's cl6x / GCC comparison** now runs the chorus at depth 0. The chorus sweep runs from the app's
+  start, and the test lines the two captures up at their first sound. With the new code the cl6x build's first
+  sound came two blocks later, so its chorus was out of step and the samples differed in the last bits, though
+  neither changed path ran in that test. The two builds had been starting in the same block by luck.
+- **Tried and dropped:** GCC flags (the best set, `-fsched-pressure`, gains 2 %; dropping `-funroll-loops` loses
+  19 %). `-fmodulo-sched` gives no SPLOOP on float loops (see Open items), and the selective scheduler crashes
+  GCC. cl6x's `--opt_for_speed=5` changes nothing over `-O3`. Writing clamp and floor_int branch-free for GCC
+  leaves the iterations serial.
+
+Cycles for 64 frames, cl6x / GCC, before and after:
+
+| Item | Before | After |
+|---|---|---|
+| Sample player, mono, any rate | 9,896 / 10,767 | 950 / 3,397 |
+| Sample player, stereo | 13,608 / 13,967 | 1,212 / 6,075 |
+| `render_add`, stereo | 15,664 / 17,527 | 1,860 / 6,955 |
+| Synced sine | 7,220 / 7,179 | 2,203 / 7,179 |
+| Envelope, held | 1,134 / 1,874 | 112 / 133 |
+| Smoother, at rest | 917 / 930 | 96 / 111 |
+
+### Enaga's own share of the audio block (2026-11-26)
+
+On the unit, Enaga's share of every block was about 13,000 cycles, 3 % of the budget (first unit session); on the
+emulator, with an app that does nothing, it was 7,027. Timing the interrupt in parts showed that most of it was
+two loops: converting the received words to float (about 1,800 cycles) and converting the output back to words
+with clipping and the NaN check (about 4,800); the clock, the call into the app, USB audio, the level and the cache
+operations together took about 400.
+- **The output conversion** (`to_word` in `kernel/audio.c`) now works on the float's bits with shifts and masks:
+  no float instruction and no branch. It gives the same words as the float form for all 2^32 bit patterns (checked
+  on the host against the old expression), and `test_output_words_are_the_samples_clipped` checks the build on
+  the emulator with edge cases and random patterns (with the NaN mask removed, it fails).
+- **`audio_isr` is unrolled** (`optimize("unroll-loops")`). The firmware is built without `-funroll-loops`, unlike
+  apps, and GCC overlaps nothing between passes of a loop with float in it, so the input conversion took about
+  14 cycles a sample. Unrolled, it takes 3.
+- Result on the emulator: 7,027 to 2,644 cycles a block. Not yet measured on the unit.
+- **Also found, not changed:** the firmware's and the app runtime's `memcpy` copy a byte at a time (6 cycles a
+  byte). A word-wise version copies 512 aligned bytes in 451 cycles instead of 3,162. GCC turns some loops in app
+  code into `memcpy` and `memset` calls, including in the synth's audio path, but the synth's worst case stayed
+  at 29 % with the fast version, so its copies are small. The runtime's `memset` is already pipelined (about 1
+  cycle a byte).
+
+### The DSP library prebuilt by cl6x (2026-11-26)
+
+The owner asked whether the SDK could ship the DSP library compiled by cl6x, then to set it up. GCC's build of the
+block functions is 2-12 times slower than cl6x's (tools/bench.py), and most developers have only GCC.
+- **Linking:** the cl6x archive needs only `__c6xabi_fixfu` and `__c6xabi_llshl` from outside itself, and GCC's
+  libgcc defines both, so nothing of TI's run-time library is linked. Its relocations are absolute and
+  PC-relative only (no data page pointer, which apps do not set up); it has only code, constants and jump tables
+  (no writable data); every function of `dsp.h` takes pointers and scalars and returns `float`, `int`,
+  `uint32_t` or nothing. All 21 structs of `dsp.h` have the same size, alignment and field offsets under both
+  compilers: `test_dsp.Layout` asserts GCC's 158 numbers under cl6x (a wrong one fails).
+- **Licence:** the only TI headers the library includes are the stdint typedefs, so it holds no TI code. CGT
+  8.5.0's licence ("TI Text File" for the compiler, BSD-3-Clause for the RTS) grants rights over TI's software and
+  claims nothing over what it compiles; its narrowest condition, use only with TI devices, holds anyway (C6748).
+  The 8.3.x releases were under TI's TSPA instead, so the release pins 8.5.0.
+- **TI's download:** https://dr-download.ti.com/software-development/ide-configuration-compiler-or-debugger/
+  MD-vqU2jj6ibH/8.5.0.LTS/ti_cgt_c6000_8.5.0.LTS_linux-x64_installer.bin needs no login (43,933,713 bytes, SHA-256
+  772511aa92dc36bd32622aad754c08797cefd8973bfd6c7bc1ceeb784955b37c from TI's page) and installs with
+  `--mode unattended --prefix DIR` in 2 s. On GitHub's runners: branch `ci-cl6x` (from origin/main, pushed with the
+  owner's permission) ran `.github/workflows/dsp-cl6x.yml`, run 45879715154, which passed in under a minute. Its
+  objects had the same machine code as a local build and differed only in a tag cl6x makes up per compilation
+  (8-9 bytes of the symbol table).
+- **No debug information:** with it, the objects carry the build machine's paths (the owner's user name among
+  them). `--symdebug:none` drops it with the same code (TI's strip6x would drop the symbol table too).
+- **How it ships:** `build_app.prebuilt_dsp_library` compiles the library with `--symdebug:none` and archives it
+  with GNU ar (`D`, deterministic), refusing an archive that needs more than `__c6xabi_*` helpers or holds a path
+  of the machine; it writes `sources.txt`, the SHA-256 of each library source and header. `make_sdk.py` puts both
+  in `runtime/prebuilt/` when cl6x is installed, and `--prebuilt` (the release workflow) makes that required. The
+  release workflow installs CGT 8.5.0 from TI's download, pinned by its SHA-256 and cached.
+- **Which library an app links** (`build_app.dsp_choice`, said on the tool's last line): built by cl6x when cl6x
+  is installed; else the prebuilt archive, while the sources match `sources.txt`; else built by GCC (an edited
+  library). `ENAGA_TI_CGT=none` takes GCC, never the prebuilt archive (`paths.TI_DISABLED`).
+- **Tests:** `test_sdk_prebuilt.py`: the SDK's build tool without cl6x links the prebuilt
+  archive, and the synth and sampler packages are byte-identical to the repository's cl6x builds; with a library
+  source edited, the synth's is byte-identical to the GCC build. Both need cl6x on the machine running the tests;
+  CI runs no tests.
 

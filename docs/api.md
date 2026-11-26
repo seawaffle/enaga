@@ -926,8 +926,8 @@ the same object.
 **Conventions**
 
 - **Process in blocks.** Methods that take a buffer and a count (`render_add`, `process`, `render`, `read`) are
-  *block functions*, built with TI's cl6x when it is installed: several times faster than GCC's code, and the
-  same samples either way. Per-sample `step()` calls are for code that needs them, such as feedback loops.
+  *block functions*, compiled by TI's cl6x (the SDK's prebuilt copy, or your own cl6x): several times faster
+  than GCC's code, and the same samples either way. Per-sample `step()` calls are for code that needs them, such as feedback loops.
 - **`_add` adds** into the output buffer; clear it first (`enaga_clear`) when starting a mix.
 - **Coefficients at control rate.** Filter and envelope settings cost a reciprocal or an exponential; compute them
   when a parameter changes, or once per block, not per sample.

@@ -5,11 +5,17 @@
  * pipeline either way and is faster branching around the corrections; the arithmetic, so the result, is the same. */
 #include <enaga/dsp.h>
 
+/* The branch-free forms are cl6x's; ENAGA_DSP_SELECTS chooses them under any compiler, so the host tests can run
+ * both forms. */
+#if defined(__TI_COMPILER_VERSION__) && !defined(ENAGA_DSP_SELECTS)
+#define ENAGA_DSP_SELECTS 1
+#endif
+
 #define TURN 4294967296.0f
 
 /* The residual that takes the step out of a naive saw or pulse at a discontinuity at phase 0. */
 static inline float blep(float t, float dt, float inv_dt) {
-#ifdef __TI_COMPILER_VERSION__
+#ifdef ENAGA_DSP_SELECTS
     float a = t * inv_dt, b = (t - 1.0f) * inv_dt;
     float r = t < dt ? a + a - a * a - 1.0f : 0.0f;
     return t > 1.0f - dt ? b * b + b + b + 1.0f : r;
@@ -111,7 +117,7 @@ void enaga_wavetable_morph_add(enaga_oscillator *o, const float *restrict a, con
  * branch-free (both cases computed, one selected), which lets it pipeline; GCC, which doesn't pipeline, is faster
  * branching around the restart's work (about one sample in a hundred). The arithmetic, so the result, is the
  * same. */
-#ifdef __TI_COMPILER_VERSION__
+#ifdef ENAGA_DSP_SELECTS
 #define SYNC_RESTART(NAIVE)                                                                                        \
     const float a = enaga_clamp(enaga_unipolar(pm1) * inv_dt_m, 0.0f, 1.0f);                                      \
     const float at = enaga_unipolar(p + (uint32_t)(int32_t)((1.0f - a) * dt * TURN));                             \
@@ -159,6 +165,50 @@ void enaga_wavetable_morph_add(enaga_oscillator *o, const float *restrict a, con
         p = p1;                                                                                                    \
     }
 
+#ifdef ENAGA_DSP_SELECTS
+/* The sine's sync, as SYNC_LOOP(NAIVE_SINE, 0, 0.0f) computes it, in three passes over chunks of the block: the
+ * phases and the restarts, then the two sines (at the phase and where a restart cut the wave), then the
+ * corrections. With both sines in the one loop, cl6x could not pipeline it (7,200 cycles a 64-sample block against
+ * 2,200); GCC is faster with the one loop. */
+static void sync_sine(uint32_t *phase, uint32_t pm, uint32_t dpm, uint32_t dp, float inv_dt_m, float dt,
+                      float inv_dt, float *restrict out, int n, float level, float *carry) {
+    float x[64], cut[64], since[64];
+    int32_t restarted[64];
+    uint32_t p = *phase;
+    float prev = *carry;
+    int done, i;
+    for (done = 0; done < n; done += 64) {
+        const int count = n - done < 64 ? n - done : 64;
+        float *restrict o = out + done;
+        for (i = 0; i < count; i++) {
+            const uint32_t pm1 = pm + dpm, free = p + dp;
+            const int restart = pm1 < pm;
+            const float a = enaga_clamp(enaga_unipolar(pm1) * inv_dt_m, 0.0f, 1.0f);
+            const float at = enaga_unipolar(p + (uint32_t)(int32_t)((1.0f - a) * dt * TURN));
+            const uint32_t p1 = restart ? (uint32_t)(int32_t)(a * dt * TURN) : free;
+            const float x1 = enaga_unipolar(p1);
+            x[i] = x1;
+            cut[i] = restart ? at : 0.0f;
+            since[i] = restart ? a : x1 * inv_dt;
+            restarted[i] = restart;
+            pm = pm1;
+            p = p1;
+        }
+        for (i = 0; i < count; i++) x[i] = enaga_sin_turns(x[i]);
+        for (i = 0; i < count; i++) cut[i] = enaga_sin_turns(cut[i]);
+        for (i = 0; i < count; i++) {
+            const float jump = restarted[i] ? enaga_sin_turns(0.0f) - cut[i] : 0.0f, t = since[i];
+            const float cur = x[i] - 0.5f * jump * (1.0f - t) * (1.0f - t);
+            prev += 0.5f * jump * t * t;
+            o[i] += level * (prev + 0.0f);
+            prev = cur;
+        }
+    }
+    *phase = p;
+    *carry = prev;
+}
+#endif
+
 void enaga_oscillator_sync_add(enaga_oscillator *o, float *carry, const enaga_oscillator *master, float dt_m,
                                float inv_dt_m, float *restrict out, int n, int wave, float dt, float inv_dt,
                                float level, float width) {
@@ -174,7 +224,14 @@ void enaga_oscillator_sync_add(enaga_oscillator *o, float *carry, const enaga_os
         SYNC_LOOP(NAIVE_PULSE, 1, 2.0f)
         break;
     case ENAGA_WAVE_TRIANGLE: SYNC_LOOP(NAIVE_TRIANGLE, 0, 0.0f) break;
-    default: SYNC_LOOP(NAIVE_SINE, 0, 0.0f) break;
+    default:
+#ifdef ENAGA_DSP_SELECTS
+        sync_sine(&o->phase, pm, dpm, dp, inv_dt_m, dt, inv_dt, out, n, level, carry);
+        return;
+#else
+        SYNC_LOOP(NAIVE_SINE, 0, 0.0f)
+        break;
+#endif
     }
     o->phase = p;
     *carry = prev;

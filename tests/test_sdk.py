@@ -2,7 +2,7 @@
 on its own, the template copied to a folder of the developer's, and every app built with the SDK's build tool
 into the developer's folder, byte for byte as the repository builds them; the packaged (stripped) toolchain
 building the same bytes as the full one; the build tool's object names and DSP library rebuilds; and the template
-app playing a MIDI note on the emulator.
+app playing a MIDI note on the emulator. The SDK's prebuilt DSP library: test_sdk_prebuilt.py.
 
     python3 -B -m unittest tests.test_sdk
 """
@@ -29,29 +29,35 @@ BOOT = 300_000_000
 MS = 372_000
 
 
-@unittest.skipUnless(build_app.tools_present(), "needs the toolchain")
-class Sdk(unittest.TestCase):
-    def build_with_sdk(self, sdk, app, toolchain, scratch):
+class SdkBuilds:
+    """Builds with the SDK's tool and with the repository's (also used by test_sdk_prebuilt.py)."""
+    def build_with_sdk(self, sdk, app, toolchain, scratch, ti="none", said=None):
         """The SDK's build_app.py with no options: an app outside the SDK builds into its own build/, one inside
-        (the examples) into the SDK's build/apps/."""
-        env = dict(os.environ, ENAGA_TOOLCHAIN=str(toolchain), ENAGA_TI_CGT="none")
+        (the examples) into the SDK's build/apps/. ti: ENAGA_TI_CGT (a missing folder: no cl6x); said: what the
+        tool's last line must be."""
+        env = dict(os.environ, ENAGA_TOOLCHAIN=str(toolchain), ENAGA_TI_CGT=ti)
         env.pop("ENAGA_BUILD", None)
-        subprocess.run([sys.executable, "-B", str(sdk / "tools" / "build_app.py"), str(app)], env=env, check=True,
-                       capture_output=True, cwd=scratch)
+        result = subprocess.run([sys.executable, "-B", str(sdk / "tools" / "build_app.py"), str(app)], env=env,
+                                check=True, capture_output=True, text=True, cwd=scratch)
+        if said:
+            self.assertTrue(result.stdout.strip().splitlines()[-1].startswith(said), result.stdout)
         inside = app.is_relative_to(sdk)
         return (sdk / "build" / "apps" / app.name if inside else app / "build").joinpath("APP.ENA").read_bytes()
 
-    def build_here(self, app, toolchain, work):    # the repository's build tool, GCC only as above
-        env = dict(os.environ, ENAGA_TOOLCHAIN=str(toolchain), ENAGA_TI_CGT="none", ENAGA_BUILD=str(work))
+    def build_here(self, app, toolchain, work, ti="none"):    # the repository's build tool, GCC only as above
+        env = dict(os.environ, ENAGA_TOOLCHAIN=str(toolchain), ENAGA_TI_CGT=ti, ENAGA_BUILD=str(work))
         out = Path(work) / "APP.ENA"
         subprocess.run([sys.executable, "-B", str(ENAGA / "tools" / "build_app.py"), str(app), "-o", str(out)],
                        env=env, check=True, capture_output=True)
         return out.read_bytes()
 
+
+@unittest.skipUnless(build_app.tools_present(), "needs the toolchain")
+class Sdk(SdkBuilds, unittest.TestCase):
     def test_template_and_examples_build_from_the_sdk_alone(self):
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)
-            with zipfile.ZipFile(make_sdk.make("vtest", d / "sdk.zip")) as z:
+            with zipfile.ZipFile(make_sdk.make("vtest", d / "sdk.zip", prebuilt=False)) as z:
                 z.extractall(d)
             sdk = d / "enaga-sdk-vtest"
             mine = d / "projects" / "my-synth"
@@ -72,7 +78,7 @@ class Sdk(unittest.TestCase):
         """The sampler's tests on the PC with the SDK's host_test.py, from a copy outside the SDK."""
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)
-            with zipfile.ZipFile(make_sdk.make("vtest", d / "sdk.zip")) as z:
+            with zipfile.ZipFile(make_sdk.make("vtest", d / "sdk.zip", prebuilt=False)) as z:
                 z.extractall(d)
             sdk = d / "enaga-sdk-vtest"
             mine = d / "projects" / "my-sampler"

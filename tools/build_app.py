@@ -17,8 +17,12 @@ An optional icon.txt in the directory is the app's icon in the Enaga menu: 16 li
 Files named *.ti.c, and the DSP library, are built with TI's cl6x instead when it is installed (tools/paths.py, TI_CGT): its
 software pipelining makes inner DSP loops several times faster than GCC's code. They must be C that GCC also
 compiles (the fallback) and export plain C functions, since C++ objects don't mix between the compilers.
+Without cl6x, the SDK's copy of the DSP library prebuilt by cl6x (runtime/prebuilt, made by a release:
+prebuilt_dsp_library) is linked instead, as long as the library's sources and headers are the ones it was built
+from (runtime/prebuilt/sources.txt); otherwise GCC builds the library. ENAGA_TI_CGT=none always takes GCC.
 """
 import argparse
+import hashlib
 import re
 import struct
 import subprocess
@@ -32,6 +36,7 @@ import paths  # noqa: E402
 GCC, GXX, LD, OBJCOPY, NM, AR = (paths.tool(name) for name in ("gcc", "g++", "ld", "objcopy", "nm", "ar"))
 RUNTIME = paths.ROOT / "runtime"
 INCLUDE = paths.ROOT / "include"
+PREBUILT = RUNTIME / "prebuilt"            # in the SDK only: libenaga_dsp.a by cl6x and the sources' fingerprint
 WORK = paths.BUILD / "apps"
 
 ABI_VERSION = 0
@@ -87,14 +92,40 @@ def compile_source(src, out, name=None):
     return obj
 
 
+def dsp_sources():
+    return [*sorted((RUNTIME / "dsp").glob("*.c")), RUNTIME / "libm.c"]
+
+
+def dsp_fingerprint():
+    """The DSP library's sources and headers, one "sha256  path" line each: what a prebuilt archive was built from."""
+    files = [*dsp_sources(), INCLUDE / "enaga" / "dsp.h", *sorted((INCLUDE / "enaga" / "dsp").glob("*.h"))]
+    return "".join(f"{hashlib.sha256(f.read_bytes()).hexdigest()}  {f.relative_to(paths.ROOT).as_posix()}\n"
+                   for f in files)
+
+
+def dsp_choice():
+    """Which DSP library an app links: "cl6x" (built here), "prebuilt" (the SDK's, by cl6x), "edited" (GCC, because
+    the sources are no longer the prebuilt archive's) or "gcc"."""
+    if paths.ti_present():
+        return "cl6x"
+    stamp = PREBUILT / "sources.txt"
+    if paths.TI_DISABLED or not (PREBUILT / "libenaga_dsp.a").exists() or not stamp.exists():
+        return "gcc"
+    recorded = "".join(line + "\n" for line in stamp.read_text().splitlines() if line and not line.startswith("#"))
+    return "prebuilt" if recorded == dsp_fingerprint() else "edited"
+
+
 def dsp_library():
     """The DSP library's block functions (runtime/dsp/*.c, include/enaga/dsp.h) and libm (runtime/libm.c) as an
-    archive: built by cl6x when it is installed, by GCC otherwise, and again only when a source, a header, this
-    script or the compiler changes."""
-    ti = paths.ti_present()
+    archive: built by cl6x when it is installed, else the SDK's prebuilt archive while it matches the sources, else
+    built by GCC; built again only when a source, a header, this script or the compiler changes."""
+    choice = dsp_choice()
+    if choice == "prebuilt":
+        return PREBUILT / "libenaga_dsp.a"
+    ti = choice == "cl6x"
     lib = paths.BUILD / "dsplib" / ("cl6x" if ti else "gcc")
     archive, stamp = lib / "libenaga_dsp.a", lib / "compiler.txt"
-    sources = [*sorted((RUNTIME / "dsp").glob("*.c")), RUNTIME / "libm.c"]
+    sources = dsp_sources()
     inputs = [*sources, INCLUDE / "enaga" / "dsp.h", *(INCLUDE / "enaga" / "dsp").glob("*.h"), Path(__file__)]
     compiler = (paths.TI_CGT / "bin" / "cl6x" if ti else GCC).resolve()
     identity = f"{compiler} {compiler.stat().st_size} {compiler.stat().st_mtime_ns}\n"   # another version, another key
@@ -113,6 +144,46 @@ def dsp_library():
     archive.unlink(missing_ok=True)
     run([AR, "rcs", archive, *objs], lib)
     stamp.write_text(identity)
+    return archive
+
+
+def prebuilt_dsp_library(out):
+    """The DSP library by cl6x for the SDK (tools/make_sdk.py): out/libenaga_dsp.a and out/sources.txt. No debug
+    information (it would carry this machine's paths) and a deterministic archive. Refuses an archive that needs
+    anything from outside itself but libgcc's C6000 EABI helpers (__c6xabi_*: never TI's run-time library), or that
+    holds a path of this machine."""
+    if not paths.ti_present():
+        raise RuntimeError("the prebuilt DSP library needs TI's cl6x (tools/paths.py, TI_CGT)")
+    out = Path(out).resolve()
+    objdir = out / "objects"
+    objdir.mkdir(parents=True, exist_ok=True)
+    objs = []
+    for src in dsp_sources():
+        obj = objdir / (src.stem + ".o")
+        run([paths.TI_CGT / "bin" / "cl6x", *TIFLAGS, "--symdebug:none", f"-I{paths.TI_CGT / 'include'}",
+             f"--output_file={obj}", "-c", src], objdir)
+        objs.append(obj)
+    archive = out / "libenaga_dsp.a"
+    archive.unlink(missing_ok=True)
+    run([AR, "rcsD", archive, *objs], out)
+    defined, needed = set(), set()
+    for line in subprocess.run([str(NM), str(archive)], capture_output=True, text=True, check=True).stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0] == "U":
+            needed.add(parts[1])
+        elif len(parts) == 3:
+            defined.add(parts[2])
+    outside = sorted(s for s in needed - defined if not s.startswith("__c6xabi_"))
+    if outside:
+        raise RuntimeError("the prebuilt DSP library needs more than libgcc's helpers: " + " ".join(outside))
+    data = archive.read_bytes()
+    for path in {str(paths.ROOT), str(Path.home()), str(paths.TI_CGT), str(paths.BUILD.resolve())}:
+        if path.encode() in data:
+            raise RuntimeError(f"the prebuilt DSP library holds a path of this machine ({path})")
+    version = subprocess.run([str(paths.TI_CGT / "bin" / "cl6x"), "--help"], capture_output=True, text=True).stdout
+    version = re.search(r"v\S+", version.splitlines()[0]).group(0) if version else "?"
+    (out / "sources.txt").write_text(f"# runtime/prebuilt/libenaga_dsp.a: built by TI cl6x {version} from these files "
+                                     "(tools/build_app.py, prebuilt_dsp_library)\n" + dsp_fingerprint())
     return archive
 
 
@@ -196,7 +267,11 @@ def main(argv=None):
     target = args.output or out / "APP.ENA"
     target.write_bytes(b["package"])
     print(f"wrote {target}: {len(b['package'])} bytes (payload {b['payload_size']}, bss {b['bss_size']}, entry +{b['entry']:#x})")
-    print("built with cl6x: " + ", ".join(["the DSP library", *b["ti_sources"]]) if paths.ti_present() else
+    choice = dsp_choice()
+    print("built with cl6x: " + ", ".join(["the DSP library", *b["ti_sources"]]) if choice == "cl6x" else
+          "built with GCC, with the SDK's DSP library prebuilt by cl6x" if choice == "prebuilt" else
+          "built with GCC only: the DSP library's sources differ from those runtime/prebuilt was built from, so GCC "
+          "built it (docs/getting-started.md, step 3)" if choice == "edited" else
           "built with GCC only (TI's cl6x not found: docs/getting-started.md, step 3)")
     return 0
 

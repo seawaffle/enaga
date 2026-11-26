@@ -5,7 +5,8 @@
  * stage's name changes), and release clamps at zero, after which it stays there as an idle envelope would. */
 #include <enaga/dsp.h>
 
-void enaga_envelope_render(enaga_envelope *e, const enaga_envelope_shape *s, float *restrict out, int n) {
+static void __attribute__((noinline)) envelope_steps(enaga_envelope *e, const enaga_envelope_shape *s,
+                                                     float *restrict out, int n) {
     float l = e->level;
     int i;
     switch (e->stage) {
@@ -43,9 +44,23 @@ void enaga_envelope_render(enaga_envelope *e, const enaga_envelope_shape *s, flo
     e->level = l;
 }
 
+void enaga_envelope_render(enaga_envelope *e, const enaga_envelope_shape *s, float *restrict out, int n) {
+    const float l = e->level;
+    int i;
+    if (e->stage == ENAGA_ENV_SUSTAIN && l + s->decay * (s->sustain - l) == l) {   /* held where steps stay */
+        for (i = 0; i < n; i++) out[i] = l;
+        return;
+    }
+    envelope_steps(e, s, out, n);
+}
+
 void enaga_smoother_render(enaga_smoother *s, float *out, int n) {
     float v = s->value, t = s->target, a = s->a;
     int i;
+    if (v == t) {                           /* at rest: every step gives the target */
+        for (i = 0; i < n; i++) out[i] = t;
+        return;
+    }
     for (i = 0; i < n; i++) {
         float w = v + a * (t - v);
         out[i] = v = w == v ? t : w;
