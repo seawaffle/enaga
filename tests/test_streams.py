@@ -85,6 +85,38 @@ class Streams(unittest.TestCase):
         self.assertEqual(data, struct.pack(f"<{words}H", *((j * 13 + 5) & 0xFFFF for j in range(words))))
         self.assertEqual(len(take), 44 + BLOCKS * block)
 
+    def test_writer_with_its_ring_full(self):
+        """tests/apps/writer: wav::Writer's 24-bit frames (6 bytes) into a 4 KiB ring kept full, through write()
+        and write_bytes(): whatever was lost, each file holds whole frames in order (frame k: k left, -k right),
+        as many as frames() says, with the header's size matching."""
+        from emulate import Emulation
+        with Emulation(HERE / "apps" / "writer", "WRITER") as emu:
+            for _ in range(60):
+                self.assertIsNone(emu.run(100 * MS)["error"])
+                if "WRITER DONE" in emu.report()["log"]:
+                    break
+            self.assertIn("WRITER DONE", emu.report()["log"])
+            results = dict(line.rsplit(" ", 1) for line in emu.card_file("/ENAGA/DATA/WRITER/RESULTS.TXT").decode().splitlines())
+            results = {k: int(v) for k, v in results.items()}
+            self.assertEqual((results["create_full"], results["create_bytes"], results["create_12_bit"]), (0, 0, -64))
+            self.assertEqual(results["closed_again"], 0)
+            for name in ("full", "bytes"):
+                with self.subTest(file=name):
+                    frames, lost = results[f"{name}_frames"], results[f"{name}_lost"]
+                    self.assertEqual(results[f"{name}_close"], 0)
+                    self.assertEqual(results[f"{name}_taken"], frames)
+                    self.assertEqual(frames + lost, 42 * 700)
+                    self.assertGreater(lost, 0)                   # the ring did fill
+                    data = emu.card_file(f"/RECORD/{name.upper()}.WAV")
+                    self.assertEqual(data[:4] + data[8:12], b"RIFFWAVE")
+                    size = struct.unpack("<I", data[40:44])[0]
+                    self.assertEqual((size, len(data)), (6 * frames, 44 + 6 * frames))
+                    values = [int.from_bytes(data[i:i + 3], "little", signed=True) for i in range(44, len(data), 3)]
+                    left, right = values[0::2], values[1::2]
+                    self.assertEqual(right, [-v for v in left])     # never a frame's halves from two frames
+                    self.assertTrue(all(b > a for a, b in zip(left, left[1:])), "frames in order")
+                    self.assertEqual(left[0], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

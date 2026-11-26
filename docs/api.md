@@ -470,8 +470,36 @@ rounds misaligned word accesses down).
 | `parse(start, bytes, Format &out)` | `true` for a RIFF WAVE whose `fmt ` chunk and the start of its `data` chunk lie in the bytes given, in a format above (WAVE_FORMAT_EXTENSIBLE included). Other chunks are skipped |
 | `header(out, format, data_bytes)` | writes the 44-byte header of a file holding `data_bytes` of samples |
 
-Recording a WAV: `create(path, 44, ...)`, write samples, then `wav::header(head, format, status().position)` and
-`close(head, 44)`.
+Recording a WAV by hand: `create(path, 44, ...)`, write samples, then `wav::header(head, format,
+status().position)` and `close(head, 44)`. **`wav::Writer`** does all of that, and the converting:
+
+| Member | Does |
+|---|---|
+| `create(path, format, ring, ring_bytes)` | a new file (an existing one is replaced) recording in `format` (`data_offset` and `data_bytes` ignored): `ENAGA_FILE_OK`, an `ENAGA_FILE_*` error, or `not_wav` for a format `parse` would not read back, or frames wider than `max_frame_bytes` (32: eight channels of 32 bits). Main context |
+| `write(in, frames)` | `frames` frames of `format().channels` interleaved floats, ±1 full scale (`audio`'s `in` or `out` as they are, for stereo), converted to the file's format by `enaga_float_to_pcm`: the frames taken |
+| `write_bytes(data, bytes)` | whole frames already in the file's format: the frames taken |
+| `close()` | writes out what is left, then the header with the final size; waits for the card. `ENAGA_FILE_OK` also when nothing is open. Main context |
+| `frames()`, `frames_lost()` | frames written so far, and frames dropped because the ring was full |
+| `is_open()`, `format()`, `status()` | as a stream's; `status().state` turns negative if the card fills or fails |
+
+`write` and `write_bytes` belong to one context at a time: `audio` for a recording, or the main context for a
+file rendered faster than real time (a resampled sample, a bounced pattern). The ring is a power of two of at least
+`ENAGA_STREAM_RING_MIN`, from the heap; size it for the card's slowest moments, a few tenths of a second (256 KiB
+is 0.9 s of 24-bit stereo, and the card has paused for 0.37 s on a unit). When it is full, the frames that do not
+fit are dropped whole and counted; a frame the ring took only part of is finished next time, so the file is always
+whole frames. Close it in `stop()` as well: a file the app never closes keeps an empty header. Each Writer is
+one of the app's 8 streams. Eight stems of 16-bit stereo (1,500 KiB/s) fit in the 2,000 KiB/s a unit's card
+wrote; eight of 24-bit (2,250 KiB/s) do not, six do.
+
+```cpp
+enaga::wav::Format format;                               // stereo at 48 kHz
+format.bits = 24;
+take_.create("/RECORD/TAKE1.WAV", format, ring_, 1 << 18);   // in the main context
+take_.write(in, frames);                                 // in audio(): the input, as it comes
+take_.close();                                           // in the main context, and in stop()
+```
+
+`examples/recorder` records the input with it.
 
 **`wav::Loader`** reads a whole WAV file into a `dsp::Sample` ("Samples and their player") in the background, a
 16 KiB chunk at a time between the app's callbacks, so the screen and controls stay live. It takes any format
@@ -1032,6 +1060,7 @@ from `<enaga/dsp.h>`, block functions; `Resampler` (`<enaga/dsp/sample.hpp>`) wr
 | `enaga_pcm_to_int16(src, format, stride, out, n)` | the same to int16, half the memory of float: rounded to nearest, saturated |
 | `enaga_int16_to_float(in, out, n, gain)` | out = gain × in / 32768, for playing int16 samples |
 | `enaga_float_to_int16(in, out, n)` | out = in × 32768, rounded and saturated, for a 16-bit WAV |
+| `enaga_float_to_pcm(in, dst, format, n)` | `n` floats to `format` at `dst` (any address, written byte by byte), in order: the reverse of `enaga_pcm_to_float`, × 2^(bits-1), rounded and saturated (8-bit unsigned; infinity and NaN write silence), so a sample read and written back is unchanged. `wav::Writer` uses it |
 
 ```cpp
 // A stereo file's left channel, from data read off the card, as int16 (the right: src + bytes, the same stride).

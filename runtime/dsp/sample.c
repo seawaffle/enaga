@@ -79,6 +79,47 @@ void enaga_float_to_int16(const float *restrict in, int16_t *restrict out, int n
     for (i = 0; i < n; i++) out[i] = float_to_int16(in[i]);
 }
 
+/* x * scale rounded to nearest, within [lo, hi]; infinity and NaN as 0. */
+static int32_t float_to_int(float x, float scale, float lo, float hi) {
+    if ((enaga_float_bits(x) & 0x7F800000u) == 0x7F800000u) return 0;
+    return enaga_floor_int(enaga_clamp(x * scale, lo, hi) + 0.5f);
+}
+
+void enaga_float_to_pcm(const float *restrict in, void *dst, int format, int n) {
+    uint8_t *p = (uint8_t *)dst;
+    int i;
+    int32_t v;
+    uint32_t u;
+    switch (format) {
+    case ENAGA_PCM_U8:
+        for (i = 0; i < n; i++) p[i] = (uint8_t)(float_to_int(in[i], 128.0f, -128.0f, 127.0f) + 128);
+        break;
+    case ENAGA_PCM_S16:
+        for (i = 0; i < n; i++, p += 2) {
+            v = float_to_int(in[i], 32768.0f, -32768.0f, 32767.0f);
+            p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8);
+        }
+        break;
+    case ENAGA_PCM_S24:
+        for (i = 0; i < n; i++, p += 3) {
+            v = float_to_int(in[i], 8388608.0f, -8388608.0f, 8388607.0f);
+            p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16);
+        }
+        break;
+    case ENAGA_PCM_S32:                       /* 2147483520: the largest float below 2^31 */
+    case ENAGA_PCM_FLOAT:
+        for (i = 0; i < n; i++, p += 4) {
+            u = format == ENAGA_PCM_FLOAT
+                ? ((enaga_float_bits(in[i]) & 0x7F800000u) == 0x7F800000u ? 0u : enaga_float_bits(in[i]))
+                : (uint32_t)float_to_int(in[i], 2147483648.0f, -2147483648.0f, 2147483520.0f);
+            p[0] = (uint8_t)u; p[1] = (uint8_t)(u >> 8); p[2] = (uint8_t)(u >> 16); p[3] = (uint8_t)(u >> 24);
+        }
+        break;
+    default:
+        break;
+    }
+}
+
 /* ---- Rate conversion ---- */
 
 #define TAPS ENAGA_RESAMPLE_TAPS

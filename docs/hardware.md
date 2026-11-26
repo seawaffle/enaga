@@ -324,7 +324,11 @@ the block. Details in docs/design.md, "First unit session: results".
   1, the **left** channel: confirmed by ear on headphones (smpltrek-re session M1, image 0.3.1, which uses the same
   scheme with 256-word buffers): even words left only, odd words right only, both at the same level. The receive
   side follows the same order (INPUT L in IN L, INPUT R in IN R: Enaga session 1); the line outputs are not yet
-  checked. With nothing connected, 0.3.1's input peak sat around 2 in 32,768.
+  checked. With nothing connected, 0.3.1's input peak sat around 2 in 32,768. Since a buffer's word 0 is slot 1 and
+  word 1 the next frame's slot 0, a frame's right sample would be taken one codec frame (20.8 us) after its left,
+  so in a recording of a mono source the right channel leads by a sample. The emulator models it so (a mono input
+  reads `IN LAG -1` on CHECK's REC page). **Not checked on a unit** (checklist step 23); if it holds, a mono source
+  recorded in stereo has its channels a sample apart, and their sum is 3 dB down at 12 kHz.
 - **Speaker:** plays with GP2[8] (speaker mute) driven low and headphones unplugged (M1). Enaga releases it unless
   the SPEAKER setting is OFF or the app mutes it (docs/design.md "Settings"). Headphones cut it in hardware (unit
   session 3, E3 check; no code involved, as smpltrek-re HW-15 inferred). GP3[8] is the only jack-sensing input the stock
@@ -694,5 +698,18 @@ unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it mut
     - **Synth:** F1 + F2, PATCH: UP / DOWN move as well as VALUE, the loaded patch marked `>`; a saved patch shows
       SAVED U1 on a bar over the scope for two seconds. Pressure: hold a pad and press harder with a modulation
       slot set to PRESS (MOD page): it should respond only after the hit, not to the hit itself.
+23. **Recording (CHECK, REC page, the sixth):** the card needs about 3 MB free.
+    - STEP 1 records 5 s of a test signal (a triangle in each ear, heard quietly). Expected `WROTE 240000 LOST 0`;
+      report RING MAX (how close the card came to falling behind). STEP 2 plays it back, heard, every sample
+      checked: expected `PLAYED 240000 BAD 0`, `UNDERRUNS 0`. Run both twice.
+    - **The channels' timing:** connect one mono source to both INPUT jacks (a mono cable into a splitter, or a
+      stereo cable carrying the same signal on both sides: a mono track from a phone), choose LINE ST on the AUDIO
+      page, then STEP 3 on REC: it records 5 s of the input to `/RECORD/CHECKIN.WAV` and shows `IN LAG`, the right
+      channel's delay in samples. Music or noise works best (a pure low tone barely tells 0 from 1). Report the
+      LAG and keep the file: 0 means left and right are taken together; -1 means the right channel is taken one
+      sample early, which the emulator models (docs/hardware.md "Channels").
+    - `RECORDER` (`examples/recorder`, copied into `/ENAGA/APPS` like WIDGETS): OK records the input to
+      `/RECORD/TAKE001.WAV`, OK again stops; F1 changes the format between takes. Check the files play on the
+      computer (USB DRIVE) and sound like the input.
 
 Afterwards the official update restores the unit ("Installing and recovery").

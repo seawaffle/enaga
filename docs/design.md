@@ -503,6 +503,11 @@ Its card is staged by `tools/unit_card.py`.
 
 ## Open items
 
+- **The channels' timing (2026-11-26):** a buffer's word 0 is codec slot 1 and word 1 the next codec frame's slot
+  0, so a frame's right sample may be taken 20.8 us after its left; the emulator models it so. If it holds on the
+  unit, stereo recordings of a mono source have the channels a sample apart (their sum 3 dB down at 12 kHz), and
+  the output has the same skew. CHECK's REC page measures it (checklist step 23, `IN LAG`). If it is -1, the fix
+  is to pair words 1 and 2 of each buffer rather than 0 and 1 (input and output), on the emulator first.
 - **From the code review (2026-11-25, log), left open:** a short SCSI answer stalled while its packet may still be in
   the FIFO (`dcd_musb.c`, with the double-buffered FIFOs of `usb-drive-speed`; settle with a capture of one mount);
   the SPLOOP flag in ITSR when an app is dropped inside an SPLOOP (`start.s`, unknown on the chip); `update(ms)` can
@@ -2762,3 +2767,28 @@ place of `ENAGA 0.3.0`). A `+` build says only "this commit and changes", so uni
 hash. A release is built from its tag's clean checkout and carries that commit; a local build of the same commit
 gives the same bytes, so the check of a release against a local build still holds. HELLO's answer is unchanged.
 Tests: test_usb_debug's status (`BUILD` equals build.py's `build_id`), test_e1's boot logs.
+
+### Recording to WAV files (2026-11-26)
+
+Apps could already record through a stream (`Stream::create`, `write` in `audio`, `wav::header`, `close`), but
+nothing showed it and each app had to convert, size and finish the file itself. Three additions:
+- `enaga_float_to_pcm` (DSP library): floats to any WAV format `parse` reads, x 2^(bits-1), rounded and saturated,
+  8-bit unsigned, infinity and NaN as silence: the exact reverse of `enaga_pcm_to_float`, so a sample read and
+  written back is unchanged (host test: every format, at an odd address, the extremes, saturation, NaN).
+- `wav::Writer` (`wav.hpp`): `create(path, format, ring, ring_bytes)`, `write(in, frames)` from `audio` (or the main
+  context, faster than real time), `write_bytes`, `close()` with the header's final size; `frames()` and
+  `frames_lost()`. A full ring takes as much of a write as fits, which can cut a frame (24-bit stereo is 6 bytes,
+  the ring a power of two): the Writer keeps the frame's other bytes and writes them first next time, and drops
+  whole frames otherwise, so the file is whole frames in order. `tests/apps/writer` keeps a 4 KiB ring full
+  through both write paths (test_streams): every frame whole and in order, as many as `frames()`; with the tail
+  logic removed the test fails.
+- `examples/recorder`: OK records the input to `/RECORD/TAKEnnn.WAV` (the first free name), F1 the format between
+  takes (16-bit, 24-bit, float), VALUE the monitor (off at first: the built-in mic and the speaker would feed
+  back), meters, the take's length, frames lost; `stop()` closes a take still running. In the SDK.
+  test_recorder_example: a known pattern on the emulator's input, recorded in each format, every sample checked;
+  a take cut by switching off is a whole WAV file.
+- CHECK's REC page (sixth): STEP 1 records 5 s of a 24-bit test signal (triangles, heard) through `wav::Writer`,
+  reporting frames written, lost and the ring's peak; STEP 2 plays it back through a stream and checks every sample;
+  STEP 3 records the input and estimates the delay between its channels by correlation at -2..2 samples. On the
+  emulator: 240,000 frames, none lost, ring at most 3 %, 0 bad, and `IN LAG -1`, which is how the channel timing
+  question above turned up (the recorder's test found the right channel a frame ahead). Checklist step 23.

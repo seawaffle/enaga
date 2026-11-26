@@ -109,7 +109,8 @@ The rules that matter most:
 - `docs/api.md`: the reference, header by header.
 - `examples/tone`: the smallest app. `examples/widgets`: the UI toolkit's widgets. `examples/synth`: a full
   instrument (eight voices, filters, effects, patches on the card). `examples/sampler`: WAV files on the pads,
-  trimmed and tuned on a waveform, with its sound tested on a PC.
+  trimmed and tuned on a waveform, with its sound tested on a PC. `examples/recorder`: the input recorded to WAV
+  files in `/RECORD` (`wav::Writer`).
 - To test sound code on your PC: put tests in a `tests/` folder in your app and run
   `python3 -B tools/host_test.py ~/my-app`. It needs only g++ and gcc. `docs/api.md`, "Testing on a PC", has the
   helpers, and `examples/sampler/tests/engine.cpp` is an example.

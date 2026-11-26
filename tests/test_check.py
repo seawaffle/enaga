@@ -142,6 +142,45 @@ class Check(unittest.TestCase):
             span = (clocks[-1] - clocks[0]) / 372_000_000 / (len(clocks) - 1)
             self.assertAlmostEqual(span * 1000, 125 / 6, delta=0.3)  # no drift over the second
             self.assertEqual(emu.cpu.midi_state()["overruns"], 0)
+    def test_rec_page_records_plays_back_and_finds_the_input_lag(self):
+        """REC: the test signal recorded (STEP 1) and played back with every sample checked (STEP 2), then the
+        input recorded (STEP 3) with both slots of each codec frame alike. On the emulator Enaga's right channel is
+        the next codec frame's slot 0 (docs/hardware.md "Channels"), so the right channel comes out one sample
+        early: LAG -1."""
+        import random
+        import struct
+        rng = random.Random(7)
+        same = b"".join(struct.pack("<II", w, w) for w in (rng.randrange(-1 << 22, 1 << 22) << 8 & 0xFFFFFFFF
+                                                             for _ in range(4096)))
+        with Emulation(HERE / "unit" / "check", "CHECK") as emu, tempfile.TemporaryDirectory() as d:
+            image = Path(d) / "card.img"
+            card.make(image, 16, "fat", {"/ENAGA/APPS/CHECK/APP.ENA": (WORK / "emulate" / "CHECK.ENA").read_bytes()})
+            emu.cpu.sd_load(image.read_bytes())
+            emu.cpu.audio_input(same, loop=True)
+            self.assertIsNone(emu.run(BOOT)["error"])
+            for _ in range(5):                                       # F4 held a second, five times: REC
+                self.press(emu, F4, hold_ms=1100)
+
+            def until(prefix, seconds):
+                for _ in range(seconds * 10):
+                    self.assertIsNone(emu.run(100 * MS)["error"])
+                    found = [line for line in emu.report()["log"] if line.startswith(prefix)]
+                    if found:
+                        return found[-1]
+                self.fail(f"no {prefix!r} in {emu.report()['log']}")
+
+            self.press(emu, STEP1)
+            self.assertEqual(until("REC W", 12), "REC W 240000 L 0 R " + until("REC W", 1).split()[-1])
+            self.press(emu, STEP1 + 1)
+            self.assertEqual(until("REC P", 12), "REC P 240000 B 0 U 0")
+            self.press(emu, STEP1 + 2)
+            self.assertEqual(until("REC IN", 12), "REC IN LAG -1 W 240000 L 0")
+            self.assertNotIn("REC CARD", " ".join(emu.report()["log"]))
+            self.assertEqual(emu.word("audio_overruns"), 0)
+            image.write_bytes(emu.cpu.sd_read())
+            self.assertEqual(len(card.get(image, "/RECORD/CHECKREC.WAV")), 44 + 6 * 240000)
+            self.assertEqual(len(card.get(image, "/RECORD/CHECKIN.WAV")), 44 + 6 * 240000)
+
 
 if __name__ == "__main__":
     unittest.main()

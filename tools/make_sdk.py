@@ -24,7 +24,8 @@ import build_app  # noqa: E402
 import paths  # noqa: E402
 
 ROOT = paths.ROOT
-TREES = ["include", "runtime", "template", "examples/tone", "examples/widgets", "examples/synth", "examples/sampler"]
+TREES = ["include", "runtime", "template", "examples/tone", "examples/widgets", "examples/synth", "examples/sampler",
+         "examples/recorder"]
 FILES = ["LICENSE", "tools/build_app.py", "tools/host_test.py", "tools/paths.py", "tools/usb_debug.py",
          "docs/getting-started.md", "docs/api.md", "docs/usb-debug.md"]
 README = """Enaga SDK {tag}
@@ -40,7 +41,7 @@ CyDrums. Start with docs/getting-started.md.
                 screenshots and presses its keys over USB (Windows, macOS or Linux; docs/usb-debug.md)
   template/     a small app to copy and start from
   examples/     tone (the smallest app), widgets (the UI toolkit), synth (a full instrument), sampler (WAV files
-                on the pads, with tests on a PC)
+                on the pads, with tests on a PC), recorder (the input to WAV files)
   docs/         getting-started.md, api.md, usb-debug.md
 """
 

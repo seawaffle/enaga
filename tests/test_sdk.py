@@ -63,7 +63,7 @@ class Sdk(SdkBuilds, unittest.TestCase):
             mine = d / "projects" / "my-synth"
             shutil.copytree(sdk / "template", mine)
             for app, source in [(mine, ENAGA / "template")] + [
-                    (sdk / "examples" / n, ENAGA / "examples" / n) for n in ("tone", "widgets", "synth", "sampler")]:
+                    (sdk / "examples" / n, ENAGA / "examples" / n) for n in ("tone", "widgets", "synth", "sampler", "recorder")]:
                 with self.subTest(app=source.name):
                     package = self.build_with_sdk(sdk, app, paths.TOOLCHAIN, d)
                     here = self.build_here(source, paths.TOOLCHAIN, d / "here" / source.name)
