@@ -1145,6 +1145,66 @@ static void polyphony() {
     check(s.size() == 2 && s.top().key == 2 && s[0].key == 3, "a key played again moves to the top", s[0].key, 3);
 }
 
+// The synced sine as the one-loop SYNC_LOOP computed it (GCC's branching form), as the reference for the three
+// passes, bit for bit.
+static void sync_sine_reference(enaga_oscillator *o, float *carry, const enaga_oscillator *master, float dt_m,
+                                float inv_dt_m, float *out, int n, float dt, float inv_dt, float level) {
+    const float TURN = 4294967296.0f;
+    const uint32_t dpm = (uint32_t)(int32_t)(dt_m * TURN), dp = (uint32_t)(int32_t)(dt * TURN);
+    uint32_t pm = master->phase, p = o->phase;
+    float prev = *carry, dc = 0.0f;
+    for (int i = 0; i < n; i++) {
+        const float wrap_jump = 0.0f;
+        const uint32_t pm1 = pm + dpm, free = p + dp;
+        const int restart = pm1 < pm, wrap = free < p;
+        float a = 0.0f, at = 0.0f, jump, since;
+        uint32_t p1 = free;
+        if (restart) {
+            a = enaga_clamp(enaga_unipolar(pm1) * inv_dt_m, 0.0f, 1.0f);
+            at = enaga_unipolar(p + (uint32_t)(int32_t)((1.0f - a) * dt * TURN));
+            p1 = (uint32_t)(int32_t)(a * dt * TURN);
+        }
+        const float x1 = enaga_unipolar(p1);
+        if (restart) {
+            jump = enaga_sin_turns(0.0f) - enaga_sin_turns(at);
+            since = a;
+        } else {
+            jump = wrap ? wrap_jump : 0.0f;
+            since = x1 * inv_dt;
+        }
+        float cur = enaga_sin_turns(x1) - 0.5f * jump * (1.0f - since) * (1.0f - since);
+        prev += 0.5f * jump * since * since;
+        out[i] += level * (prev + dc);
+        prev = cur;
+        pm = pm1;
+        p = p1;
+    }
+    o->phase = p;
+    *carry = prev;
+}
+
+static void sync_sine_against_reference() {
+    uint32_t seed = 77;
+    int bad = 0;
+    for (int trial = 0; trial < 400 && !bad; trial++) {
+        float dt = 0.001f + 0.45f * enaga_unipolar(enaga_xorshift(&seed));
+        float dt_m = 0.001f + 0.45f * enaga_unipolar(enaga_xorshift(&seed));
+        enaga_oscillator a = {enaga_xorshift(&seed)}, b = a, m = {enaga_xorshift(&seed)};
+        float ca = 0.0f, cb = 0.0f;
+        for (int call = 0; call < 20 && !bad; call++) {
+            int n = 1 + int(enaga_xorshift(&seed) % 150);
+            std::vector<float> oa(n, 0.25f), ob(n, 0.25f);
+            enaga_oscillator_sync_add(&a, &ca, &m, dt_m, 1.0f / dt_m, oa.data(), n, ENAGA_WAVE_SINE, dt, 1.0f / dt, 0.7f, 0.5f);
+            sync_sine_reference(&b, &cb, &m, dt_m, 1.0f / dt_m, ob.data(), n, dt, 1.0f / dt, 0.7f);
+            if (std::memcmp(oa.data(), ob.data(), n * sizeof(float)) || a.phase != b.phase ||
+                std::memcmp(&ca, &cb, sizeof ca))
+                bad++;
+            enaga_oscillator_advance(&m, n, dt_m);
+        }
+    }
+    check(!bad, "synced sine = the one-loop reference", bad, 0);
+}
+
 // The sample player as it was written frame by frame (before the run of plain frames), as the reference.
 namespace player_reference {
 constexpr int64_t kFrame = int64_t(1) << 32;
@@ -1713,6 +1773,7 @@ int main() {
     sequencing();
     sample_player();
     player_against_reference();
+    sync_sine_against_reference();
     polyphony();
     libm();
     samples();
