@@ -53,15 +53,17 @@ python3 enaga-sdk-v0.3.0/tools/build_app.py ~/my-synth
 This writes `~/my-synth/build/APP.ENA`, the package you put on the card. Warnings stop the build
 (`-Werror`). `--name "MY SYNTH"` sets the name shown in the menu (up to 23 characters).
 
-The DSP library is compiled into every app. If TI's free C6000 compiler (cl6x) is installed in
-`~/ti/ti-cgt-c6000_*`, the build tool uses it for the library, and its inner loops run several times faster. The
-tool's last line says which compiler built it. Without cl6x, GCC builds it and everything still works, just with
-less audio headroom. App source files named `*.ti.c` are built with cl6x too, when it is there (docs/api.md,
-"Writing inner loops for cl6x"). Set `ENAGA_TI_CGT` to use a cl6x installed elsewhere, or to `none` for GCC
-only.
+The DSP library is linked into every app. The SDK comes with it already compiled by TI's C6000 compiler (cl6x),
+in `runtime/prebuilt/`, whose inner loops run several times faster than GCC's, so you need nothing more for
+that. The tool's last line says which library your app got. If you change the library's sources
+(`runtime/dsp/`, `runtime/libm.c`, `include/enaga/dsp*`), the prebuilt copy no longer matches them and GCC
+builds the library instead: everything still works, with less audio headroom. With cl6x itself installed (free
+from TI) in `~/ti/ti-cgt-c6000_*`, the build tool compiles the library with it, edited or not, and also builds
+your own files named `*.ti.c` with it (docs/api.md, "Writing inner loops for cl6x"). Set `ENAGA_TI_CGT` to use a
+cl6x installed elsewhere, or to `none` for GCC only, the library included.
 
-The DSP library is built once, into the SDK's own `build/` folder, and again only when the SDK changes, so the
-SDK folder must be writable.
+When it is not the prebuilt copy, the DSP library is built once, into the SDK's own `build/` folder, and again
+only when the SDK changes, so the SDK folder must be writable.
 
 ## 4. Put it on the card
 

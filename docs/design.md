@@ -669,30 +669,9 @@ Its card is staged by `tools/unit_card.py`.
 - Synth on the unit: measured 8 % idle, 10 % one note, 24 % eight notes (INIT), 25 % SUPERSAW two notes (eight
   voices), no dropouts; the worst case (30 % on the emulator) not yet measured there.
 - **DSP library speed (2026-11-26, log "The DSP library's speed"):**
-  - Whether the SDK ships the library prebuilt by cl6x is still the owner's call ("decide later"). GCC's build of
-    the block functions is 2-12 times slower than cl6x's (tools/bench.py), and most developers have only GCC.
-    Checked 2026-11-26: the cl6x archive needs only `__c6xabi_fixfu` and `__c6xabi_llshl` from outside itself, and
-    GCC's libgcc defines both (the local SDK build already links it this way), so nothing of TI's run-time library
-    is linked. The only TI headers it includes are the stdint typedefs, so it holds no TI code. CGT 8.5.0's licence
-    ("TI Text File" for the compiler, BSD-3-Clause for the RTS) grants rights over TI's software and claims nothing
-    over what it compiles; its narrowest condition, use only with TI devices, holds anyway (C6748). The objects
-    carry debug info with the build machine's paths, so a shipped archive is built with `--strip-debug`. CI has
-    no cl6x: either the archive is built locally at release, or CI installs TI's public download. That download
-    needs no login: https://dr-download.ti.com/software-development/ide-configuration-compiler-or-debugger/
-    MD-vqU2jj6ibH/8.5.0.LTS/ti_cgt_c6000_8.5.0.LTS_linux-x64_installer.bin answered a plain curl with HTTP 200 and
-    43,933,713 bytes (2026-11-26); TI's page gives its SHA-256 as 772511aa...b37c, and the installer has an
-    unattended mode (`--mode unattended --prefix DIR`). Tried on this machine the same day: downloaded, the
-    checksum matched, the unattended install took 2 s with no prompt, and the library built with that copy was
-    byte-identical to the local build's once debug info was stripped (all 8 objects). Stripped, the objects hold
-    no paths. On GitHub's runners too: branch `ci-cl6x` (from origin/main, pushed with the owner's permission)
-    has a workflow, `.github/workflows/dsp-cl6x.yml`, that downloads and checks the installer, caches the install,
-    builds with `--symdebug:none` (which drops the paths without a strip step: TI's strip6x would drop the symbol
-    table too) and archives with TI's ar6x. It then checks that the archive needs only `__c6xabi_*` helpers and
-    holds no build path. Its first run (45879715154, 2026-11-26) passed in under a minute. The runner's objects
-    have the same machine code as a local build of the same sources and differ only in a tag cl6x makes up per
-    compilation (8-9 bytes of the symbol table), so the archive's hash differs from build to build. An ar6x
-    archive links into GCC apps (test_synth, test_sampler_example and test_sdk passed with one in place). Its
-    members are stored with no permission bits, which matters only to someone unpacking it.
+  - The SDK ships the library prebuilt by cl6x (owner's decision, 2026-11-26; log "The DSP library prebuilt by
+    cl6x"). Still open: the first tagged release that makes it on GitHub, and branch `ci-cl6x` (the trial
+    workflow), which can be deleted once that release has run.
   - GCC 13's tic6x back end pipelines no loop with a float multiply (its SPLOOP pass gives up on them: "We don't
     handle floating point multiplies yet"). Its selective scheduler crashes the compiler, and the list scheduler
     does not overlap the unrolled copies, so each value waits for its whole chain. Inline math in an app's own
@@ -2595,3 +2574,40 @@ operations together took about 400.
   code into `memcpy` and `memset` calls, including in the synth's audio path, but the synth's worst case stayed
   at 29 % with the fast version, so its copies are small. The runtime's `memset` is already pipelined (about 1
   cycle a byte).
+
+### The DSP library prebuilt by cl6x (2026-11-26)
+
+The owner asked whether the SDK could ship the DSP library compiled by cl6x, then to set it up. GCC's build of the
+block functions is 2-12 times slower than cl6x's (tools/bench.py), and most developers have only GCC.
+- **Linking:** the cl6x archive needs only `__c6xabi_fixfu` and `__c6xabi_llshl` from outside itself, and GCC's
+  libgcc defines both, so nothing of TI's run-time library is linked. Its relocations are absolute and
+  PC-relative only (no data page pointer, which apps do not set up); it has only code, constants and jump tables
+  (no writable data); every function of `dsp.h` takes pointers and scalars and returns `float`, `int`,
+  `uint32_t` or nothing. All 21 structs of `dsp.h` have the same size, alignment and field offsets under both
+  compilers: `test_dsp.Layout` asserts GCC's 158 numbers under cl6x (a wrong one fails).
+- **Licence:** the only TI headers the library includes are the stdint typedefs, so it holds no TI code. CGT
+  8.5.0's licence ("TI Text File" for the compiler, BSD-3-Clause for the RTS) grants rights over TI's software and
+  claims nothing over what it compiles; its narrowest condition, use only with TI devices, holds anyway (C6748).
+  The 8.3.x releases were under TI's TSPA instead, so the release pins 8.5.0.
+- **TI's download:** https://dr-download.ti.com/software-development/ide-configuration-compiler-or-debugger/
+  MD-vqU2jj6ibH/8.5.0.LTS/ti_cgt_c6000_8.5.0.LTS_linux-x64_installer.bin needs no login (43,933,713 bytes, SHA-256
+  772511aa92dc36bd32622aad754c08797cefd8973bfd6c7bc1ceeb784955b37c from TI's page) and installs with
+  `--mode unattended --prefix DIR` in 2 s. On GitHub's runners: branch `ci-cl6x` (from origin/main, pushed with the
+  owner's permission) ran `.github/workflows/dsp-cl6x.yml`, run 45879715154, which passed in under a minute. Its
+  objects had the same machine code as a local build and differed only in a tag cl6x makes up per compilation
+  (8-9 bytes of the symbol table).
+- **No debug information:** with it, the objects carry the build machine's paths (the owner's user name among
+  them). `--symdebug:none` drops it with the same code (TI's strip6x would drop the symbol table too).
+- **How it ships:** `build_app.prebuilt_dsp_library` compiles the library with `--symdebug:none` and archives it
+  with GNU ar (`D`, deterministic), refusing an archive that needs more than `__c6xabi_*` helpers or holds a path
+  of the machine; it writes `sources.txt`, the SHA-256 of each library source and header. `make_sdk.py` puts both
+  in `runtime/prebuilt/` when cl6x is installed, and `--prebuilt` (the release workflow) makes that required. The
+  release workflow installs CGT 8.5.0 from TI's download, pinned by its SHA-256 and cached.
+- **Which library an app links** (`build_app.dsp_choice`, said on the tool's last line): built by cl6x when cl6x
+  is installed; else the prebuilt archive, while the sources match `sources.txt`; else built by GCC (an edited
+  library). `ENAGA_TI_CGT=none` takes GCC, never the prebuilt archive (`paths.TI_DISABLED`).
+- **Tests:** `test_sdk_prebuilt.py`: the SDK's build tool without cl6x links the prebuilt
+  archive, and the synth and sampler packages are byte-identical to the repository's cl6x builds; with a library
+  source edited, the synth's is byte-identical to the GCC build. Both need cl6x on the machine running the tests;
+  CI runs no tests.
+

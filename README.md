@@ -140,7 +140,9 @@ tools/build_tic6x_gcc.sh            # 10-30 minutes
 Set `ENAGA_TOOLCHAIN` to use an existing installation elsewhere. Optionally install TI's C6000 code generation
 tools (free from TI; tested with 8.5.0.LTS) for the DSP library and `*.ti.c` files: `tools/paths.py` uses the newest
 `~/ti/ti-cgt-c6000_*`, or `ENAGA_TI_CGT` (`ENAGA_TI_CGT=none` builds them with GCC). The library is built once
-into `build/dsplib/` and again when it changes. Then:
+into `build/dsplib/` and again when it changes. A release's SDK carries the library prebuilt by cl6x
+(`runtime/prebuilt/`, `tools/make_sdk.py --prebuilt`), which apps link when the developer has no cl6x and the
+library's sources are unchanged. Then:
 
 ```sh
 python3 -B tools/build_app.py examples/tone     # -> build/apps/tone/APP.ENA

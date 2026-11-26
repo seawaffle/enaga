@@ -1,6 +1,9 @@
 # On a version tag (v0.1.0, ...): build the firmware and publish a GitHub release with one zip per device, the
 # SDK (tools/make_sdk.py), the prebuilt toolchain and the toolchain's source (tools/package_toolchain.py: GCC and
 # binutils are GPLv3, so their source goes out with the binaries).
+# The SDK holds the DSP library prebuilt by TI's cl6x (make_sdk.py --prebuilt). TI's Linux installer for CGT
+# 8.5.0.LTS is a public download (no login), pinned by its SHA-256 from TI's download page and cached, so TI's
+# server is asked only when the cache is empty (tried on branch ci-cl6x, 2026-11-26).
 # Each zip holds the update file under the name the bootloader looks for (spaces included, which GitHub would
 # rewrite in a bare asset name). The tag must match VERSION in firmware/build.py, which names the image.
 name: Release
@@ -11,6 +14,11 @@ on:
 
 permissions:
   contents: write
+
+env:
+  CGT_VERSION: 8.5.0.LTS
+  CGT_URL: https://dr-download.ti.com/software-development/ide-configuration-compiler-or-debugger/MD-vqU2jj6ibH/8.5.0.LTS/ti_cgt_c6000_8.5.0.LTS_linux-x64_installer.bin
+  CGT_SHA256: 772511aa92dc36bd32622aad754c08797cefd8973bfd6c7bc1ceeb784955b37c
 
 jobs:
   firmware:
@@ -45,6 +53,22 @@ jobs:
       - name: Build the firmware
         run: python3 -B firmware/build.py
 
+      - name: Restore TI's compiler
+        id: cgt
+        uses: actions/cache@v4
+        with:
+          path: ~/ti
+          key: ti-cgt-c6000-${{ env.CGT_VERSION }}-${{ env.CGT_SHA256 }}
+
+      - name: Download and install TI's compiler
+        if: steps.cgt.outputs.cache-hit != 'true'
+        run: |
+          curl -sSfL --retry 3 -o /tmp/cgt-installer.bin "$CGT_URL"
+          echo "$CGT_SHA256  /tmp/cgt-installer.bin" | sha256sum -c
+          chmod +x /tmp/cgt-installer.bin
+          /tmp/cgt-installer.bin --mode unattended --prefix "$HOME/ti"
+          rm /tmp/cgt-installer.bin
+
       - name: Package
         run: |
           mkdir -p dist
@@ -52,7 +76,7 @@ jobs:
             device=$(basename "$dir")
             (cd "$dir" && python3 -m zipfile -c "$GITHUB_WORKSPACE/dist/enaga-${GITHUB_REF_NAME}-${device}.zip" *.bin)
           done
-          python3 -B tools/make_sdk.py "$GITHUB_REF_NAME"
+          ENAGA_TI_CGT="$HOME/ti/ti-cgt-c6000_${CGT_VERSION}" python3 -B tools/make_sdk.py "$GITHUB_REF_NAME" --prebuilt
           python3 -B tools/package_toolchain.py "$GITHUB_REF_NAME"
           cp build/dist/* dist/
           (cd dist && sha256sum * > SHA256SUMS)
