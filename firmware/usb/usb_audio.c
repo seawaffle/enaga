@@ -116,6 +116,16 @@ void usb_audio_read(float *in, u32 frames)    /* audio interrupt: the computer's
     }
 }
 
+/* Audio interrupt, each block while no app takes the computer's audio: the ring is kept at its target, so it never
+ * fills (every packet counted an overrun: 1,729 on the unit, 2026-11-25) and an app choosing USB input later starts
+ * at once on recent frames, not old ones. */
+void usb_audio_unread(void)
+{
+    u32 head = out_head;
+    out_primed = 0;
+    if (head - out_tail > USB_OUT_TARGET) out_tail = head - USB_OUT_TARGET;
+}
+
 static u32 to16(float v)
 {
     float s = v * 32768.0f;

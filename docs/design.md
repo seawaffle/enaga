@@ -614,7 +614,13 @@ Its card is staged by `tools/unit_card.py`.
   2,000 KiB/s, the time goes on USB: about 380 us a 64-byte packet, single-buffered (a NAK while the CPU empties
   the FIFO; how soon the computer retries is the computer's). To measure before changing anything: the read
   speed, and whether double buffering the OUT endpoint helps (the TRM is not clear that a second packet waiting
-  raises its own interrupt, the trap the IN side fell into).
+  raises its own interrupt, the trap the IN side fell into). Measured 2026-11-25 (log, "USB DRIVE's time"):
+  the packets, both ways; double buffering is on branch usb-drive-speed. On the unit (2026-11-26, log "Which side
+  waits"): 0.20 MiB/s writing, 0.24 reading, and the computer is the slower side both ways (one packet per two
+  microframes). By port (log, "By port and with audio off"): on the CPU's controller with the unit's audio off,
+  0.67 MiB/s writing, 0.92 reading; the front port's chipset controller was the slowness. The SD card now overlaps
+  the USB transfer (log, "The card beside the packets"): on the unit 0.92 MiB/s writing and 1.02 reading (audio
+  off), 0.80 and 0.84 (on), near full speed's ceiling. Full speed is done; more needs high speed (step 3).
   - Earlier plan: the user started a Claude session on the Windows PC with a read-only brief: raw sectors 0-63 and
     the partition start over USB vs a card reader, a USBPcap capture of drive mount / playback / recording, and
     scripted play / record tests. Debug from its evidence. Also ask whether STATUS showed a crash row.
@@ -682,7 +688,8 @@ Its card is staged by `tools/unit_card.py`.
   - Not yet looked at closely: the resampler (180 cycles an output under cl6x, 128 multiply-adds), the
     compressor, the limiter and the reverb, and libm's tanhf, which cl6x builds slower than GCC.
   - Enaga's own share of a block (log "Enaga's own share of the audio block"): 7,027 to 2,644 cycles on the
-    emulator; the unit's figure (about 13,000 before) is to be measured. `memcpy` copies a byte at a time (in the
+    emulator; on the unit about 5,800 with the app stopped (USB DRIVE open), from about 13,000, and about 9,600
+    while Windows streams USB audio (log, "Enaga's own share of the audio block"). `memcpy` copies a byte at a time (in the
     firmware and the app runtime), a 7x gain on aligned copies left for when an app needs it.
 - USB stack: the C6748's USB0 is a Mentor MUSB controller; a TinyUSB port (TinyUSB has a MUSB driver for
   other TI parts) is plausible and unverified.
@@ -2431,6 +2438,134 @@ photographs of STATUS.
       Windows no longer streamed to the unit; `USB_AUDIO_IN UNDERRUNS` went 0 → 357 across the unplug. CHECK's
       PAD MSG/S read 82 just after the menu closed (its one-second window spans the pause).
 
+### USB DRIVE's time (2026-11-25)
+
+Step 2 of the USB work, measuring first. Counters (usb.c, dcd_musb.c; STATUS `USB_DRIVE_TIME`, `USB_DRIVE_PACKETS`,
+from the page's opening): per direction, the 8 KiB callbacks, the time in the SD driver and between callbacks;
+per bulk endpoint, each packet's time from load to its TX interrupt, and the time between OUT packets.
+- **On the unit** (Windows 11 26200, build b8cbeb29, a 20 MiB random file, four rounds; `~/smpltrek-debug/
+  drive-timing/FINDINGS-drive-timing.md` on the user's machine). Writing took 118-124 s (0.16-0.17 MiB/s), reading
+  141-142 s (0.14 MiB/s), buffered or not; both read-backs matched. With the counts before each copy taken away:
+
+  | Round | Callbacks | SD driver | Between callbacks | Packets | Their time |
+  |---|---|---|---|---|---|
+  | read | 2,560 R | 2.5 s (0.96 ms each) | 138.8 s | 328,001 IN | 138.1 s, 0.42 ms each |
+  | write | 2,714 W | 6.3 s (2.3 ms each) | 117.8 s | 347,916 OUT | 120.5 s apart, 0.35 ms each |
+
+  The SD card is 2-5 % of the time. Nearly all of it is the packets: the computer took one 64-byte packet every
+  0.42 ms reading and sent one every 0.35 ms writing, 2-3 a millisecond where full speed carries up to 19.
+  Single-buffered, the FIFO is empty from a packet's leaving until the interrupt loads the next (or, writing,
+  full until it is emptied); the host's token meanwhile is NAKed, and Windows (an xHCI controller, full speed
+  through its transaction translator) tries again only some 0.3-0.4 ms later. The emulator's host retries within
+  microseconds, so it never showed this.
+  - Mounting read about 15,200 sectors (7.4 MiB, FAT32's tables) before D: answered: 53 s each time.
+  - The counters were not zero before the page opened: the host's commands at enumeration (TEST UNIT READY and
+    the like) use the drive's endpoints too.
+- **The fix: double-buffered bulk FIFOs** (dcd_musb.c dcd_edpt_open), so the next packet is waiting when the host
+  asks (IN) and a packet can arrive while the last is emptied (OUT). This is what went wrong in unit session 6:
+  the C6748's core interrupts when TXPKTRDY clears, which double-buffered means a half is free, not that the
+  last packet has gone, and TinyUSB waited for the FIFO to empty before completing a transfer, an interrupt that
+  never comes. Now a transfer completes once its last packet is loaded and a half is free (TXPKTRDY clear): the
+  next transfer's first packet goes into that half and follows in order. MIDI's bulk endpoints are double-buffered
+  too, so a MIDI note can wait behind four packets of debug data instead of three (test bound 64 event packets).
+  The emulator models the core's double-buffered behaviour (its `test_double_buffered_bulk_in_interrupts_only_
+  when_txpktrdy_clears`); the drive, MIDI and debug tests pass on it.
+  - With 0.96 ms of SD time per 8 KiB, about 1 MiB/s is the ceiling reading if the packets now go at full speed;
+    overlapping the card with the USB transfer is the next step if that falls short of 700 KiB/s.
+- **On the unit with double buffering** (build 8898abb9; `~/smpltrek-debug/drive-speed/FINDINGS-drive-speed.md`):
+  writing 95.6-96.0 s (0.21 MiB/s), reading 84.5 s (0.24 MiB/s), the mount 31.9 s (from 53), hashes matching. One
+  packet every 0.25 ms in both directions, for the mount and the copies, buffered or not: 1.3-1.7 times faster,
+  not the several times hoped for. USB audio nobody reads: `OVERRUNS 0` after a 10 s tone. MIDI and the debug port
+  as before. 0.25 ms is two 125 us microframes, which fits two explanations: the host schedules one full-speed
+  transaction per two microframes (the NAKs added retries on top before), or the unit's USB interrupt answers that
+  late. Counted next (STATUS `USB_DRIVE_FIFO`, `USB_ISR`): at each TX interrupt, whether the other FIFO half still
+  held a packet (the host is the slower side) or the FIFO was empty (the host waited for the interrupt), and the
+  same for OUT; and the interrupt handler's time. On the emulator the handler takes 1 us and every interrupt finds
+  a packet still queued. If the host is the limit, 64-byte full-speed packets cannot go much faster, and high speed
+  (step 3) is the way.
+- **Which side waits, on the unit** (2026-11-26, build b9811df8, the same PC, the unit straight into a front port
+  of an AMD USB 3.20 xHCI; `~/smpltrek-debug/drive-waits/FINDINGS-drive-waits.md`): writing 99.5 s (0.20 MiB/s),
+  reading 83.3 s (0.24 MiB/s), mounts 31.6-32.4 s, the read-back matching. **The computer is the slower side, both
+  ways:**
+
+  | Copy | Packets | Unit ready first | Unit late | Per packet | USB interrupt | SD driver |
+  |---|---|---|---|---|---|---|
+  | read | 328,002 IN | 325,120 queued (99.1 %) | 0 empty | 0.244 ms | 412,434, avg 3.3 us, max 10 us | 2.5 s of 83 |
+  | write | 380,904 OUT | 375,721 alone (98.6 %) | 2,586 backlog | 0.249 ms | 479,064, avg 5.1 us, max 12 us | 7.6 s of 100 |
+
+  Reading, every TX interrupt found the other FIFO half still holding a packet: the host never asked for one the
+  unit didn't have. Writing, after nearly every packet the next had not yet come; the 2,586 backlogs are about one
+  per 8 KiB write callback (2,970), the packets that arrived while the SD card was being written. The interrupt
+  takes 3-5 us of each 250 us. So the unit is not late packet by packet: the host polls the drive's endpoints
+  only every 0.25 ms, about 256 KB/s. That is a quarter of what full speed carries in practice (about 1 MB/s), so
+  why the host schedules this device so sparsely is still open. Candidates: this controller (the front port is on
+  the chipset's xHCI, AMD 43FC; the PC has a second, the CPU's 15B8), or the unit's isochronous audio streams
+  (Windows streamed USB_AUDIO_IN throughout; 392 of each frame's bytes reserved). The PC's other drives are no
+  comparison: they run at high speed or faster. To try: a port on the other controller, the unit's audio devices
+  disabled in Windows, and a USB 2.0 hub. Double buffering stays: it removed the NAKs and is the 1.3-1.7 times
+  already measured.
+  - After the last eject (a file deleted, then Eject), `USB_DRIVE ERRORS` went to 1 with `DRV R RANGE`: Windows
+    read once after its STOP UNIT, which `drive_range` refuses (the drive is no longer ready). The writes before
+    the STOP had all landed; nothing was lost. Only once in three ejects.
+- **By port and with audio off** (2026-11-26, same build and PC; `~/smpltrek-debug/drive-waits/
+  FINDINGS-drive-ports.md`). Mostly the controller, partly the audio streams:
+
+  | Port, controller | Audio | Write | Read | Read, per IN packet | Mount |
+  |---|---|---|---|---|---|
+  | rear, CPU's xHCI (AMD 15B7) | off | 29.7 s, 0.67 MiB/s | 21.7 s, 0.92 MiB/s | 0.057 ms | 8.2-8.7 s |
+  | rear, CPU's xHCI (AMD 15B7) | on | 33.0 s, 0.61 MiB/s | 25.7 s, 0.78 MiB/s | 0.069 ms | 10.1-10.3 s |
+  | front, chipset's xHCI (AMD 43FC) | off | 64.9 s, 0.31 MiB/s | 57.8 s, 0.35 MiB/s | 0.166 ms | 22.0 s |
+  | front, chipset's xHCI (AMD 43FC) | on | 99.5 s, 0.20 MiB/s | 83.3 s, 0.24 MiB/s | 0.244 ms | 31.6 s |
+
+  On the CPU's controller with audio off, reading takes 17.6 packets a millisecond, near full speed's 19 for
+  64-byte bulk (1.16 MiB/s), and every TX interrupt still found a packet queued: the unit keeps up at full speed.
+  The audio streams (392 bytes of each frame reserved) cost 15 % there and 30 % on the chipset's controller,
+  which schedules full-speed bulk three to four times more sparsely. All read-backs matched.
+  - Against the 700 KiB/s target, on a good port: reading 943 KiB/s with audio off, 796 on; writing 689 and 621.
+    What is left is the unit's own: the SD card's time is in series with the USB transfer, 25 % of a write
+    (7.4 s of 29.7) and 11 % of a read. Overlapping them (the next 8 KiB from USB while the card writes the last)
+    would bring writing to about 0.9 MiB/s; not done.
+  - What a user can do: use a port on the CPU's controller (on this PC the rear ones), and disable the unit's
+    audio in Windows while copying if it is not wanted.
+  - `DRV R RANGE` after the last eject came again on the front port (twice in two sessions there, never on the
+    rear): one read after STOP UNIT, refused. Harmless. Once in set-up B, Explorer's first Eject did nothing (D:
+    stayed ready, a few sectors read and written meanwhile); the second, 17 s later, worked: Windows still using
+    the volume, most likely, since the unit saw no STOP.
+- **The card beside the packets** (2026-11-26, usb.c): a second 8 KiB buffer. Writing, each chunk of a command
+  but the last is copied aside and acknowledged, and written to the card in usb_poll while the USB interrupt takes
+  the next chunk's packets; the last is written before its callback returns, so a command's status still comes only
+  once all of it is on the card, and a SYNCHRONIZE CACHE or STOP after it finds nothing pending. A chunk written
+  behind that fails fails its command at the next chunk (`side_failed_next`). Reading, the next chunk of the command
+  is read into the buffer while this one goes out, and copied in when asked for; any write, and sharing or taking
+  back the card, drops it. TinyUSB's MSC driver gained `tud_msc_data_left` (Enaga's patch) to say whether a chunk
+  is its command's last. STATUS `USB_DRIVE_TIME` ends `AHEAD` (chunks read ahead) and `BEHIND` (written behind).
+  The emulator
+  test checks a 64 KiB write is on the card at its status, seven of its eight chunks written behind, the read-back
+  seven chunks ahead, and a write dropping what was read ahead. The write-behind failure path is untested (the
+  emulator cannot fail the card).
+- **Reads and writes after the eject** are NOT READY, MEDIUM NOT PRESENT, as TEST UNIT READY already said, and no
+  longer counted or logged as card errors (`DRV R RANGE` was Windows' read after STOP UNIT).
+- **On the unit with the overlap** (2026-11-26, build 9cc86011, the rear port on the CPU's xHCI;
+  `~/smpltrek-debug/drive-overlap/FINDINGS-drive-overlap.md`), the 20 MiB file as before, both read-backs matching:
+
+  | Audio | Write | Read | Mount | Before (b9811df8): write, read |
+  |---|---|---|---|---|
+  | off | 21.7 s, 0.92 MiB/s | 19.7 s, 1.02 MiB/s | 8.1 s | 0.67, 0.92 MiB/s |
+  | on | 25.1 s, 0.80 MiB/s | 23.8 s, 0.84 MiB/s | 9.5 s | 0.61, 0.78 MiB/s |
+
+  Writing gained 31-37 %, reading 8-10 %. `BEHIND` 2,240 of 2,586 write chunks (seven of each 64 KiB command's
+  eight), `AHEAD` 2,240 of 2,560 read chunks. `OUT_BACKLOG` fell from 2,550 to 234 (170 with audio): packets no
+  longer pile up while the card writes. Reading kept its 0.057 ms a packet, so the gain there is the card's 2.4 s
+  hidden; writing's packets came every 0.062 ms. Both directions are now near full speed's 1.16 MiB/s, and past the
+  700 KiB/s target with the audio on too. `ERRORS 0` after all four ejects (the rear port never showed the read
+  after STOP; the emulator test covers it). `SD SLOW 60 MS` and `373 MS` in the log, as in earlier sessions: the
+  card's own pauses. `USB_AUDIO_OUT` counted 1,750 packets at each eject with audio on: Windows' removal sound,
+  played on the unit as its default output, most likely.
+- **USB audio nobody reads** (the first debug-port session): with no app on USB input, the computer's packets
+  filled the ring and each one counted an overrun. The audio interrupt now trims the ring to its 3 ms target each
+  block while USB input is unused (`usb_audio_unread`), so the counter means what it says and an app switching to
+  USB input starts on recent audio (`test_audio_nobody_reads_does_not_pile_up`).
+
 ### The debug port's guide (2026-11-25)
 
 `docs/usb-debug.md`, for app developers: setting up python-rtmidi, the commands, logging from an app, how input from
@@ -2574,6 +2709,11 @@ operations together took about 400.
   code into `memcpy` and `memset` calls, including in the synth's audio path, but the synth's worst case stayed
   at 29 % with the fast version, so its copies are small. The runtime's `memset` is already pipelined (about 1
   cycle a byte).
+- **On the unit** (2026-11-26, build 9cc86011, `~/smpltrek-debug/drive-overlap`): `audio_cycles_last` read ten times
+  with USB DRIVE open, so no app: 5,774-5,905 cycles (most 5,780) with the unit's audio disabled in Windows, and
+  9,620-9,773 with Windows streaming to and from it (USB audio's share, about 3,850). The first unit session's
+  13,000 had no USB audio and was worked out from the CHECK load page, so the comparison is rough: 2.2 times less,
+  against the emulator's 2.7. `audio_cycles_peak` read 16,501 and 23,019 (since start-up, transients included).
 
 ### The DSP library prebuilt by cl6x (2026-11-26)
 

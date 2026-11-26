@@ -291,6 +291,12 @@ TU_ATTR_ALWAYS_INLINE static inline void hwfifo_flush(musb_regs_t* musb, unsigne
   }
 }
 
+/* Enaga: bulk packet timing (musb_enaga.h). */
+volatile uint32_t enaga_musb_in_packets[5], enaga_musb_in_wait_us[5];
+volatile uint32_t enaga_musb_out_packets[5], enaga_musb_out_gap_us[5];
+volatile uint32_t enaga_musb_in_empty[5], enaga_musb_in_queued[5], enaga_musb_out_backlog[5], enaga_musb_out_alone[5];
+static uint32_t enaga_in_loaded[5], enaga_out_last[5];
+
 // write to txfifo using pipe_state_t info
 static void pipe_write(musb_regs_t* musb_regs, pipe_state_t* pipe, uint8_t epnum) {
   musb_ep_csr_t* ep_csr = &musb_regs->indexed_csr;
@@ -307,6 +313,7 @@ static void pipe_write(musb_regs_t* musb_regs, pipe_state_t* pipe, uint8_t epnum
     pipe->remaining -= xact_len;
   }
   ep_csr->tx_csrl = MUSB_TXCSRL1_TXRDY;
+  enaga_in_loaded[epnum] = tsc_read() | 1;   /* Enaga: for the packet timing (musb_enaga.h); 0 means none */
 }
 
 volatile uint32_t enaga_musb_tx_busy;   /* Enaga: TX interrupts that found the FIFO still full (process_epin_isr) */
@@ -320,6 +327,11 @@ static void process_epin_isr(uint8_t rhport, musb_regs_t *musb_regs, uint8_t epn
     ep_csr->tx_csrl &= ~(MUSB_TXCSRL1_STALLED | MUSB_TXCSRL1_UNDRN);
     return; // sent STALL, do nothing
   }
+  if (!(csrl & MUSB_TXCSRL1_TXRDY) && enaga_in_loaded[epnum]) {   /* Enaga: the packet went (musb_enaga.h) */
+    enaga_musb_in_wait_us[epnum] += (tsc_read() - enaga_in_loaded[epnum]) / 372u;
+    enaga_musb_in_packets[epnum]++;
+    enaga_in_loaded[epnum] = 0;
+  }
 
   pipe_state_t* pipe = pipe_get(epnum, TUSB_DIR_IN);
   if (pipe->remaining > 0) {
@@ -330,14 +342,17 @@ static void process_epin_isr(uint8_t rhport, musb_regs_t *musb_regs, uint8_t epn
       enaga_musb_tx_busy++;
       return;
     }
+    if (csrl & MUSB_TXCSRL1_FIFONE) enaga_musb_in_queued[epnum]++;   /* Enaga: a packet still waits: the host is */
+    else enaga_musb_in_empty[epnum]++;          /* the slower side; both halves empty: it waited for this interrupt */
     pipe_write(musb_regs, pipe, epnum);
   } else {
-    // All bytes have been loaded into the FIFO. With double-packet buffering a
-    // second packet may still be waiting in the FIFO when this IRQ fires (the
-    // hardware signals TXRDY clear as soon as a slot frees, not when the wire
-    // transfer finishes). Defer completion until FIFONE == 0 so we don't emit
-    // a duplicate xfer_complete before the final packet has been sent.
-    if (csrl & MUSB_TXCSRL1_FIFONE) {
+    /* Enaga: every packet is loaded. Bulk FIFOs are double-buffered (dcd_edpt_open), and the C6748's core
+     * interrupts when TXPKTRDY clears, which is when a half is free, not when the last packet has gone: a packet
+     * leaving with the other half already empty gives no interrupt (SPRUH79C 33.2.7.1.2.1.2). So the transfer
+     * completes once its last packet is loaded and a half is free for the next transfer's first packet, which
+     * follows it out in order. With both halves full (TXPKTRDY still set), the interrupt when one frees comes
+     * next. An unarmed pipe (the isochronous ones, served on SOF by usb_audio.c) has nothing to complete. */
+    if ((csrl & MUSB_TXCSRL1_TXRDY) || !pipe->armed) {
       return;
     }
     const uint16_t xferred_len = pipe->length;
@@ -380,6 +395,12 @@ static void process_epout_isr(uint8_t rhport, musb_regs_t *musb_regs, uint8_t ep
   if (!(ep_csr->rx_csrl & MUSB_RXCSRL1_RXRDY)) {
     return;
   }
+  { /* Enaga: packet timing (musb_enaga.h) */
+    uint32_t now = tsc_read();
+    if (now - enaga_out_last[epnum] < 2u * 372000u) enaga_musb_out_gap_us[epnum] += (now - enaga_out_last[epnum]) / 372u;
+    enaga_out_last[epnum] = now;
+    enaga_musb_out_packets[epnum]++;
+  }
 
   pipe_state_t *pipe = pipe_get(epnum, TUSB_DIR_OUT);
   if (!pipe->armed) {
@@ -393,6 +414,8 @@ static void process_epout_isr(uint8_t rhport, musb_regs_t *musb_regs, uint8_t ep
   }
 
   const bool is_short = pipe_read(musb_regs, pipe, epnum);
+  if (ep_csr->rx_csrl & MUSB_RXCSRL1_RXRDY) enaga_musb_out_backlog[epnum]++;   /* Enaga: the next packet was */
+  else enaga_musb_out_alone[epnum]++;           /* already waiting (the host was ahead of this interrupt), or not */
 
   // Transfer completes on a short packet or when the rx buffer is filled.
   if (is_short || pipe->remaining == 0) {
@@ -798,11 +821,12 @@ bool dcd_edpt_open(uint8_t rhport, tusb_desc_endpoint_t const * ep_desc) {
 
   hwfifo_flush(musb, epn, is_rx, true);
 
-  /* Enaga: one packet per FIFO, bulk too. Double-buffered, the C6748's core clears TXPKTRDY and interrupts when a
-   * packet is loaded, not when it is sent (SPRUH79C 33.2.7.1.2.1.2), so the wait below for FIFONOTEMPTY to clear
-   * got no further interrupt: at full speed, every IN transfer's completion was lost (the mass-storage CSW after
-   * INQUIRY never sent; unit session 6, round 3). Single-buffered, the interrupt means the packet has gone. */
-  TU_ASSERT(hwfifo_config(musb, epn, is_rx, mps, false));
+  /* Enaga: two packets per FIFO for bulk. Single-buffered, the FIFO is empty from a packet's leaving until the
+   * interrupt loads the next, and a host's IN (or OUT) meanwhile is NAKed; Windows then waits about 0.4 ms
+   * before trying again, and USB DRIVE moved one packet per 0.42 ms, 0.15 MiB/s (unit, 2026-11-25). Double-buffered
+   * the next packet is already there. The TX side completes transfers without waiting for the FIFO to empty
+   * (process_epin_isr): waiting for that lost every IN completion before (unit session 6, round 3). */
+  TU_ASSERT(hwfifo_config(musb, epn, is_rx, mps, ep_desc->bmAttributes.xfer == TUSB_XFER_BULK));
   musb->intren_ep[is_rx] |= TU_BIT(epn);
 
   return true;

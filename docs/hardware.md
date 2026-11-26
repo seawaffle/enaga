@@ -411,7 +411,7 @@ full-speed USB MIDI, audio and mass storage device with TinyUSB (`firmware/third
   packet to keep its ring at two blocks. The original firmware trims the codec PLL from TIMER64P1 instead
   (HW-18, HW-40). Tested on the emulator's isochronous streams, including a computer clock 1000 ppm fast and slow.
 - **Mass storage (USB DRIVE, E5):** bulk-only transport, SCSI, one removable drive that is the whole SD card,
-  16 sectors per SD command. No medium except while the menu's USB DRIVE page is open; then UNIT ATTENTION
+  16 sectors per SD command, the card's work overlapping the next 8 KiB's packets. No medium except while the menu's USB DRIVE page is open; then UNIT ATTENTION
   (medium changed) and the card. START STOP UNIT with START clear (eject) ends the page; so does OK on the page,
   once the computer has written nothing for 2 s (OK again ends it at once). The size comes from the
   card's CSD (CMD9, read during `sd_init`; CSD 1.0 and 2.0), which the emulator's SDSC card exercises; an SDHC card
@@ -434,7 +434,8 @@ full-speed USB MIDI, audio and mass storage device with TinyUSB (`firmware/third
 - **The debug port:** the MIDI interface has two cables. Cable 0 is MIDI; cable 1 ("Enaga Debug"; on Windows'
   older MIDI stack "MIDIIN2 (...)" / "MIDIOUT2 (...)") carries Enaga's log, its state, the screen and memory words
   as SysEx, for `tools/usb_debug.py` (`firmware/usb/usb_debug.c` has the protocol). It sends nothing until asked,
-  and fills at most 128 bytes of the MIDI IN buffer, so MIDI waits behind no more than two packets of it. During a
+  and fills at most 128 bytes of the MIDI IN buffer, so MIDI waits behind no more than four packets of it (two in
+  the buffer, two in the FIFO). During a
   session on a unit:
 
   ```

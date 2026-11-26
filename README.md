@@ -162,7 +162,9 @@ per device, built by `.github/workflows/release.yml` (the tag must match `VERSIO
 1. Copy the file for your device to the root of the SD card, keeping its name: `build/firmware/smpltrek/SmplTrek.bin`,
    `build/firmware/lofi12xt/Lofi-12 XT.bin` or `build/firmware/cydrums/CyDrums.bin` (`ENAGA_<version>.bin` is
    the SmplTrek's under the release name). Copy an app's package to `/ENAGA/APPS/<NAME>/APP.ENA` (8.3 names); once Enaga runs, the
-   menu's USB DRIVE page puts the card on a computer over USB for this, without taking it out.
+   menu's USB DRIVE page puts the card on a computer over USB for this, without taking it out. It runs at USB full
+   speed, up to about 1 MB/s; a port on the computer's CPU-side USB controller (often the rear ones) can be several
+   times faster than one on the chipset's.
 2. Hold the fourth key of the upper function row (F4: HOME on a SmplTrek, PAD on a Lofi-12 XT or CyDrums) while
    switching on to reach BOOT MODE, and choose SYSTEM UPDATE.
 

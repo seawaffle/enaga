@@ -180,6 +180,75 @@ class UsbDrive(unittest.TestCase):
             self.assertEqual(data, image[lba * SECTOR:(lba + 128) * SECTOR], lba)
         self.assertEqual(self.emu.word("usb_drive_errors"), 0)
 
+    def test_the_card_beside_the_packets(self):
+        """A command's chunks overlap the SD card: writing, each chunk but the last is written while the next
+        arrives, and the last before the status, so the whole command is on the card when the status comes; reading,
+        the next chunk is read while this one goes out. Both give the card's bytes."""
+        self.open_drive()
+        self.assertIs(self.ready() == (6, 0x28) and self.ready(), True)
+        data = bytes((i * 7919 + (i >> 9) * 31) & 255 for i in range(128 * SECTOR))   # 64 KiB: eight chunks
+        self.write(2000, data)
+        self.assertEqual(self.emu.cpu.sd_read(2000 * SECTOR, len(data)), data)          # all there at the status
+        self.assertEqual(self.words("usb_drive_ahead", 2)[1], 7)                         # seven written behind
+        self.assertEqual(self.emu.word("usb_drive_written_sectors"), 128)
+        self.assertEqual(self.read(2000, 128), data)
+        self.assertEqual(self.words("usb_drive_ahead", 2)[0], 7)                         # seven read ahead
+        self.write(2008, bytes(16 * SECTOR))                                             # a write drops what was read
+        self.assertEqual(self.read(2000, 32), data[:8 * SECTOR] + bytes(16 * SECTOR) + data[24 * SECTOR:32 * SECTOR])
+        self.assertEqual(self.emu.word("usb_drive_errors"), 0)
+
+    def test_reads_after_the_eject_are_not_card_errors(self):
+        """Windows sometimes reads once more after its STOP UNIT (the unit, 2026-11-26): NOT READY, as for no medium,
+        and neither counted nor logged as a card error."""
+        self.open_drive()
+        self.assertIs(self.ready() == (6, 0x28) and self.ready(), True)
+        self.assertEqual(self.scsi([0x1B, 0, 0, 0, 0x02, 0])[0], 0)                    # eject
+        self.assertEqual(self.scsi([0x28, 0, 0, 0, 0, 0, 0, 0, 1, 0], SECTOR)[0], 1)    # at once, before the menu
+        self.assertEqual(self.sense(), (2, 0x3A))
+        self.run_ms(100)
+        self.assertEqual(self.emu.word("menu_drive"), 0)
+        self.assertEqual(self.scsi([0x2A, 0, 0, 0, 0, 0, 0, 0, 1, 0], data_out=bytes(SECTOR))[0], 1)
+        self.emu.cpu.usb_control((0x02, 1, 0, EP_OUT), 0)                              # the host clears the stall
+        self.assertEqual(self.sense(), (2, 0x3A))
+        self.assertEqual(self.emu.word("usb_drive_errors"), 0)
+        self.assertNotIn("DRV", " ".join(self.emu.report()["log"]))
+
+    def words(self, name, count):
+        data = self.emu.cpu.read(self.emu.names[name], 4 * count)
+        return list(struct.unpack(f"<{count}I", data))
+
+    def test_bulk_fifos_hold_two_packets(self):
+        """Single-buffered, a host's IN or OUT finds the FIFO busy between packets and is NAKed, and Windows waits
+        about 0.4 ms before trying again: 0.15 MiB/s on the unit (2026-11-25). MIDI and the drive hold two."""
+        fifos = {e["number"]: (e["tx_fifo"]["packets"], e["rx_fifo"]["packets"])
+                 for e in self.emu.cpu.usb_state()["endpoints"]}
+        self.assertEqual((fifos[1], fifos[2]), ((2, 2), (2, 2)))
+
+    def test_where_the_time_goes(self):
+        """The counters STATUS reports for a copy's breakdown, from the page's opening: reads and writes (8 KiB
+        callbacks), the time in the SD driver and between callbacks, and the drive's packets with the host's time."""
+        self.open_drive()
+        self.assertIs(self.ready() == (6, 0x28) and self.ready(), True)
+        for lba in (0, 128):
+            self.read(lba, 128)                                  # 2 x 8 callbacks, 2 x 1,024 data packets
+        self.write(100, bytes(range(256)) * 64)                  # 32 sectors: 2 callbacks, 256 data packets
+        calls, sd_us, gap_us = (self.words(n, 2) for n in ("usb_drive_calls", "usb_drive_sd_us", "usb_drive_gap_us"))
+        self.assertEqual(calls, [16, 2])
+        self.assertTrue(all(sd_us) and gap_us[0], (sd_us, gap_us))
+        in_packets, in_wait = self.words("enaga_musb_in_packets", 3)[2], self.words("enaga_musb_in_wait_us", 3)[2]
+        out_packets = self.words("enaga_musb_out_packets", 3)[2]
+        self.assertGreaterEqual(in_packets, 2048)                # and each command's status
+        self.assertGreaterEqual(out_packets, 256)
+        self.assertGreater(in_wait, 0)
+        empty, queued = self.words("enaga_musb_in_empty", 3)[2], self.words("enaga_musb_in_queued", 3)[2]
+        backlog, alone = self.words("enaga_musb_out_backlog", 3)[2], self.words("enaga_musb_out_alone", 3)[2]
+        self.assertGreaterEqual(empty + queued, 2048 - 16)        # each packet loaded by an interrupt, not the first
+        self.assertAlmostEqual(backlog + alone, out_packets, delta=4)   # each OUT packet read (one arriving unarmed counts twice in out_packets)
+        self.assertGreater(self.emu.word("usb_isr_count"), 0)
+        print(f"\nemulator: IN empty {empty} queued {queued}, OUT backlog {backlog} alone {alone}, "
+              f"ISR {self.emu.word('usb_isr_count')} x avg {self.emu.word('usb_isr_us') / max(1, self.emu.word('usb_isr_count')):.1f} us, "
+              f"max {self.emu.word('usb_isr_max_us')} us")
+
     def test_ok_ends_it(self):
         self.open_drive()
         self.assertEqual(self.emu.word("menu_drive"), 1)

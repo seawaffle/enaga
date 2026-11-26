@@ -12,7 +12,7 @@ the screen and the log, listen to the sound. You don't need to photograph the di
 unit.
 
 The debug port doesn't change anything for apps. It sends nothing until a computer asks. An app's own USB MIDI keeps
-working beside it: the debug traffic never holds MIDI up by more than two USB packets.
+working beside it: the debug traffic never holds MIDI up by more than four USB packets (about 0.3 ms).
 
 ## Setting up
 
@@ -174,6 +174,15 @@ output, or play into it as an input), a script can check an app's MIDI and sound
 | `SD` | SD card sectors read and written, and the last error |
 | `BATTERY` | 0-4, or -1 on USB or adapter power |
 | `LOG_COUNT` | lines logged since start-up |
+| `USB_DRIVE_TIME` | since USB DRIVE opened, per direction: 8 KiB reads (`R`) and writes (`W`), ms in the SD driver, ms between them; then chunks read ahead and written behind (the card working while USB moves the next) |
+| `USB_DRIVE_PACKETS` | since USB DRIVE opened: the drive's packets to the computer and the ms it took to collect them, and packets from it and the ms between them |
+| `USB_DRIVE_FIFO` | at each of those packets, whether the unit had the next one ready (`IN_QUEUED`, `OUT_ALONE`: the computer is the slower side) or not (`IN_EMPTY`, `OUT_BACKLOG`) |
+| `USB_ISR` | since USB DRIVE opened: USB interrupts, their total and longest time in microseconds |
+
+The four `USB_DRIVE_...` lines and `USB_ISR` are for work on Enaga's USB DRIVE speed. On a computer, a port on the
+CPU's own USB controller (often the rear ones) can be several times faster for USB DRIVE than one on the chipset's,
+and the unit's audio streams take some of the bandwidth: disable the unit's audio devices in the computer's sound
+settings during a big copy if they aren't needed.
 
 ## Peek
 
