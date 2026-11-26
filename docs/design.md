@@ -608,7 +608,9 @@ Its card is staged by `tools/unit_card.py`.
   the FIFO; how soon the computer retries is the computer's). To measure before changing anything: the read
   speed, and whether double buffering the OUT endpoint helps (the TRM is not clear that a second packet waiting
   raises its own interrupt, the trap the IN side fell into). Measured 2026-11-25 (log, "USB DRIVE's time"):
-  the packets, both ways; double buffering is on branch usb-drive-speed, awaiting the unit.
+  the packets, both ways; double buffering is on branch usb-drive-speed. On the unit (2026-11-26, log "Which side
+  waits"): 0.20 MiB/s writing, 0.24 reading, and the computer is the slower side both ways (one packet per two
+  microframes). Full speed is done; the rest is high speed (step 3).
   - Earlier plan: the user started a Claude session on the Windows PC with a read-only brief: raw sectors 0-63 and
     the partition start over USB vs a card reader, a USBPcap capture of drive mount / playback / recording, and
     scripted play / record tests. Debug from its evidence. Also ask whether STATUS showed a crash row.
@@ -2462,6 +2464,26 @@ per bulk endpoint, each packet's time from load to its TX interrupt, and the tim
   same for OUT; and the interrupt handler's time. On the emulator the handler takes 1 us and every interrupt finds
   a packet still queued. If the host is the limit, 64-byte full-speed packets cannot go much faster, and high speed
   (step 3) is the way.
+- **Which side waits, on the unit** (2026-11-26, build b9811df8, the same PC, the unit straight into a front port
+  of an AMD USB 3.20 xHCI; `~/smpltrek-debug/drive-waits/FINDINGS-drive-waits.md`): writing 99.5 s (0.20 MiB/s),
+  reading 83.3 s (0.24 MiB/s), mounts 31.6-32.4 s, the read-back matching. **The computer is the slower side, both
+  ways:**
+
+  | Copy | Packets | Unit ready first | Unit late | Per packet | USB interrupt | SD driver |
+  |---|---|---|---|---|---|---|
+  | read | 328,002 IN | 325,120 queued (99.1 %) | 0 empty | 0.244 ms | 412,434, avg 3.3 us, max 10 us | 2.5 s of 83 |
+  | write | 380,904 OUT | 375,721 alone (98.6 %) | 2,586 backlog | 0.249 ms | 479,064, avg 5.1 us, max 12 us | 7.6 s of 100 |
+
+  Reading, every TX interrupt found the other FIFO half still holding a packet: the host never asked for one the
+  unit didn't have. Writing, after nearly every packet the next had not yet come; the 2,586 backlogs are about one
+  per 8 KiB write callback (2,970), the packets that arrived while the SD card was being written. The interrupt
+  takes 3-5 us of each 250 us. So this host gives a full-speed bulk endpoint one 64-byte packet per two
+  microframes, about 256 KB/s, and nothing on the unit's side of full speed changes that: the 700 KiB/s target
+  needs high speed (step 3). No hub was at hand to see whether a USB 2.0 hub's transaction translator schedules
+  differently. Double buffering stays: it removed the NAKs and is the 1.3-1.7 times already measured.
+  - After the last eject (a file deleted, then Eject), `USB_DRIVE ERRORS` went to 1 with `DRV R RANGE`: Windows
+    read once after its STOP UNIT, which `drive_range` refuses (the drive is no longer ready). The writes before
+    the STOP had all landed; nothing was lost. Only once in three ejects.
 - **USB audio nobody reads** (the first debug-port session): with no app on USB input, the computer's packets
   filled the ring and each one counted an overrun. The audio interrupt now trims the ring to its 3 ms target each
   block while USB input is unused (`usb_audio_unread`), so the counter means what it says and an app switching to
