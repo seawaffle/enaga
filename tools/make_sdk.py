@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Make the Enaga SDK: what building an app needs, without the rest of the repository.
 
-    python3 -B tools/make_sdk.py v0.3.0                  # -> build/dist/enaga-sdk-v0.3.0.zip
-    python3 -B tools/make_sdk.py v0.3.0 --prebuilt       # a release: fails without cl6x
+    python3 -B tools/make_sdk.py v0.4.0                  # -> build/dist/enaga-sdk-v0.4.0.zip
+    python3 -B tools/make_sdk.py v0.4.0 --prebuilt       # a release: fails without cl6x
 
 The zip holds enaga-sdk-<tag>/ with the headers (include/), the app runtime and the DSP library's sources
 (runtime/), the build tool (tools/build_app.py, tools/paths.py), the host test tool (tools/host_test.py), the USB
