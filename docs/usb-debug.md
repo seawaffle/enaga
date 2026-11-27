@@ -27,7 +27,7 @@ Connect the unit by USB first. The tool finds the debug port by asking each Enag
 one it chose on its first line:
 
 ```
-usb_debug: ENAGA 0.3.0 2 on MIDIOUT2 (Enaga SmplTrek) 5 / MIDIIN2 (Enaga SmplTrek) 4
+usb_debug: ENAGA 0.4.0 2 on MIDIOUT2 (Enaga SmplTrek) 5 / MIDIIN2 (Enaga SmplTrek) 4
 ```
 
 The port's name differs by system: "Enaga Debug" where the system uses the USB descriptor's names, and

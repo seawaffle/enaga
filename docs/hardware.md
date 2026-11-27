@@ -523,7 +523,7 @@ unless headphones are in or SPEAKER is OFF (step 15); earlier images kept it mut
 
 1. **Install.** A card with only `SmplTrek.bin` (staged as `build/unit-card/install/SmplTrek.bin`) at its root; F4 (HOME) held while switching on, SYSTEM UPDATE,
    restart. Expected: the ENAGA splash with MCU, AUDIO and CARD, then Enaga's status page with `NO /ENAGA/APPS`,
-   its header and first log line naming the build (`0.3.0 d0eb6c1`: the commit `tools/unit_card.py` built from, `+`
+   its header and first log line naming the build (`0.4.0 d0eb6c1`: the commit `tools/unit_card.py` built from, `+`
    if it had changes not yet committed), and `SMPLTREK` as the third log line (the device, from the bootloader's file name; `UNKNOWN DEVICE` means the
    name was not found where `firmware/kernel/device.c` looks). A unit stuck on the SONICWARE logo with the power key dead: remove power, then BOOT MODE and the official
    update ("Installing and recovery").

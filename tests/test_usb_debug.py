@@ -89,7 +89,7 @@ class UsbDebug(Emulated):
     def test_two_cables_and_hello(self):
         config = bytes(self.config["configuration"]) if isinstance(self.config, dict) else bytes(self.config)
         self.assertIn(bytes([6, 0x25, 0x01, 2, 1, 5]), config)          # MIDI OUT endpoint: 2 embedded jacks (1, 5)
-        self.assertEqual(self.client.hello(), "ENAGA 0.3.0 2")
+        self.assertEqual(self.client.hello(), "ENAGA 0.4.0 2")
 
     def test_the_log_kept_and_as_it_happens(self):
         self.client.log(True)
@@ -144,7 +144,7 @@ class UsbDebug(Emulated):
 
     def test_status(self):
         status = dict(line.split(" ", 1) for line in self.client.status())
-        self.assertEqual(status["VERSION"], "0.3.0")
+        self.assertEqual(status["VERSION"], "0.4.0")
         self.assertEqual(status["BUILD"], self.emu.firmware["build_id"])          # the commit, from git
         self.assertRegex(status["BUILD"], r"^([0-9a-f]{7}\+?|unknown)$")
         self.assertEqual(status["APP_STATUS"], "APP RUNNING")
@@ -188,7 +188,7 @@ class UsbDebug(Emulated):
         self.transport.run_ms(10)
         self.assertEqual(self.client.log_lines(0.1), [])                 # ... which does not come: the log stopped
         self.assertIn("M90 7F 64", self.emu.report()["log"])
-        self.assertEqual(self.client.hello(), "ENAGA 0.3.0 2")           # and the port still answers
+        self.assertEqual(self.client.hello(), "ENAGA 0.4.0 2")           # and the port still answers
 
     def test_a_remote_key_is_a_key(self):
         """STEP 1 pressed from the computer sends the app's note, as the unit's own key does."""

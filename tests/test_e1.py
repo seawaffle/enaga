@@ -27,7 +27,7 @@ BOOT = 300_000_000          # past card, app load and audio start
 STEP1 = 32
 BLOCK_CYCLES = 64 * 372_000_000 // 48_000
 MS = 372_000
-FIRST_LOG = "ENAGA 0.3.0 " + firmware_build.build_id()   # the version and the commit built from
+FIRST_LOG = "ENAGA 0.4.0 " + firmware_build.build_id()   # the version and the commit built from
 CACHE_LOG = "CACHE 043 8F>444 FF"   # the bootloader's hand-over as measured (smpltrek-re session M1), then after set-up
 
 
