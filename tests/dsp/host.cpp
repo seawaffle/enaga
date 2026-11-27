@@ -925,6 +925,36 @@ static void samples() {
     enaga_float_to_int16(back, out16, 4);
     check(out16[0] == 1 && out16[1] == -32768 && out16[2] == 32767 && out16[3] == -1, "float_to_int16", out16[0], 1);
     {
+        // float_to_pcm: every format back through pcm_to_float unchanged (at an odd address), saturating, and
+        // infinity and NaN written as silence.
+        const int formats[5] = {ENAGA_PCM_U8, ENAGA_PCM_S16, ENAGA_PCM_S24, ENAGA_PCM_S32, ENAGA_PCM_FLOAT};
+        for (int format : formats) {
+            const double full = format == ENAGA_PCM_FLOAT ? 1.0 : std::ldexp(1.0, enaga_pcm_bytes(format) * 8 - 1);
+            float in[6] = {-1.0f, float(-1.0 / full), 0.0f, float(1.0 / full), float((full - 1.0) / full), 0.375f};
+            if (format == ENAGA_PCM_S32) in[4] = float(2147483520.0 / full);   // the top float below 2^31
+            if (format == ENAGA_PCM_FLOAT) in[4] = 1e-30f;
+            uint8_t bytes[1 + 6 * 4];
+            float back[6];
+            enaga_float_to_pcm(in, bytes + 1, format, 6);
+            enaga_pcm_to_float(bytes + 1, format, 1, back, 6);
+            for (int i = 0; i < 6; i++)
+                check(back[i] == in[i], "float_to_pcm round trip", format * 10 + i, back[i] - in[i]);
+            const float wild[4] = {1.5f, -3.0f, enaga_bits_float(0x7FC00000u), enaga_bits_float(0xFF800000u)};
+            enaga_float_to_pcm(wild, bytes + 1, format, 4);
+            enaga_pcm_to_float(bytes + 1, format, 1, back, 4);
+            if (format != ENAGA_PCM_FLOAT) {
+                check(back[0] == float((full - 1.0) / full) || (format == ENAGA_PCM_S32 && back[0] == float(2147483520.0 / full)),
+                      "float_to_pcm saturates high", format, back[0]);
+                check(back[1] == -1.0f, "float_to_pcm saturates low", format, back[1]);
+            }
+            check(back[2] == 0.0f && back[3] == 0.0f, "float_to_pcm: NaN and infinity write silence", format, back[2]);
+        }
+        const float halves[2] = {0.5f / 32768, -0.6f / 32768};
+        uint8_t two[4];
+        enaga_float_to_pcm(halves, two, ENAGA_PCM_S16, 2);
+        check(two[0] == 1 && two[1] == 0 && two[2] == 0xFF && two[3] == 0xFF, "float_to_pcm rounds to nearest", two[0], 1);
+    }
+    {
         // wav::parse: a chunk size that puts the next chunk at 2^32 - 8 must not wrap back into the buffer.
         uint8_t file[20] = {'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'A', 'V', 'E', 'J', 'U', 'N', 'K'};
         enaga::wav::detail::put32(file + 16, 0xFFFFFFE4u);

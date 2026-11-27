@@ -1,6 +1,7 @@
 // Enaga: WAV files. parse() finds the format and the sample data in the first bytes of a file; header() makes
 // the 44 bytes that start a PCM or float file, for a recording (Stream::create reserves them, Stream::close
-// writes them with the final size); Loader reads a whole file into a dsp::Sample in the background.
+// writes them with the final size); Writer records a file from audio() with both done for it; Loader reads a
+// whole file into a dsp::Sample in the background.
 //
 //     uint8_t head[512];                                   // read from the file's start (File::read, read_all)
 //     enaga::wav::Format wav;
@@ -85,12 +86,138 @@ inline void header(uint8_t out[44], const Format &format, uint32_t data_bytes) {
     put32(out + 40, data_bytes);
 }
 
-// Loader's errors, besides the file service's ENAGA_FILE_* codes.
+// Loader's and Writer's errors, besides the file service's ENAGA_FILE_* codes.
 enum LoadError : int32_t {
     not_wav = -64,                  // not a RIFF WAVE in a format parse() knows, no sample data, or a rate
                                     // outside Loader::min_rate - max_rate
     no_memory = -65,                // the heap has no room for the sample
 };
+
+// Records a WAV file through a stream (files::Stream): create() and close() in the main context, write() in
+// audio() (or the main context, for a file rendered faster than real time; one context at a time). write() takes
+// the app's float samples, interleaved, and converts them to the file's format (enaga_float_to_pcm: any of
+// parse()'s, so a file read back with Loader gives the same samples). close() writes the header with the final
+// size, so call it in stop() too: a recording the app never closes is left with an empty header.
+//
+//     enaga::wav::Writer take_;
+//     enaga::wav::Format format;                              // 16-bit stereo at 48 kHz by default
+//     format.bits = 24;
+//     take_.create("/RECORD/TAKE1.WAV", format, ring_, 1 << 18);   // in the main context; ring_ from the heap
+//     take_.write(in, frames);                                 // in audio(): the input, as it comes
+//     take_.close();                                           // in the main context: the header, then closed
+//
+// The ring (a power of two, at least ENAGA_STREAM_RING_MIN) holds the samples until Enaga writes them to the card
+// in the main loop; size it for the card's slowest moments, a few tenths of a second (256 KiB holds 0.9 s of
+// 24-bit stereo). When it is full the frames that do not fit are dropped whole, and counted (frames_lost()).
+class Writer {
+public:
+    static constexpr uint32_t header_bytes = 44;
+    static constexpr uint32_t max_frame_bytes = 32;    // 8 channels of 32 bits
+
+    Writer() = default;
+    Writer(const Writer &) = delete;
+    Writer &operator=(const Writer &) = delete;
+
+    // A new file at path (an existing one is replaced), recording in format (its data_offset and data_bytes are
+    // ignored). ENAGA_FILE_OK, an ENAGA_FILE_* error, or not_wav for a format parse() would not read back or wider
+    // than max_frame_bytes.
+    int32_t create(const char *path, const Format &format, void *ring, uint32_t ring_bytes) {
+        close();
+        pcm_ = enaga_pcm_format(format.encoding, format.bits);
+        if (pcm_ < 0 || format.channels == 0 || format.frame_bytes() > max_frame_bytes) return not_wav;
+        format_ = format;
+        format_.data_offset = header_bytes;
+        format_.data_bytes = 0;
+        frames_ = 0;
+        lost_ = 0;
+        tail_bytes_ = 0;
+        return stream_.create(path, header_bytes, ring, ring_bytes);
+    }
+
+    // frames frames of format().channels interleaved floats (±1 full scale): those taken, the rest lost.
+    uint32_t write(const float *in, uint32_t frames) {
+        const uint32_t channels = format_.channels, frame = format_.frame_bytes();
+        const uint32_t per_chunk = sizeof chunk_ / frame;
+        uint32_t taken = 0;
+        if (!stream_.is_open() || !finish_tail()) { lost_ += frames; return 0; }
+        while (taken < frames) {
+            uint32_t n = frames - taken < per_chunk ? frames - taken : per_chunk;
+            enaga_float_to_pcm(in + taken * channels, chunk_, pcm_, int(n * channels));
+            uint32_t moved = put(n * frame);
+            taken += moved;
+            if (moved < n || tail_bytes_) break;     // the ring is full
+        }
+        frames_ += taken;
+        lost_ += frames - taken;
+        return taken;
+    }
+
+    // Bytes already in the file's format, whole frames: the frames taken.
+    uint32_t write_bytes(const void *data, uint32_t bytes) {
+        const uint32_t frame = format_.frame_bytes(), frames = stream_.is_open() ? bytes / frame : 0;
+        const uint8_t *p = static_cast<const uint8_t *>(data);
+        uint32_t taken = 0;
+        if (!frames || !finish_tail()) { lost_ += frames; return 0; }
+        while (taken < frames) {
+            uint32_t n = frames - taken < sizeof chunk_ / frame ? frames - taken : sizeof chunk_ / frame;
+            for (uint32_t i = 0; i < n * frame; i++) chunk_[i] = p[taken * frame + i];
+            uint32_t moved = put(n * frame);
+            taken += moved;
+            if (moved < n || tail_bytes_) break;     // the ring is full
+        }
+        frames_ += taken;
+        lost_ += frames - taken;
+        return taken;
+    }
+
+    // Writes out what is left, the header with the final size over the file's start, and closes. Main context;
+    // waits for the card. ENAGA_FILE_OK (also when nothing is open) or an error.
+    int32_t close() {
+        if (!stream_.is_open()) return ENAGA_FILE_OK;
+        finish_tail();
+        uint8_t head[header_bytes];
+        uint32_t bytes = stream_.status().position;
+        header(head, format_, bytes - bytes % format_.frame_bytes());   // a frame cut short is not counted
+        return stream_.close(head, header_bytes);
+    }
+
+    bool is_open() const { return stream_.is_open(); }
+    const Format &format() const { return format_; }
+    uint32_t frames() const { return frames_; }            // frames written so far
+    uint32_t frames_lost() const { return lost_; }         // frames dropped: the ring was full, or nothing open
+    // The stream's state (main context): state (a negative error once the card failed or filled), position
+    // (bytes of samples so far), buffered (bytes in the ring), underruns.
+    files::Stream::Status status() const { return stream_.status(); }
+
+private:
+    // n bytes of chunk_ to the stream: the whole frames moved. A frame the ring took only part of is counted as
+    // moved; its other bytes wait in tail_ and go first next time, so the file stays whole frames.
+    uint32_t put(uint32_t n) {
+        const uint32_t frame = format_.frame_bytes();
+        uint32_t got = stream_.write(chunk_, n), part = got % frame;
+        if (part) {
+            tail_bytes_ = frame - part;
+            for (uint32_t i = 0; i < tail_bytes_; i++) tail_[i] = chunk_[got + i];
+        }
+        return got / frame + (part ? 1u : 0u);
+    }
+    bool finish_tail() {                                   // true once no frame is cut short
+        if (!tail_bytes_) return true;
+        uint32_t got = stream_.write(tail_, tail_bytes_);
+        for (uint32_t i = got; i < tail_bytes_; i++) tail_[i - got] = tail_[i];
+        tail_bytes_ -= got;
+        return tail_bytes_ == 0;
+    }
+
+    files::Stream stream_;
+    Format format_;
+    int pcm_ = -1;
+    volatile uint32_t frames_ = 0, lost_ = 0;
+    uint32_t tail_bytes_ = 0;
+    uint8_t tail_[max_frame_bytes] = {};
+    uint8_t chunk_[768] = {};                              // 64 frames of 24-bit stereo, 24 of 8 x 32-bit
+};
+
 
 // Reads a WAV file into a dsp::Sample in the background, a chunk at a time between the app's callbacks, so the
 // screen and controls stay live: any format parse() knows, as float, mono or stereo (a file with more channels

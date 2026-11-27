@@ -431,6 +431,11 @@ void enaga_pcm_to_int16(const void *src, int format, int stride, int16_t *out, i
 void enaga_int16_to_float(const int16_t *in, float *out, int n, float gain);
 /* out = in x 32768, rounded to nearest and saturated: float to 16-bit, for writing a 16-bit WAV. */
 void enaga_float_to_int16(const float *in, int16_t *out, int n);
+/* n floats to `format` at dst, little-endian at any alignment (written byte by byte), samples kept in order (so
+ * interleaved stays interleaved): the reverse of enaga_pcm_to_float, so a sample read from a file and written back
+ * is the same. x 2^(bits-1), rounded to nearest and saturated; 8-bit is unsigned; infinity and NaN write silence.
+ * For writing a WAV in any format (wav::Writer). */
+void enaga_float_to_pcm(const float *in, void *dst, int format, int n);
 
 /* ---- Rate conversion: windowed sinc, a fixed ratio, block by block ---- */
 

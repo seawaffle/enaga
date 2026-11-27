@@ -1,4 +1,4 @@
-// CHECK: the app for sessions on a unit (docs/hardware.md "Checks on a unit"). Four pages; hold F4 for one
+// CHECK: the app for sessions on a unit (docs/hardware.md "Checks on a unit"). Six pages; hold F4 for one
 // second to go to the next one (the press still counts on the panel page).
 //
 //   AUDIO  STEP 1: 750 Hz left only, STEP 2: 1500 Hz right only, STEP 3: 750 Hz both, STEP 4: off. VALUE: level.
@@ -27,10 +27,19 @@
 //          SysEx identity request (F0 7E 7F 06 01 F7), STEP 4 starts or stops a MIDI clock at 120 BPM (START,
 //          24 clocks a beat, STOP). The CLK line is Enaga's clock (CLOCK SRC, its tempo, RUN and the beat):
 //          STEP 5 starts or stops it when CLOCK SRC is INT; CLOCK OUT and SYNC OUT send it.
+//   REC    recording and playing back through wav::Writer and a stream, at the card's real pace. STEP 1 records
+//          5 s of a test signal (24-bit stereo: a 375 Hz triangle left, 750 Hz right, at -12 dB, heard quietly
+//          while it records) to /RECORD/CHECKREC.WAV: the frames written, those lost (the ring was full) and how
+//          full the 256 KiB ring got. STEP 2 plays the file back through a stream, heard, comparing every sample
+//          with the signal: the frames played, those wrong, and the stream's underruns. STEP 3 records 5 s of the
+//          input to /RECORD/CHECKIN.WAV and finds the delay between its channels (LAG, in samples: positive, the
+//          right channel late; feed both inputs the same signal, a mono source on the stereo line input).
+//          Results also go to the log (REC W, REC P, REC IN).
 #include <enaga/app.hpp>
 #include <enaga/files.hpp>
 #include <enaga/clock.hpp>
 #include <enaga/midi.hpp>
+#include <enaga/wav.hpp>
 
 #include <cstdint>
 
@@ -40,7 +49,20 @@ constexpr int kTable = 64;
 constexpr uint32_t kBlockCycles = 496000;          // the 64-frame budget at 372 MHz; load is per mille of it
 constexpr uint32_t kBankSamples = 4u << 20;        // 8 MiB of 16-bit samples
 constexpr int kMaxVoices = 512;
-constexpr int kPageCount = 5;
+constexpr int kPageCount = 6;
+
+constexpr const char *kRecPath = "/RECORD/CHECKREC.WAV", *kInPath = "/RECORD/CHECKIN.WAV";
+constexpr uint32_t kRecRing = 1u << 18;            // 256 KiB, for recording and for playback
+constexpr uint32_t kRecFrames = 5 * 48000;         // 5 s
+constexpr int32_t kRecLevel = 1 << 21;             // -12 dB of 24-bit full scale
+
+// The test signal's frame k: triangles of period 128 (left) and 64 (right) frames between -kRecLevel and
+// kRecLevel, whole numbers that survive the trip to the card and back exactly.
+int32_t rec_triangle(uint32_t k, uint32_t period) {
+    int32_t t = int32_t(k % period), p = int32_t(period);
+    int32_t distance = 2 * t - p;
+    return kRecLevel - (distance < 0 ? -distance : distance) * (2 * kRecLevel / p);
+}
 
 constexpr const char *kCardPath = "/RECORD/CHECK.BIN";
 constexpr uint32_t kCardBytes = 4u << 20;           // the test file
@@ -105,6 +127,11 @@ public:
         return true;
     }
 
+    void stop() override {                         // a recording still running is closed, a whole WAV file
+        rec_mode_ = rec_idle;
+        rec_writer_.close();
+    }
+
     void update(uint32_t ms) override {
         if (home_down_ && !home_used_ && ms - home_since_ >= 1000) {
             home_used_ = true;
@@ -124,6 +151,7 @@ public:
             pads_per_second_ = pad_messages_ - pad_messages_last_;
             pad_messages_last_ = pad_messages_;
         }
+        rec_update();
         float l = in_peak_[0], r = in_peak_[1];
         if (l > in_window_[0]) in_window_[0] = l;
         if (r > in_window_[1]) in_window_[1] = r;
@@ -160,6 +188,7 @@ public:
         if (page_ == 1 && step >= 4) voices_ = kPresets[step - 4];
         if (page_ == 1) { load_window_ = 0; uncap_ = uncap_ + 1; }
         if (page_ == 3 && step == 0) card_start();
+        if (page_ == 5 && step < 3) rec_start(step);
     }
 
     void on_encoder(int encoder, int delta) override {
@@ -204,10 +233,11 @@ public:
         for (uint32_t i = 0; i < 2 * frames; i++) out[i] = 0.0f;
         if (page_ == 0) tone(out, frames);
         if (page_ == 1) load(out, frames);
+        if (rec_mode_ != rec_idle) rec_audio(in, out, frames);
     }
 
     void draw(enaga::Canvas &canvas) override {
-        static const char *const kPages[kPageCount] = {"AUDIO", "LOAD", "PANEL", "CARD", "MIDI"};
+        static const char *const kPages[kPageCount] = {"AUDIO", "LOAD", "PANEL", "CARD", "MIDI", "REC"};
         canvas.clear();
         canvas.text(0, 0, "CHECK");
         canvas.text(48, 0, kPages[page_], 10);
@@ -217,6 +247,7 @@ public:
         if (page_ == 2) draw_panel(canvas);
         if (page_ == 3) draw_card(canvas);
         if (page_ == 4) draw_midi(canvas);
+        if (page_ == 5) draw_rec(canvas);
     }
 
     void on_midi(const enaga::MidiMessage &m) override {
@@ -463,6 +494,171 @@ private:
         canvas.text(0, 92, (Line() << "STREAMS " << card_kibs_[1] * 2u / 375u).str());
     }
 
+    // REC: the audio context does the signal and the comparing; the main context opens, closes and reports.
+    enum RecMode : uint32_t { rec_idle, rec_test, rec_filling, rec_playing, rec_input, rec_finished };
+
+    void rec_start(int step) {
+        if (rec_mode_ != rec_idle) return;
+        rec_ring_ = rec_ring_ ? rec_ring_ : new uint8_t[kRecRing];
+        rec_frame_ = 0;
+        rec_buffered_max_ = 0;
+        rec_error_ = 0;
+        if (step == 0 || step == 2) {
+            enaga::wav::Format format;
+            format.bits = 24;
+            int32_t r = rec_writer_.create(step == 0 ? kRecPath : kInPath, format, rec_ring_, kRecRing);
+            if (r != ENAGA_FILE_OK) { rec_fail(r); return; }
+            rec_written_ = rec_lost_ = 0;
+            for (auto &c : rec_correlation_) c = 0.0f;
+            for (auto &h : rec_history_) h = 0.0f;
+            rec_input_lag_ = 99;
+            rec_input_take_ = step == 2;
+            rec_mode_ = step == 0 ? rec_test : rec_input;    // last: audio() starts from here
+            enaga::system::set_busy(true);
+            return;
+        }
+        // STEP 2: the test recording, checked as it plays. Its header first (read in the background), then the
+        // stream from where the samples start.
+        int32_t r = rec_file_.open(kRecPath, ENAGA_FILE_READ);
+        if (r == ENAGA_FILE_OK) r = rec_file_.read<&Check::rec_header_read>(rec_head_, sizeof rec_head_, this);
+        if (r < 0) { rec_file_.close(); rec_fail(r); return; }
+        rec_mode_ = rec_filling;
+        enaga::system::set_busy(true);
+    }
+
+    void rec_header_read(int32_t got) {
+        enaga::wav::Format format;
+        rec_file_.close();
+        if (got < 0) { rec_fail(got); return; }
+        if (!enaga::wav::parse(rec_head_, uint32_t(got), format) || format.bits != 24 || format.channels != 2) {
+            rec_fail(enaga::wav::not_wav);
+            return;
+        }
+        rec_play_frames_ = format.data_bytes / 6u;
+        rec_played_ = 0;
+        rec_bad_ = 0;
+        rec_underruns_ = 0;
+        rec_carry_ = 0;
+        int32_t r = rec_stream_.open(kRecPath, format.data_offset, rec_ring_, kRecRing);
+        if (r != ENAGA_FILE_OK) rec_fail(r);
+    }
+
+    void rec_fail(int32_t error) {                // reported, and back to idle, by rec_update
+        rec_error_ = error;
+        rec_mode_ = rec_finished;
+    }
+
+    void rec_update() {                           // the main context's part, every pass
+        const uint32_t mode = rec_mode_;
+        if (mode == rec_test || mode == rec_input) {
+            enaga::files::Stream::Status s = rec_writer_.status();
+            if (s.buffered > rec_buffered_max_) rec_buffered_max_ = s.buffered;
+            if (s.state < 0) { rec_error_ = s.state; rec_mode_ = rec_finished; }
+        }
+        if (mode == rec_filling && rec_stream_.is_open() && rec_stream_.ready()) rec_mode_ = rec_playing;
+        if (mode == rec_playing) {                // a failure, or a file shorter than its header said
+            enaga::files::Stream::Status s = rec_stream_.status();
+            if (s.state < 0) rec_error_ = s.state;
+            if (s.state < 0 || (s.state == ENAGA_STREAM_ENDED && !s.buffered)) rec_mode_ = rec_finished;
+        }
+        if (rec_mode_ != rec_finished) return;
+        if (rec_writer_.is_open()) {              // a recording done (or failed)
+            rec_written_ = rec_writer_.frames();
+            rec_lost_ = rec_writer_.frames_lost();
+            int32_t r = rec_writer_.close();
+            if (r < 0 && !rec_error_) rec_error_ = r;
+            if (rec_input_take_) {
+                int best = 0;
+                for (int d = -2; d <= 2; d++) if (rec_correlation_[d + 2] > rec_correlation_[best + 2]) best = d;
+                rec_input_lag_ = best;
+                enaga::log((Line() << "REC IN LAG " << best << " W " << rec_written_ << " L " << rec_lost_).str());
+            } else {
+                enaga::log((Line() << "REC W " << rec_written_ << " L " << rec_lost_ << " R "
+                                   << rec_buffered_max_ * 100u / kRecRing << "%").str());
+            }
+        }
+        if (rec_stream_.is_open()) {              // a playback done (or failed)
+            rec_underruns_ = rec_stream_.status().underruns;
+            rec_stream_.close();
+            enaga::log((Line() << "REC P " << rec_played_ << " B " << rec_bad_ << " U " << rec_underruns_).str());
+        }
+        if (rec_error_) enaga::log((Line() << "REC " << enaga::files::error_name(rec_error_)).str());
+        enaga::system::set_busy(false);
+        rec_mode_ = rec_idle;
+    }
+
+    void rec_audio(const float *in, float *out, uint32_t frames) {
+        const uint32_t mode = rec_mode_;
+        if (frames > ENAGA_BLOCK_FRAMES) frames = ENAGA_BLOCK_FRAMES;
+        if (mode == rec_test) {
+            float block[2 * ENAGA_BLOCK_FRAMES];
+            for (uint32_t i = 0; i < frames; i++) {
+                block[2 * i] = float(rec_triangle(rec_frame_ + i, 128)) * (1.0f / 8388608.0f);
+                block[2 * i + 1] = float(rec_triangle(rec_frame_ + i, 64)) * (1.0f / 8388608.0f);
+                out[2 * i] = block[2 * i] * 0.25f;
+                out[2 * i + 1] = block[2 * i + 1] * 0.25f;
+            }
+            rec_writer_.write(block, frames);
+            rec_frame_ += frames;
+            if (rec_frame_ >= kRecFrames) rec_mode_ = rec_finished;
+        } else if (mode == rec_input) {
+            rec_writer_.write(in, frames);
+            // c[d + 2] sums L[n - d] R[n] for d = 0..2 (the right channel late) and L[n] R[n + d] for d = -1, -2.
+            float l1 = rec_history_[0], l2 = rec_history_[1], r1 = rec_history_[2], r2 = rec_history_[3];
+            float c[5] = {};
+            for (uint32_t i = 0; i < frames; i++) {
+                float l = in[2 * i], r = in[2 * i + 1];
+                c[2] += l * r;
+                c[3] += l1 * r;
+                c[4] += l2 * r;
+                c[1] += l * r1;
+                c[0] += l * r2;
+                l2 = l1; l1 = l; r2 = r1; r1 = r;
+            }
+            rec_history_[0] = l1; rec_history_[1] = l2; rec_history_[2] = r1; rec_history_[3] = r2;
+            for (int d = 0; d < 5; d++) rec_correlation_[d] += c[d];
+            rec_frame_ += frames;
+            if (rec_frame_ >= kRecFrames) rec_mode_ = rec_finished;
+        } else if (mode == rec_playing) {
+            uint8_t bytes[6 * ENAGA_BLOCK_FRAMES];
+            uint32_t got = rec_stream_.read(bytes, 6 * frames), done = 0;
+            for (uint32_t i = 0; i < got; i++) {     // whole frames, a frame cut by the ring kept for next time
+                rec_carry_bytes_[rec_carry_++] = bytes[i];
+                if (rec_carry_ < 6) continue;
+                rec_carry_ = 0;
+                const uint8_t *p = rec_carry_bytes_;
+                int32_t l = int32_t(uint32_t(p[0]) << 8 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 24) >> 8;
+                int32_t r = int32_t(uint32_t(p[3]) << 8 | uint32_t(p[4]) << 16 | uint32_t(p[5]) << 24) >> 8;
+                const uint32_t k = rec_played_;
+                if (l != rec_triangle(k, 128) || r != rec_triangle(k, 64)) rec_bad_ = rec_bad_ + 1;
+                if (done < frames) {
+                    out[2 * done] = float(l) * (0.25f / 8388608.0f);
+                    out[2 * done + 1] = float(r) * (0.25f / 8388608.0f);
+                    done++;
+                }
+                rec_played_ = k + 1;
+            }
+            if (rec_played_ >= rec_play_frames_) rec_mode_ = rec_finished;
+        }
+    }
+
+    void draw_rec(enaga::Canvas &canvas) {
+        static const char *const kModes[6] = {"STEP 1 2 3", "RECORDING", "FILLING", "PLAYING", "RECORDING IN",
+                                              "FINISHING"};
+        const uint32_t mode = rec_mode_;
+        uint32_t frames = mode == rec_playing ? rec_played_ : mode == rec_idle ? 0u : rec_frame_;
+        canvas.text(0, 16, kModes[mode < 6 ? mode : 0]);
+        if (frames) canvas.text(84, 16, (Line() << frames / 48000u << "." << frames % 48000u / 4800u << " S").str(), 10);
+        if (rec_error_) canvas.text(0, 28, enaga::files::error_name(rec_error_), 15);
+        canvas.text(0, 40, (Line() << "WROTE " << rec_written_ << " LOST " << rec_lost_).str());
+        canvas.text(0, 52, (Line() << "RING MAX " << rec_buffered_max_ * 100u / kRecRing << "%").str(), 10);
+        canvas.text(0, 64, (Line() << "PLAYED " << rec_played_ << " BAD " << rec_bad_).str());
+        canvas.text(0, 76, (Line() << "UNDERRUNS " << rec_underruns_).str(), 10);
+        if (rec_input_lag_ < 99) canvas.text(0, 88, (Line() << "IN LAG " << rec_input_lag_).str());
+        canvas.text(0, 100, "1 REC TEST  2 PLAY+CHECK", 6);
+        canvas.text(0, 108, "3 REC INPUT (LAG)", 6);
+    }
+
     void leds_off() {
         for (int led = 0; led < ENAGA_LED_COUNT; led++) enaga::host().led(uint32_t(led), 0, 0, 0);
     }
@@ -503,6 +699,25 @@ private:
     int32_t card_error_ = 0;
     uint32_t card_queued_ = 0, card_done_ = 0, card_since_ = 0, card_random_ = 1;
     uint32_t card_kibs_[3] = {}, card_reads_per_s_ = 0;
+
+    // REC. Written by the main context before a mode starts, then by audio until it is finished; rec_mode_ by both
+    // in turn (the main context starts a mode, audio finishes it, the main context returns it to idle).
+    volatile uint32_t rec_mode_ = rec_idle;
+    volatile uint32_t rec_frame_ = 0, rec_played_ = 0, rec_bad_ = 0;
+    uint32_t rec_play_frames_ = 0, rec_carry_ = 0;
+    uint8_t rec_carry_bytes_[6] = {};
+    float rec_history_[4] = {};
+    volatile float rec_correlation_[5] = {};
+    enaga::wav::Writer rec_writer_;
+    enaga::files::Stream rec_stream_;
+    enaga::files::File rec_file_;
+    uint8_t rec_head_[64] = {};
+    uint8_t *rec_ring_ = nullptr;
+    // Main context only.
+    uint32_t rec_written_ = 0, rec_lost_ = 0, rec_buffered_max_ = 0, rec_underruns_ = 0;
+    int32_t rec_error_ = 0;
+    int rec_input_lag_ = 99;
+    bool rec_input_take_ = false;
 };
 
 }  // namespace
